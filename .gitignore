@@ -6,6 +6,7 @@ dist/
 wheels/
 *.egg-info
 .streamlit/*
+.github/agents/
 
 # Virtual environments
 .venv
