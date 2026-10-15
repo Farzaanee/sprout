@@ -100,3 +100,31 @@ Running log of what was built, why, and what later phases need to know. Newest p
 - **In-place JSON mutation isn't tracked by SQLAlchemy.** Assign a whole new dict/list to `Company.sic_codes`, `matched_keywords` or `RunLog.stats` rather than mutating it.
 - **The DB has no migrations.** `init_db` only creates missing tables; after changing a model, delete `data/sprout.db` (or add Alembic if the data becomes precious).
 - **`HttpClient` is synchronous and not thread-safe** (the rate limiter and counters are plain objects). If Phase 3 parallelises, use one client per worker or add locking.
+
+## Streamlit progress & test console (ahead of Phase 6)
+
+**Status: done.** A working UI to check progress and exercise ingestion; it is not the Phase 6 dashboard (no funding/stage views, because no enrichment data exists yet).
+
+### What was built
+| Item | Where |
+|---|---|
+| Streamlit entry point (adds `src/` to `sys.path`; this is the file to deploy) | [streamlit_app.py](streamlit_app.py) |
+| App: Progress, Companies, News, Run & test tabs | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
+| Streamlit-free queries and docs parsing | [src/sprout/app/queries.py](src/sprout/app/queries.py) |
+| Tests (queries on a temp DB; `AppTest` smoke tests of the whole app) | [tests/test_app_queries.py](tests/test_app_queries.py), [tests/test_dashboard.py](tests/test_dashboard.py) |
+| New direct dependency `pandas` (already pulled in by Streamlit) | [pyproject.toml](pyproject.toml) |
+
+### Acceptance (no plan criteria; own checks)
+- [x] `uv run pytest` 110 passed, `uv run ruff check` clean.
+- [x] App renders with an empty database and with seeded data (`AppTest`), and `streamlit run` serves HTTP 200 / health `ok` headless.
+- [ ] **Not verified:** clicking the ingestion/hello buttons against the live APIs, and a Streamlit Community Cloud deployment. Neither was run here.
+
+### Decisions locked in
+- **Progress tab is driven by these docs**: phases come from the plan's timeline table; state from each `## Phase N — …` section of this file (`**Status: done…**` and no unticked `- [ ]` → Done, otherwise In progress, no section → Not started). Keep that heading/status/checkbox format or the tab misreports.
+- **Run & test is opt-in**: it writes the database and spends API quota, so it only appears when `SPROUT_ENABLE_ACTIONS=1`. A public deployment is read-only by default.
+- Ingestion is run by calling `sprout.ingest.main` in-process and showing its output.
+
+### Things later phases must know
+- **Streamlit Community Cloud has no persistent disk and `*.db` is gitignored**, so a deployed copy starts empty. Phase 6/7's bundled snapshot DB is still needed for a populated public app. Secrets go in the app's Secrets settings (exposed as environment variables), never in the repo.
+- Phase 6 should extend `queries.py` (shared service layer) rather than add SQL in the page code.
+
