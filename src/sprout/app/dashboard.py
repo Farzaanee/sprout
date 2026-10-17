@@ -21,7 +21,7 @@ from sprout.app import queries
 from sprout.config import get_settings
 from sprout.db import get_engine, init_db
 
-DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
+DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
 STATE_ICONS = {"Done": "✅", "In progress": "🟡", "Not started": "⬜"}
 
 

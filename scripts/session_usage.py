@@ -1,6 +1,6 @@
 """Sum Claude Code token usage from local session transcripts.
 
-Run: `uv run python -m sprout.session_usage --since <UTC timestamp>`.
+Run: `uv run python scripts/session_usage.py --since <UTC timestamp>`.
 
 Claude Code writes one JSONL transcript per session under `~/.claude/projects/<project>/`. Every
 assistant message carries the API `usage` block, but a message with several content blocks is
@@ -102,7 +102,7 @@ def format_table(totals: dict[str, Totals]) -> str:
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="sprout.session_usage", description=__doc__)
+    parser = argparse.ArgumentParser(prog="session_usage.py", description=__doc__)
     parser.add_argument(
         "--since", type=parse_timestamp, help="window start, e.g. 2026-10-15T18:00:00Z"
     )
