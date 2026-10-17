@@ -2,8 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-from sprout.session_usage import (
+from session_usage import (
     format_table,
     main,
     parse_timestamp,

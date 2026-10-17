@@ -21,7 +21,7 @@ from sprout.app import queries
 from sprout.config import get_settings
 from sprout.db import get_engine, init_db
 
-DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
+DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
 STATE_ICONS = {"Done": "✅", "In progress": "🟡", "Not started": "⬜"}
 
 
@@ -106,7 +106,7 @@ def render_progress() -> None:
             for r in runs
         ),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -144,7 +144,7 @@ def render_companies() -> None:
                 for r in rows
             ),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             column_config={"source": st.column_config.LinkColumn("source", display_text="open")},
         )
 
@@ -166,7 +166,7 @@ def render_companies() -> None:
                 for f in facts
             ),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             column_config={"source": st.column_config.LinkColumn("source", display_text="open")},
         )
 
@@ -202,7 +202,7 @@ def render_run_and_test() -> None:
         "Both": ["--max-per-term", str(int(max_per_term))],
     }
     for col, (label, argv) in zip(cols, jobs.items(), strict=True):
-        if col.button(label, use_container_width=True):
+        if col.button(label, width="stretch"):
             with st.spinner(f"Running ingestion: {label.lower()}…"):
                 code, output = _run_captured(ingest.main, argv)
             (st.success if code == 0 else st.error)(f"exit code {code}")

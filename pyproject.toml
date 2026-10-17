@@ -28,6 +28,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["scripts"]
 markers = ["live: calls the real Claude API (needs ANTHROPIC_API_KEY)"]
 
 [tool.ruff]

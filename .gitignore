@@ -8,6 +8,7 @@ wheels/
 .streamlit/*
 .github/agents/
 .claude
+CLAUDE.md
 
 # Virtual environments
 .venv
