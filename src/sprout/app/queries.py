@@ -23,6 +23,7 @@ class PhaseStatus:
 
 
 _PLAN_ROW = re.compile(r"^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(\d+)\s*\|$", re.MULTILINE)
+_HEADING = re.compile(r"^## .+$", re.MULTILINE)
 _NOTES_SECTION = re.compile(r"^## Phase (\d+) - .+$", re.MULTILINE)
 _STATUS = re.compile(r"^\*\*Status:\s*(.+?)\*\*", re.MULTILINE)
 
@@ -33,10 +34,10 @@ def parse_phases(plan_text: str, notes_text: str) -> list[PhaseStatus]:
     A phase with no notes section is "Not started"; one whose status starts with "done" and has no
     unticked acceptance criterion is "Done"; anything else is "In progress".
     """
+    headings = [h.start() for h in _HEADING.finditer(notes_text)] + [len(notes_text)]
     sections: dict[int, str] = {}
-    matches = list(_NOTES_SECTION.finditer(notes_text))
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(notes_text)
+    for match in _NOTES_SECTION.finditer(notes_text):
+        end = next(pos for pos in headings if pos >= match.end())
         sections[int(match.group(1))] = notes_text[match.end() : end]
 
     phases = []
