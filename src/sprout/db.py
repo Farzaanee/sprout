@@ -26,6 +26,7 @@ def utcnow() -> datetime:
 
 class Company(SQLModel, table=True):
     __tablename__ = "company"
+    __table_args__ = {"extend_existing": True}
 
     id: int | None = Field(default=None, primary_key=True)
     # Companies House number: the identity used to dedupe (names change, numbers do not).
@@ -47,7 +48,10 @@ class Fact(SQLModel, table=True):
     """One `Sourced` value for one field of a company; `value_json` is NULL if not disclosed."""
 
     __tablename__ = "fact"
-    __table_args__ = (UniqueConstraint("company_id", "field", "source_url"),)
+    __table_args__ = (
+        UniqueConstraint("company_id", "field", "source_url"),
+        {"extend_existing": True},
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     company_id: int = Field(foreign_key="company.id", index=True)
@@ -61,6 +65,7 @@ class Fact(SQLModel, table=True):
 
 class NewsItemRow(SQLModel, table=True):
     __tablename__ = "news_item"
+    __table_args__ = {"extend_existing": True}
 
     id: int | None = Field(default=None, primary_key=True)
     url: str = Field(unique=True, index=True)
@@ -73,6 +78,7 @@ class NewsItemRow(SQLModel, table=True):
 
 class RunLog(SQLModel, table=True):
     __tablename__ = "run_log"
+    __table_args__ = {"extend_existing": True}
 
     id: int | None = Field(default=None, primary_key=True)
     kind: str
