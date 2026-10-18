@@ -1,4 +1,4 @@
-# Sprout — Agent Performance Log
+# Sprout: Agent Performance Log
 
 One row per phase (or per notable task), newest last. Maintained by the Senior Developer agent at the end of each phase; see "How to fill this in" below. Companion to [implementation-notes.md](implementation-notes.md), which records *what* was built; this file records *how many tokens it took*.
 
@@ -6,8 +6,8 @@ Token counts are **measured**; Complexity and Effort are recorded labels (see be
 
 | Date | Task | Complexity | Effort | Model | Requests | Input (fresh) | Output | Cache read | Cache write |
 |---|---|---|---|---|---|---|---|---|---|
-| 2026-10-11 | Phase 0 — Setup & definitions | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| 2026-10-14 | Phase 1 — Data foundations | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-11 | Phase 0 - Setup & definitions | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-14 | Phase 1 - Data foundations | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | 2026-10-15 | Streamlit progress & test console (ahead of Phase 6) | Medium | n/a | claude-sonnet-5-5 | 9 | 18 | 12,053 | 596,142 | 21,827 |
 | 2026-10-17 | Create architect and full-stack-developer agents; set model/effort; reverse agent symlink | Low | low | claude-sonnet-5-5 | 53 | 106 | 34,340 | 3,140,375 | 151,708 |
 | 2026-10-17 | Architecture doc via architect agent; move docs/ and scripts/; README; architect agent permissions and end-of-phase sync | Medium | low (main), medium (architect) | claude-sonnet-5-5 | 42 | 84 | 27,700 | 2,826,142 | 132,531 |
@@ -23,7 +23,7 @@ Phase 0 and Phase 1 were written before this log existed, and usage for those se
 Columns:
 
 - **Date**: ISO date the phase was finished.
-- **Task**: phase number and title from [project-plan.md](project-plan.md), plus any notable follow-up (e.g. "Phase 1 — key fix").
+- **Task**: phase number and title from [project-plan.md](project-plan.md), plus any notable follow-up (e.g. "Phase 1 - key fix").
 - **Complexity**: the agent's own assessment of how hard the task was, on a fixed scale: `Low` (small, well-understood change), `Medium` (several files or some design choices), `High` (cross-cutting, new design, or significant unknowns). Judge it from the task, not from the token count.
 - **Effort**: the reasoning effort the agent ran with (`low`, `medium`, `high`, `xhigh`, `max`), read from the agent's frontmatter `effort:` or the session setting. Write `n/a` if it cannot be determined; never guess.
 - **Model**: model ID as reported by the transcript.

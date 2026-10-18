@@ -19,21 +19,21 @@ PLAN = """
 """
 
 NOTES = """
-## Phase 0 — Setup
+## Phase 0 - Setup
 
 **Status: done except two items that need your credentials**
 
 - [x] one
 - [ ] two
 
-## Phase 1 — Data
+## Phase 1 - Data
 
 **Status: done.** Verified.
 
 - [x] a
 - [x] b
 
-## Phase 2 — Agent
+## Phase 2 - Agent
 
 **Status: in progress.**
 

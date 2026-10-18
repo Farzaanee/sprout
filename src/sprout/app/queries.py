@@ -23,7 +23,7 @@ class PhaseStatus:
 
 
 _PLAN_ROW = re.compile(r"^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(\d+)\s*\|$", re.MULTILINE)
-_NOTES_SECTION = re.compile(r"^## Phase (\d+) — .+$", re.MULTILINE)
+_NOTES_SECTION = re.compile(r"^## Phase (\d+) - .+$", re.MULTILINE)
 _STATUS = re.compile(r"^\*\*Status:\s*(.+?)\*\*", re.MULTILINE)
 
 

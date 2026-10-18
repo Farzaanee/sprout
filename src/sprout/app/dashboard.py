@@ -62,7 +62,7 @@ def render_progress() -> None:
     for p in phases:
         criteria = f" · acceptance {p.criteria_done}/{p.criteria_total}" if p.criteria_total else ""
         st.markdown(
-            f"{STATE_ICONS[p.state]} **Phase {p.number} — {p.title}** "
+            f"{STATE_ICONS[p.state]} **Phase {p.number} - {p.title}** "
             f"({p.hours}h) · {p.state}{criteria}"
         )
         if p.status_line:
@@ -218,7 +218,7 @@ def render_run_and_test() -> None:
 def main() -> None:
     st.set_page_config(page_title="Sprout", page_icon="🌱", layout="wide")
     st.title("🌱 Sprout")
-    st.caption("UK AI startup discovery — progress and test console")
+    st.caption("UK AI startup discovery: progress and test console")
 
     names = ["Progress", "Companies", "News"]
     if actions_enabled():
@@ -228,5 +228,3 @@ def main() -> None:
     for tab, render in zip(tabs, renderers, strict=False):
         with tab:
             render()
-    if not actions_enabled():
-        st.sidebar.info("Read-only mode. Set SPROUT_ENABLE_ACTIONS=1 to enable the Run & test tab.")

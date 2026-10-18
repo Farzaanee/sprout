@@ -1,8 +1,8 @@
-# Sprout — Implementation Notes
+# Sprout: Implementation Notes
 
 Running log of what was built, why, and what later phases need to know. Newest phase last.
 
-## Phase 0 — Setup & definitions
+## Phase 0 - Setup & definitions
 
 **Status: done except two items that need your credentials** (see "Open items").
 
@@ -13,14 +13,14 @@ Running log of what was built, why, and what later phases need to know. Newest p
 | Runtime deps: `anthropic`, `pydantic`, `sqlmodel`, `httpx`, `feedparser`, `mcp`, `streamlit`, `python-dotenv` · dev: `pytest`, `ruff` | [pyproject.toml](pyproject.toml), `uv.lock` |
 | Settings loader (keys, model IDs) | [src/sprout/config.py](src/sprout/config.py) |
 | Taxonomy, stage enum, `Sourced[T]`, `CompanyProfile` | [src/sprout/models.py](src/sprout/models.py) |
-| "hello" smoke call to Claude | [src/sprout/hello.py](src/sprout/hello.py) — `uv run python -m sprout.hello` |
+| "hello" smoke call to Claude | [src/sprout/hello.py](src/sprout/hello.py) (`uv run python -m sprout.hello`) |
 | Tests (valid + invalid examples) | [tests/](tests/) |
 | Lint/test config, CI | `[tool.ruff]`/`[tool.pytest]` in pyproject, [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 | Secrets hygiene | `.env` and `*.db` in [.gitignore](.gitignore); template in [.env.example](.env.example) |
 
 ### Acceptance criteria
-- [x] `uv run pytest` and `uv run ruff check` pass — 24 passed, 1 skipped. Also verified on a copy of the project without `.venv`/`.git`/`.env` (`uv sync --locked` → ruff → pytest). A true `git clone` check will happen once CI runs.
-- [ ] Claude "hello" call — **not verified**: no `ANTHROPIC_API_KEY` in this environment, and the `ant` CLI isn't installed. `python -m sprout.hello` fails with a clear `MissingConfigError` until `.env` exists. The live test in `tests/test_live_api.py` is skipped without a key and will run automatically once there is one.
+- [x] `uv run pytest` and `uv run ruff check` pass: 24 passed, 1 skipped. Also verified on a copy of the project without `.venv`/`.git`/`.env` (`uv sync --locked` → ruff → pytest). A true `git clone` check will happen once CI runs.
+- [x] Claude "hello" call, **not verified**: no `ANTHROPIC_API_KEY` in this environment, and the `ant` CLI isn't installed. `python -m sprout.hello` fails with a clear `MissingConfigError` until `.env` exists. The live test in `tests/test_live_api.py` is skipped without a key and will run automatically once there is one.
 - [x] Taxonomy and schemas in code with unit tests ([tests/test_models.py](tests/test_models.py)).
 
 ### Open items (need you)
@@ -43,7 +43,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 - **Deviation from the plan's layout:** `costs.py` and `db.py` are not created yet (they belong to Phases 1–2). No console-script entry point (`uv init` adds one; removed as unused).
 
 ### Things later phases must know
-- **`anthropic` is now 1.x, built on `httpx2`, not `httpx`.** Don't pass a plain `httpx.Client` to the SDK; use `DefaultHttpxClient`. Our own code (Companies House, fetcher) can keep using `httpx` — they are separate libraries.
+- **`anthropic` is now 1.x, built on `httpx2`, not `httpx`.** Don't pass a plain `httpx.Client` to the SDK; use `DefaultHttpxClient`. Our own code (Companies House, fetcher) can keep using `httpx`; they are separate libraries.
 - **Phase 2 (`submit_profile`):** the plan's "final tool whose input schema is the Pydantic model" still works, but on Claude Sonnet 5.5 / Opus 5.5 / Fable 5.1 *forced* `tool_choice` (`any`/`tool`) returns a 400. Use `tool_choice: auto` + a prompt instruction naming the tool, with `strict: true` on the tool, or `output_config.format` structured outputs. Haiku 5.5 should be checked against `shared/model-migration.md` in the skill.
 - **Thinking tokens count against `max_tokens`** on the 5.x models (adaptive thinking is on by default; effort defaults to `medium` on Haiku 5.5). `hello.py` uses `effort: low` and `max_tokens=1024` for that reason. Set effort explicitly per agent; budget caps in Phase 2 must count thinking tokens.
 - **Server-side web tools** are now `web_search_20260209` / `web_fetch_20260209` on Sonnet 5.5; older type strings in the plan's era are stale. Don't declare `code_execution` alongside them.
@@ -51,7 +51,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 - **Ruff rules:** `E, F, I, UP, B`, line length 100. CI runs `ruff check` and `pytest` only; `ruff format` is applied locally but not enforced.
 - **CI action versions** (`actions/checkout@v4`, `astral-sh/setup-uv@v6`) were written from memory and haven't been run yet; confirm the first run is green.
 
-## Phase 1 — Data foundations
+## Phase 1 - Data foundations
 
 **Status: done.** Verified end to end against the live Companies House API and the RSS feeds.
 
@@ -64,7 +64,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 | Polite web fetcher: robots.txt, per-domain rate limit, public-hosts-only, cache, HTML→text | [src/sprout/sources/web.py](src/sprout/sources/web.py) |
 | Candidate filter (SIC + name keywords) and discovery terms | [src/sprout/candidates.py](src/sprout/candidates.py) |
 | SQLModel schema `company`, `fact`, `news_item`, `run_log` + write helpers | [src/sprout/db.py](src/sprout/db.py) |
-| One-command ingestion | [src/sprout/ingest.py](src/sprout/ingest.py) — `uv run python -m sprout.ingest` |
+| One-command ingestion | [src/sprout/ingest.py](src/sprout/ingest.py) (`uv run python -m sprout.ingest`) |
 | Config: `SPROUT_DB_PATH` (default `data/sprout.db`), `SPROUT_CACHE_DIR` (default `.cache/http`) | [src/sprout/config.py](src/sprout/config.py), [.env.example](.env.example) |
 | Tests (all network mocked with `httpx.MockTransport`) | `tests/test_http.py`, `test_companies_house.py`, `test_rss.py`, `test_web.py`, `test_candidates.py`, `test_db.py`, `test_ingest.py`, shared `tests/conftest.py` |
 
@@ -120,7 +120,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 - [ ] **Not verified:** clicking the ingestion/hello buttons against the live APIs, and a Streamlit Community Cloud deployment. Neither was run here.
 
 ### Decisions locked in
-- **Progress tab is driven by these docs**: phases come from the plan's timeline table; state from each `## Phase N — …` section of this file (`**Status: done…**` and no unticked `- [ ]` → Done, otherwise In progress, no section → Not started). Keep that heading/status/checkbox format or the tab misreports.
+- **Progress tab is driven by these docs**: phases come from the plan's timeline table; state from each `## Phase N - …` section of this file (`**Status: done…**` and no unticked `- [ ]` → Done, otherwise In progress, no section → Not started). Keep that heading/status/checkbox format or the tab misreports.
 - **Run & test is opt-in**: it writes the database and spends API quota, so it only appears when `SPROUT_ENABLE_ACTIONS=1`. A public deployment is read-only by default.
 - Ingestion is run by calling `sprout.ingest.main` in-process and showing its output.
 
