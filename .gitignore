@@ -16,6 +16,7 @@ CLAUDE.md
 # Secrets and local state
 .env
 *.db
+!data/sprout.db
 .cache/
 
 # Tooling

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Blocks the commit if lint or tests fail. Skips live (real API) tests.
+set -e
+echo "pre-commit: ruff check"
+uv run ruff check
+echo "pre-commit: pytest"
+uv run pytest -q -m "not live"
