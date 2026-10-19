@@ -11,6 +11,7 @@ Token counts are **measured**; Complexity and Effort are recorded labels (see be
 | 2026-10-15 | Streamlit progress & test console (ahead of Phase 6) | Medium | n/a | claude-sonnet-5-5 | 9 | 18 | 12,053 | 596,142 | 21,827 |
 | 2026-10-17 | Create architect and full-stack-developer agents; set model/effort; reverse agent symlink | Low | low | claude-sonnet-5-5 | 53 | 106 | 34,340 | 3,140,375 | 151,708 |
 | 2026-10-17 | Architecture doc via architect agent; move docs/ and scripts/; README; architect agent permissions and end-of-phase sync | Medium | low (main), medium (architect) | claude-sonnet-5-5 | 42 | 84 | 27,700 | 2,826,142 | 132,531 |
+| 2026-10-19 | Walkthrough of Phase 1 ingestion code (ingest.py, candidates.py, sources/*.py); update learnings.md Phase 1 with learnings and key-files tables; create learning-transcripter agent | Low | medium | claude-sonnet-5 | 51 | 102 | 26,825 | 3,743,113 | 98,129 |
 
 Phase 0 and Phase 1 were written before this log existed, and usage for those sessions was not captured, so they are `n/a` rather than estimates.
 
@@ -47,3 +48,4 @@ Known limits of the script: it counts only what is in the transcripts (usage of 
 - **Complexity / Effort columns (added 2026-10-17)**: Complexity for earlier rows is a retrospective judgment; Effort was not recorded for them, so it is `n/a`.
 - **Effort for the agent-setup row**: `low`, read from the `effort`/`perTurnEffort` metadata on the session transcript's assistant turns (39 of 39). No subagents were run in that session, so the `medium` set in the agent frontmatter did not apply.
 - **Effort for the architecture row**: read from the transcript metadata: `effort: low` on the main session turns and `effort: medium` on the architect subagent (which matches its frontmatter).
+- **Walkthrough / learnings update (2026-10-19)**: `--since 2026-10-19T17:46:14Z` (this session's first message). Not a numbered phase; no code changed, only explanation, docs edits, and one new agent file. Includes one Explore subagent run (its transcript is nested under the session folder and picked up by the script's recursive search). Effort read from transcript metadata: `medium` on all 67 assistant turns found in the window.
