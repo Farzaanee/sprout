@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from pydantic_core import to_json
-from sqlalchemy import JSON, Column, Engine, UniqueConstraint
+from sqlalchemy import JSON, Column, Engine, UniqueConstraint, inspect, text
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-from sprout.candidates import Assessment
-from sprout.models import NewsItem, Sourced
-from sprout.sources.companies_house import CompanyHit
+from sprout.candidates import Assessment, assess
+from sprout.models import CompanyProfile, NewsItem, Sourced
+from sprout.sources.companies_house import CompanyHit, parse_hit
 from sprout.sources.rss import normalise_url
 
 
@@ -36,6 +36,8 @@ class Company(SQLModel, table=True):
     incorporated: date | None = None
     sic_codes: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     locality: str | None = None
+    # A models.Category value; NULL means not yet classified (distinct from "Other").
+    category: str | None = None
     candidate_score: int = 0
     matched_keywords: list[str] = Field(
         default_factory=list, sa_column=Column(JSON, nullable=False)
@@ -96,7 +98,34 @@ def get_engine(path: Path | str) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
+    """Create missing tables, then add missing nullable columns to existing ones (no data loss)."""
     SQLModel.metadata.create_all(engine)
+    _add_missing_columns(engine)
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    quote = engine.dialect.identifier_preparer.quote
+    with engine.begin() as conn:
+        for table in SQLModel.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                if not column.nullable or column.primary_key or column.unique:
+                    raise RuntimeError(
+                        f"cannot add column {table.name}.{column.name} to an existing database "
+                        "(not a plain nullable column); delete the database file and re-ingest"
+                    )
+                ddl_type = column.type.compile(dialect=engine.dialect)
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {quote(table.name)} ADD COLUMN {quote(column.name)} "
+                        f"{ddl_type}"
+                    )
+                )
 
 
 def upsert_company(
@@ -188,3 +217,31 @@ def logged_run(session: Session, kind: str) -> Iterator[RunLog]:
         session.add(run)
         session.commit()
         raise
+
+
+def add_company_by_number(session: Session, number: str, data: dict[str, Any]) -> Company:
+    """Create or refresh a company from a Companies House `/company/{number}` response."""
+    hit = parse_hit({**data, "company_number": data.get("company_number") or number})
+    if hit is None:
+        raise ValueError(f"Companies House data for {number!r} has no company number or name")
+    assessment = assess(hit.name, hit.sic_codes, status=hit.status, incorporated=hit.incorporated)
+    company, _ = upsert_company(session, hit, assessment)
+    return company
+
+
+def save_profile(session: Session, company: Company, profile: CompanyProfile) -> None:
+    """Persist a validated profile: one fact per `Sourced` field plus `company.category`.
+
+    Not-disclosed fields are stored as NULL-value facts (researched, nothing found). `news` is not
+    stored here (news items have no company link yet) and `name` is ignored (the row is the
+    identity).
+    """
+    if company.id is None:
+        raise ValueError("company must be saved before its profile")
+    for name in CompanyProfile.model_fields:
+        value = getattr(profile, name)
+        if isinstance(value, Sourced):
+            save_fact(session, company.id, name, value)
+    company.category = profile.category.value
+    session.add(company)
+    session.flush()

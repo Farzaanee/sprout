@@ -107,3 +107,92 @@ def test_logged_run_records_success_and_failure(session):
     assert runs[0].stats == {"n": 1}
     assert "boom" in runs[1].error
     assert all(r.finished_at for r in runs)
+
+
+def test_save_profile_flattens_sourced_fields_and_sets_category(session):
+    from sprout.db import save_profile
+    from sprout.models import Category, CompanyProfile
+
+    company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
+    profile = CompanyProfile(
+        name="Acme AI Ltd",
+        category=Category.ROBOTICS_AND_AUTOMATION,
+        hq=Sourced[str](value="London", source_url="https://example.com/a"),
+        last_round=Sourced[FundingRound](
+            value=FundingRound(stage=Stage.SEED, amount_gbp=1_000_000),
+            source_url="https://example.com/r",
+            note="GBP 1m as reported",
+        ),
+    )
+    save_profile(session, company, profile)
+    session.commit()
+
+    rows = {f.field: f for f in session.exec(select(Fact))}
+    assert set(rows) == {
+        "website", "hq", "founded", "stage", "total_raised_gbp", "last_round",
+        "business_model", "target_user", "one_liner",
+    }  # fmt: skip
+    assert rows["hq"].value_json == '"London"' and rows["hq"].source_url == "https://example.com/a"
+    assert '"amount_gbp":1000000' in rows["last_round"].value_json
+    assert rows["website"].value_json is None and rows["website"].source_url is None
+    session.refresh(company)
+    assert company.category == "Robotics and automation"
+
+
+def test_save_profile_requires_a_saved_company(session):
+    from sprout.db import save_profile
+    from sprout.models import CompanyProfile
+
+    with pytest.raises(ValueError):
+        save_profile(session, Company(name="x"), CompanyProfile(name="x"))
+
+
+def test_add_company_by_number_creates_a_row_from_a_company_profile(session):
+    from sprout.db import add_company_by_number
+
+    data = {
+        "company_number": "10924127",
+        "company_name": "WAYVE TECHNOLOGIES LTD",
+        "company_status": "active",
+        "date_of_creation": "2017-08-21",
+        "sic_codes": ["62012"],
+        "registered_office_address": {"locality": "London"},
+    }
+    company = add_company_by_number(session, "10924127", data)
+    again = add_company_by_number(session, "10924127", {**data, "company_name": "WAYVE LTD"})
+    session.commit()
+    assert company.id == again.id and again.name == "WAYVE LTD"
+    assert company.incorporated == date(2017, 8, 21) and company.locality == "London"
+    with pytest.raises(ValueError):
+        add_company_by_number(session, "10924127", {"company_number": "10924127"})
+
+
+def test_init_db_adds_new_columns_to_an_old_database_and_keeps_rows(tmp_path):
+    from sqlalchemy import text
+
+    engine = get_engine(tmp_path / "old.db")
+    with engine.begin() as conn:  # the Phase 1 company table, before `category` existed
+        conn.execute(
+            text(
+                "CREATE TABLE company (id INTEGER PRIMARY KEY, company_number VARCHAR, "
+                "name VARCHAR NOT NULL, status VARCHAR, incorporated DATE, "
+                "sic_codes JSON NOT NULL, locality VARCHAR, candidate_score INTEGER NOT NULL, "
+                "matched_keywords JSON NOT NULL, "
+                "first_seen_at DATETIME NOT NULL, last_seen_at DATETIME NOT NULL)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO company VALUES (1, '12345678', 'Old Co', 'active', NULL, '[]', "
+                "'Leeds', 3, '[]', '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+            )
+        )
+    init_db(engine)
+    init_db(engine)  # idempotent
+    with Session(engine) as s:
+        (row,) = s.exec(select(Company)).all()
+        assert (row.name, row.locality, row.candidate_score, row.category) == (
+            "Old Co", "Leeds", 3, None,
+        )  # fmt: skip
+        row.category = "Other"
+        s.commit()

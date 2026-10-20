@@ -128,3 +128,76 @@ Running log of what was built, why, and what later phases need to know. Newest p
 - **Streamlit Community Cloud has no persistent disk and `*.db` is gitignored**, so a deployed copy starts empty. Phase 6/7's bundled snapshot DB is still needed for a populated public app. Secrets go in the app's Secrets settings (exposed as environment variables), never in the repo.
 - Phase 6 should extend `queries.py` (shared service layer) rather than add SQL in the page code.
 
+
+## Phase 2 - First agent: single-company enrichment
+
+**Status: done, with caveats.** The agent was built, covered by mocked tests (169 tests pass in total, `ruff check` clean) and run live on 10 companies. The tiny-cap criterion is verified with mocks only, not live. The pilot is a manual review by the implementing agent; the user's own review of the profiles is still open (see "Open items").
+
+### What was built
+| Item | Where |
+|---|---|
+| Price table, `USD_TO_GBP`, `Usage`, `cost_gbp`, `UnknownModelError` (pure, no I/O) | [src/sprout/costs.py](src/sprout/costs.py) |
+| Hand-written tool loop: `run_agent`, `Budget`, `Tool`, `ToolOutcome`, `LoopResult`, `make_client`. The only pipeline module importing `anthropic` | [src/sprout/agents/loop.py](src/sprout/agents/loop.py) |
+| Tools: `web_search` (server-side), `fetch_page` (wraps `WebFetcher`), `lookup_companies_house`; `SourceLedger`, `wrap_untrusted` | [src/sprout/agents/tools.py](src/sprout/agents/tools.py) |
+| System prompt, `submit_profile` schema derived from `CompanyProfile`, submission validation, `enrich_company` / `enrich_with_result`, `resolve_company`, CLI | [src/sprout/agents/enrich.py](src/sprout/agents/enrich.py) |
+| `python -m sprout.enrich` shim | [src/sprout/enrich.py](src/sprout/enrich.py) |
+| `Company.category` column, additive `ALTER TABLE` migration in `init_db`, `save_profile`, `add_company_by_number` | [src/sprout/db.py](src/sprout/db.py) |
+| Scripted fake Anthropic client | [tests/fakes.py](tests/fakes.py) |
+| Tests | `tests/test_costs.py`, `test_agent_loop.py`, `test_agent_tools.py`, `test_enrich.py`, additions to `test_db.py` |
+
+CLI: `uv run python -m sprout.enrich NAME_OR_NUMBER ... [--strong] [--max-gbp] [--max-iterations] [--effort] [--show]`. A company number (8 digits, or 2 letters plus 6 digits) is told apart from a name; a number not yet in the DB is fetched from Companies House and added.
+
+### Acceptance criteria
+- [x] **For 10 known companies, >=8 produce a schema-valid profile with a category and at least one sourced fact; no fabricated funding when the source is silent.** The final live run of 10 companies (Wayve, PolyAI, Synthesia, Graphcore, Cleo AI, Faculty Science, Tractable, Peak AI, Quantexa, Airborne Robotics): 10/10 `submitted`, each with a category and 4 to 9 sourced facts. The implementing agent reviewed the output: no invented funding where sources were silent (Graphcore, Peak AI and Airborne Robotics have all funding null), no surviving wrong-company confusion, original currency and rate in the `note` for every non-GBP round. Spot-checks against its own knowledge matched (Faculty GBP 30m, Tractable US$65m Series E, Quantexa EUR 163m, Cleo US$80m Series C). **Caveats:** this is the 10/10 of the *final* pass; earlier passes were worse (first pass 6/10, see "Live testing history"). The review is the agent's, not yours. Aggregator totals for Wayve (GBP 1.9bn) and Tractable (GBP 138.7m) could not be independently checked (search results arrive encrypted); both are flagged in the note, Tractable's at medium confidence.
+- [x] **The loop never exceeds its iteration or GBP cap (tested with a deliberately tiny cap).** Verified by mocked tests: a tiny GBP cap gives exactly 1 call and an exact iteration cap gives exactly that many calls, both with `run_log` stats still recorded and nothing written to `fact`. **Not stress-tested live.** The GBP cap is soft by at most one response (cost is known only after a call).
+- [x] **Cost per company is logged and averages below ~GBP 0.05.** Logged in `run_log.stats.cost_gbp` (kind `enrich`). Final 10-company run: total GBP 0.1054, **average GBP 0.0105**. All 30 `enrich` runs made while iterating: GBP 0.3196 total, average over the 22 successful ones GBP 0.0102. About 70 percent of each run is the single web search (US$0.01). Total live spend about GBP 0.32 against a roughly GBP 3 ceiling.
+
+Verification run by the orchestrator after the implementer finished: `uv run pytest` 169 passed, `uv run ruff check` all checks passed.
+
+### Live testing history
+1. First call: 400 on `strict: true` (see decisions), cost GBP 0.
+2. First pass over the 10: 6 succeeded. Cleo, Tractable and Quantexa ended `invalid`: the model cited homepages no tool had returned, and repeated them after the repair message.
+3. Fixes: the repair message now lists the citable ledger URLs, and the prompt says to fetch a page before citing it.
+4. Second pass: Cleo and Quantexa still `invalid`. Cause was a real ledger bug (`https://x.com` vs `https://x.com/`); fixed by ignoring trailing slash and host case.
+5. During re-runs: one Tractable run had web search unavailable and handled it honestly with nulls; one Cleo run ended `refused` (transient), then succeeded on retry.
+6. The model left `amount_gbp` null for non-GBP rounds, so approximate rates (0.75 GBP per USD, 0.85 per EUR) were added to the prompt.
+7. Final pass on unchanged code: 10/10. The `run_log` still holds 8 `error` rows (invalid/refused/error) from the iteration phase.
+
+### Open items (need you)
+1. **Review the 10 profiles yourself** (`uv run python -m sprout.enrich <number> --show`, or query the `fact` table). The pilot companies are not in the name-matched candidate pool; their numbers: Wayve 10924127, PolyAI 11048129, Synthesia 10933652, Graphcore 10185006, Cleo AI 09864205, Faculty Science 08873131, Tractable 09315523, Peak AI 09307701, Quantexa 10045407, Airborne Robotics 10889295.
+2. **Check the first console invoice** against the assumption of US$10 per 1,000 web searches (taken from the `claude-api` skill, where it appears only in a Managed Agents note). Cost per company is dominated by this number.
+3. **`USD_TO_GBP = 0.76`** in `costs.py` is an approximation (rounded up) from web readings of about 1.34 to 1.35 USD per GBP, dated 2026-10-19; no authoritative source was reachable. Refresh if you want it sourced.
+4. **`data/sprout.db` is tracked by git** (committed in `f753dfc`, despite `*.db` in `.gitignore`) and now shows as modified (new column, 9 added companies, `enrich` run_log rows, facts). Decide whether to commit it or untrack it. The DB the agent found held 305 companies, not the 876 recorded in the Phase 1 notes (that was probably a different local DB); it now holds 314.
+5. **`Stage` has no Series D/E/F.** The agent maps them to "Series C+" or "Growth" and says so in the note. Consider extending the enum or adding a stage note in Phase 3.
+6. Not tested live: `--strong` (Sonnet 5.5), forced `tool_choice` on Haiku 5.5, the over-100K-token price tier, and the 512-token minimum cacheable prefix.
+
+### Decisions locked in
+- **Models and call shape (verified live on Haiku 5.5):** `tool_choice: {"type": "auto"}`, `output_config={"effort": "low"}` (default effort `low`), top-level `cache_control={"type": "ephemeral"}` on `messages.create` plus a marker on the system block. Caching works: `cache_creation_input_tokens > 0`; across all runs about 455k tokens were written and 1.50M read. Haiku 5.5 is the default; `--strong` selects Sonnet 5.5.
+- **`submit_profile` is not `strict`.** The API rejected the derived schema ("29 parameters with type arrays or anyOf, limit 16"). Pydantic validation plus one repair attempt is the enforcement, as the architecture's fallback allowed. The schema is derived from `CompanyProfile` with `$ref`s inlined, `retrieved_at`, `news` and `name` removed and all fields required.
+- **Search is server-side `web_search_20260209`** with `max_uses` (start 3); `fetch_page` and `lookup_companies_house` are custom, so robots, SSRF, size and cache protections apply to every page read. Server-side `web_fetch` is not used. The SDK also ships `web_search_20260318`, not documented in the skill; not adopted. Because average cost is far below target, there is no reason to fall back to a custom search backend (D13 holds).
+- **Provenance is enforced in code:** a non-null value needs `source_url` (existing `Sourced` validator); `source_url` must be a URL a tool actually returned (the seen-URL ledger; matching ignores trailing slash and host case); `retrieved_at` is stamped by code; funding fields need a `note` with the original figure and currency; a source seen only in a search snippet is capped at `medium` confidence. Rejections go back to the model as a compact error (which does not echo input) that lists up to 25 citable URLs, then one repair attempt, then `invalid`.
+- **Nothing is persisted unless a validated `submit_profile` arrived.** On any other stop (`invalid`, `max_iter`, `budget`, `no_submit`, `truncated`, `refused`, `error`) no facts or category are written, but the `enrich` `run_log` row keeps the stats and cost. `enrich_company` assigns stats and commits before raising, because `logged_run` rolls back on exceptions.
+- **`run_log` kind `enrich`, one row per attempt;** stats: company_id, company_number, model, effort, stop, iterations, repairs (0 or 1 allowed, not failures), token counts (thinking is inside `output_tokens`), web_searches, tool_calls, cost_gbp, usd_to_gbp, budget, error.
+- **Defaults:** 12 iterations and GBP 0.10 per company. The wrap-up notice ("call submit_profile now") appears on the last iteration or at 80 percent of the GBP cap. An unpriced model fails before any call.
+- **`company.category`** is a nullable plain string: NULL means "not yet classified", distinct from `Other`.
+- **Additive migration in `init_db`:** missing nullable columns are added with `ALTER TABLE`; anything else raises an error telling you to delete the DB. Existing data is preserved.
+- **Prompt content:** fetched text is data not instructions, fetch before citing, disambiguate same-name companies by Companies House number, approximate FX rates for converting, "unknown is acceptable".
+- **No `-m live` enrichment test** was added, so a plain `pytest` with a key never spends money.
+- **Deviations from the architecture doc:** `build_tools(fetcher, ch, ledger)` instead of `build_tools(deps, ledger)` (to avoid `tools.py` importing `Deps`); `Deps` gained `model` and `effort`; `enrich_with_result` added; extra CLI flags and a Companies House name-search for suggestions. No new dependencies or env vars.
+
+### Things later phases must know
+- **Model output is non-deterministic.** Even with the ledger, an occasional run ends `invalid` (invented homepage URL, correctly rejected) or `refused` (transient). Phase 3 needs retries and `enrichment_state`.
+- **The model sometimes leaves `amount_gbp` null for non-GBP rounds** despite the prompt. Null is the safe failure, but it understates funding coverage.
+- **Search results arrive encrypted**, so snippet-only claims cannot be audited from our side. The code caps them at `medium` and the model records the source in the note. A verifier (Phase 3) is the real check.
+- **A claimed website can be wrong** (Airborne Robotics' site returned another company's content); it is stored at medium confidence with a caveat in the note.
+- **Cost is dominated by the web search** (about 70 percent); lowering `max_uses` or caching search results is the lever, not the model.
+- Use `enrich_with_result` when the caller needs the `LoopResult`; `enrich_company` returns only the profile.
+- `LoopResult.stop` values: `submitted`, `invalid`, `max_iter`, `budget`, `no_submit`, `truncated`, `refused`, `error`.
+- `Company.category` exists now, so Phase 3's classifier can write it; `save_profile` writes the enrichment agent's category.
+- **Found by the end-of-phase architecture review (not fixed):**
+  - There is no per-run fetch cap (fetches are bounded only by the iteration cap) and no batch-level GBP cap: the CLI applies `--max-gbp` per company, so a long target list can spend `n * 0.10`. The Phase 3 orchestrator needs a batch cap.
+  - A capped or failed run persists no partial facts (the older architecture text promised "partial"; it was corrected). Its `run_log.status` is `error` with the reason in `stats.stop`.
+  - Re-running a company can leave both a valued fact and a NULL-value fact for the same field (valued in run 1, null in run 2, same source or different). The winning-value rule must exist before any front end reads facts.
+  - Latent nit in `_simplify` ([src/sprout/agents/enrich.py](src/sprout/agents/enrich.py)): it drops any dict key named `title`, `default`, `minimum`, `format` etc., including a `CompanyProfile` field with such a name inside `properties`. No current field collides.
+  - `agents/enrich.py` is about 460 lines (agent, schema, CLI, `resolve_company`); split it when Phase 3 adds an orchestrator.
+  - `pause_turn` has only mock evidence; `--strong` and forced `tool_choice` were never run live.
