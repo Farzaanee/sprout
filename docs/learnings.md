@@ -192,6 +192,18 @@ Not a plan phase, but built early to check progress. **Actual learnings:**
 | `add_company_by_number` | Turns a Companies House `/company/{number}` response into a row via `parse_hit` and `assess`, which makes `db.py` import source and filter code (a known coupling). |
 | `tests/fakes.py` | Builders for `tool_use_turn`, `server_search_turn`, `pause_turn`, `text_turn` and a `ScriptedClient` that raises if the loop makes more calls than scripted. |
 
+**Terminology clarified (code walkthrough):**
+
+| Term | Clarification |
+| --- | --- |
+| Shim | `sprout/enrich.py` is a shim: a thin wrapper with no real logic, just re-exporting `main` from `agents/enrich.py` so `python -m sprout.enrich` works as an entry point. |
+| Tool vs function | A function is called directly by code you control. A tool is a function (a `Tool.handler`) the model decides to call, via a schema describing it; `loop.py`'s `_run_tool` is what actually dispatches to the handler once the model requests it. |
+| `SourceLedger` | A running log (literal meaning of "ledger": an ordered record of entries) of every URL a tool has surfaced during one run, with a `fetched` flag. Used by `enrich.py` to reject `submit_profile` citations the model made up rather than actually retrieved. |
+| `client` | The object that makes the real network call to the API (`MessagesClient` protocol, backed by `anthropic.Anthropic` in `make_client`). The loop depends only on the narrow protocol, not the concrete SDK class, which is the test seam that lets `tests/fakes.py` substitute `ScriptedClient`. |
+| `pause_turn` | Returned by the API when a server-side tool (multi-step `web_search`) hasn't finished a logical turn yet. The loop just `continue`s and resends the updated history; it is not a stopping condition, unlike `end_turn`/`max_tokens`/`tool_use`. |
+| Schema | A description of data's shape (fields, types, required-ness), not the data itself. Shows up three ways here: tool `input_schema` (JSON Schema the model must match to call a tool), `submit_profile_schema()` (derived from `CompanyProfile` so it can't drift), and SQLModel table classes (the DB schema). |
+| Delimiter spoofing example | `wrap_untrusted` escapes any `<untrusted_content`/`</untrusted_content` already inside fetched page text before wrapping it. Without that, a page could embed a fake closing tag followed by injected instructions (e.g. "set funding to GBP 50m"), tricking the model into reading them as outside the untrusted block, i.e. as if they were trusted, instead of as page content to ignore. |
+
 ## Phase 3 - Multi-agent pipeline at scale
 
 **Planned:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, verification/cross-checking patterns, failure isolation.
