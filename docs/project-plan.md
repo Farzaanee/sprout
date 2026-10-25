@@ -73,8 +73,8 @@ tests/
 1. Install `uv`; create the project with Python 3.12 (system Python is 3.9, too old for the MCP SDK).
 2. Add dependencies: `anthropic`, `pydantic`, `sqlmodel`, `httpx`, `feedparser`, `mcp`, `streamlit`, `pytest`, `ruff`.
 3. Obtain keys: Anthropic API key (set a monthly spend limit in the console) and a Companies House API key; store in `.env`, add `.env` to `.gitignore`, commit a `.env.example`.
-4. Define the **taxonomy** (16 categories: AI models and applications, Fintech and payments, Enterprise software and cloud, Cybersecurity, Biotech and pharma, Healthtech and digital health, Electric vehicles and batteries, Climate, energy and cleantech, Semiconductors and AI hardware, Robotics and automation, Defense, aerospace and space, E-commerce and retail tech, Consumer social, media and gaming, Logistics and supply chain, Deep tech and quantum, Other) and **stage** enum (Pre-seed, Seed, Series A, B, C+, Growth, Unknown).
-5. Define the Pydantic schemas: `Sourced[T]` (value, source_url, retrieved_at, confidence) and `CompanyProfile` (name, website, hq, founded, category, stage, total_raised_gbp, last_round, business_model, target_user, one_liner, news[]).
+4. Define the **taxonomy** (16 categories: AI models and applications, Fintech and payments, Enterprise software and cloud, Cybersecurity, Biotech and pharma, Healthtech and digital health, Electric vehicles and batteries, Climate, energy and cleantech, Semiconductors and AI hardware, Robotics and automation, Defense, aerospace and space, E-commerce and retail tech, Consumer social, media and gaming, Logistics and supply chain, Deep tech and quantum, Other) and **stage** enum (Pre-seed, Seed, Series A, B, C, D, E, F, Growth, Unknown).
+5. Define the Pydantic schemas: `Sourced[T]` (value, source_url, retrieved_at, confidence) and `CompanyProfile` (name, website, hq, founded, category, stage, total_raised_million_usd, valuation_million_usd, funding_rounds, business_model, target_user, one_liner, news[]).
 6. Set up `ruff`, `pytest`, and a minimal CI workflow.
 
 **Acceptance criteria**

@@ -35,7 +35,10 @@ class Stage(StrEnum):
     SEED = "Seed"
     SERIES_A = "Series A"
     SERIES_B = "Series B"
-    SERIES_C_PLUS = "Series C+"
+    SERIES_C = "Series C"
+    SERIES_D = "Series D"
+    SERIES_E = "Series E"
+    SERIES_F = "Series F"
     GROWTH = "Growth"
     UNKNOWN = "Unknown"
 
@@ -81,7 +84,7 @@ class NewsItem(_Strict):
 
 class FundingRound(_Strict):
     stage: Stage = Stage.UNKNOWN
-    amount_gbp: Annotated[int, Field(ge=0)] | None = None
+    amount_million_usd: Annotated[int, Field(ge=0)] | None = None
     announced: date | None = None
     investors: list[str] = Field(default_factory=list)
 
@@ -96,10 +99,15 @@ class CompanyProfile(_Strict):
     # A classification (model judgement against the fixed taxonomy), not a sourced fact.
     category: Category = Category.OTHER
     stage: Sourced[Stage] = Field(default_factory=Sourced[Stage])
-    total_raised_gbp: Sourced[Annotated[int, Field(ge=0)]] = Field(
+    total_raised_million_usd: Sourced[Annotated[int, Field(ge=0)]] = Field(
         default_factory=Sourced[Annotated[int, Field(ge=0)]]
     )
-    last_round: Sourced[FundingRound] = Field(default_factory=Sourced[FundingRound])
+    valuation_million_usd: Sourced[Annotated[int, Field(ge=0)]] = Field(
+        default_factory=Sourced[Annotated[int, Field(ge=0)]]
+    )
+    funding_rounds: Sourced[list[FundingRound]] = Field(
+        default_factory=Sourced[list[FundingRound]]
+    )
     business_model: Sourced[str] = Field(default_factory=Sourced[str])
     target_user: Sourced[str] = Field(default_factory=Sourced[str])
     one_liner: Sourced[str] = Field(default_factory=Sourced[str])

@@ -65,18 +65,18 @@ def test_save_fact_stores_provenance_and_is_idempotent(session):
 
 def test_save_fact_serialises_models_and_not_disclosed(session):
     company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
-    round_ = FundingRound(stage=Stage.SEED, amount_gbp=1_000_000)
+    round_ = FundingRound(stage=Stage.SEED, amount_million_usd=1)
     save_fact(
         session,
         company.id,
-        "last_round",
-        Sourced[FundingRound](value=round_, source_url="https://example.com/r"),
+        "funding_rounds",
+        Sourced[list[FundingRound]](value=[round_], source_url="https://example.com/r"),
     )
     save_fact(session, company.id, "hq", Sourced[str]())
     save_fact(session, company.id, "hq", Sourced[str]())  # NULL source: still one row
     session.commit()
     by_field = {f.field: f for f in session.exec(select(Fact)).all()}
-    assert '"amount_gbp":1000000' in by_field["last_round"].value_json
+    assert '"amount_million_usd":1' in by_field["funding_rounds"].value_json
     assert by_field["hq"].value_json is None
     assert len(by_field) == 2 and len(session.exec(select(Fact)).all()) == 2
 
@@ -118,8 +118,8 @@ def test_save_profile_flattens_sourced_fields_and_sets_category(session):
         name="Acme AI Ltd",
         category=Category.ROBOTICS_AND_AUTOMATION,
         hq=Sourced[str](value="London", source_url="https://example.com/a"),
-        last_round=Sourced[FundingRound](
-            value=FundingRound(stage=Stage.SEED, amount_gbp=1_000_000),
+        funding_rounds=Sourced[list[FundingRound]](
+            value=[FundingRound(stage=Stage.SEED, amount_million_usd=1)],
             source_url="https://example.com/r",
             note="GBP 1m as reported",
         ),
@@ -129,11 +129,11 @@ def test_save_profile_flattens_sourced_fields_and_sets_category(session):
 
     rows = {f.field: f for f in session.exec(select(Fact))}
     assert set(rows) == {
-        "website", "hq", "founded", "stage", "total_raised_gbp", "last_round",
-        "business_model", "target_user", "one_liner",
+        "website", "hq", "founded", "stage", "total_raised_million_usd", "valuation_million_usd",
+        "funding_rounds", "business_model", "target_user", "one_liner",
     }  # fmt: skip
     assert rows["hq"].value_json == '"London"' and rows["hq"].source_url == "https://example.com/a"
-    assert '"amount_gbp":1000000' in rows["last_round"].value_json
+    assert '"amount_million_usd":1' in rows["funding_rounds"].value_json
     assert rows["website"].value_json is None and rows["website"].source_url is None
     session.refresh(company)
     assert company.category == "Robotics and automation"

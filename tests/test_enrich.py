@@ -43,8 +43,9 @@ def submission(**overrides):
         "founded": NOT_DISCLOSED,
         "category": "AI models and applications",
         "stage": NOT_DISCLOSED,
-        "total_raised_gbp": NOT_DISCLOSED,
-        "last_round": NOT_DISCLOSED,
+        "total_raised_million_usd": NOT_DISCLOSED,
+        "valuation_million_usd": NOT_DISCLOSED,
+        "funding_rounds": NOT_DISCLOSED,
         "business_model": NOT_DISCLOSED,
         "target_user": NOT_DISCLOSED,
         "one_liner": fact("Builds AI agents."),
@@ -110,7 +111,8 @@ def test_submit_schema_is_derived_from_the_model_without_code_stamped_fields():
     schema = submit_profile_schema()
     assert set(schema["properties"]) == {
         "website", "hq", "founded", "category", "stage",
-        "total_raised_gbp", "last_round", "business_model", "target_user", "one_liner",
+        "total_raised_million_usd", "valuation_million_usd", "funding_rounds", "business_model",
+        "target_user", "one_liner",
     }  # fmt: skip
     assert set(schema["required"]) == set(schema["properties"])
     text = str(schema)
@@ -155,17 +157,19 @@ def test_trailing_slash_difference_is_not_an_invented_url():
 
 def test_funding_value_without_note_is_rejected_and_with_note_accepted():
     ledger = ledger_with(SEEN, FUNDING_URL)
-    raw = submission(total_raised_gbp=fact(9_000_000, FUNDING_URL, "medium"))
-    with pytest.raises(SubmissionError, match="total_raised_gbp: a funding value needs a note"):
+    raw = submission(total_raised_million_usd=fact(12, FUNDING_URL, "medium"))
+    with pytest.raises(
+        SubmissionError, match="total_raised_million_usd: a funding value needs a note"
+    ):
         validate_submission(raw, "ACME", ledger)
-    raw["total_raised_gbp"]["note"] = "Reported as US$12m, converted at about 0.75"
-    assert validate_submission(raw, "ACME", ledger).total_raised_gbp.value == 9_000_000
+    raw["total_raised_million_usd"]["note"] = "Reported as GBP 9m, converted at about 1.25"
+    assert validate_submission(raw, "ACME", ledger).total_raised_million_usd.value == 12
 
 
-def test_last_round_also_needs_a_note():
-    round_ = {"stage": "Seed", "amount_gbp": 2_000_000, "announced": "2024-05-01", "investors": []}
-    raw = submission(last_round=fact(round_, FUNDING_URL, "medium"))
-    with pytest.raises(SubmissionError, match="last_round"):
+def test_funding_rounds_also_needs_a_note():
+    round_ = {"stage": "Seed", "amount_million_usd": 2, "announced": "2024-05-01", "investors": []}
+    raw = submission(funding_rounds=fact([round_], FUNDING_URL, "medium"))
+    with pytest.raises(SubmissionError, match="funding_rounds"):
         validate_submission(raw, "ACME", ledger_with(FUNDING_URL))
 
 
@@ -276,15 +280,17 @@ def test_invalid_after_repair_writes_nothing_but_records_the_cost(session, compa
 
 
 def test_funding_without_note_goes_through_repair(session, company, deps_for):
-    unnoted = submission(total_raised_gbp=fact(5_000_000, FUNDING_URL, "medium"))
-    noted = submission(total_raised_gbp=fact(5_000_000, FUNDING_URL, "medium", "Reported as £5m"))
+    unnoted = submission(total_raised_million_usd=fact(6, FUNDING_URL, "medium"))
+    noted = submission(
+        total_raised_million_usd=fact(6, FUNDING_URL, "medium", "Reported as £5m")
+    )
     client = ScriptedClient(
         server_search_turn([SEEN, FUNDING_URL], ("submit_profile", unnoted)),
         tool_use_turn(("submit_profile", noted)),
     )
     enrich_company(session, company, deps_for(client))
     stored = facts_of(session, company)
-    assert stored["total_raised_gbp"].note == "Reported as £5m"
+    assert stored["total_raised_million_usd"].note == "Reported as £5m"
 
 
 def test_tiny_gbp_cap_stops_the_loop_and_logs_the_spend(session, company, deps_for):

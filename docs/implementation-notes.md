@@ -30,7 +30,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 
 ### Decisions locked in
 - **Taxonomy (16, frozen):** AI models and applications, Fintech and payments, Enterprise software and cloud, Cybersecurity, Biotech and pharma, Healthtech and digital health, Electric vehicles and batteries, Climate, energy and cleantech, Semiconductors and AI hardware, Robotics and automation, Defense, aerospace and space, E-commerce and retail tech, Consumer social, media and gaming, Logistics and supply chain, Deep tech and quantum, Other. Changing it later invalidates classifications and the golden set. Tests assert the exact 16 labels and contain `Other`.
-- **Stage enum:** Pre-seed, Seed, Series A, Series B, Series C+, Growth, Unknown.
+- **Stage enum:** Pre-seed, Seed, Series A, Series B, Series C, Series D, Series E, Series F, Growth, Unknown.
 - **`Sourced[T]`** = `value`, `source_url`, `retrieved_at`, `confidence` (low/medium/high), plus an optional `note` (added for Phase 2's "funding in GBP with original currency noted", e.g. `"US$12m converted"`).
   - `value=None` means "not disclosed" and is always valid.
   - **A non-null value without `source_url` fails validation.** This enforces "provenance over completeness" in code, not only in the prompt.
@@ -38,7 +38,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 - **Every `Sourced` field defaults to "not disclosed"** (via `default_factory`, so profiles never share an instance). An empty `CompanyProfile(name=...)` is valid and states nothing it cannot back up.
 - **`category` is a plain `Category`, not `Sourced`.** It is a classification against our own taxonomy, not a fact found at a URL. Defaults to `Other`. If you'd rather have a per-profile rationale/confidence, add it in Phase 3 with the classifier.
 - **Money is whole GBP as `int` (`>= 0`)**, not float, to avoid rounding artefacts; original-currency detail goes in `note`.
-- **`last_round`** is `Sourced[FundingRound]` (stage, amount_gbp, announced date, investors): one source covers the whole round. `founded` is bounded to 1800–2100.
+- **`funding_rounds`** is `Sourced[list[FundingRound]]` (each round has stage, amount_million_usd, announced date, investors): one source covers the whole list. `founded` is bounded to 1800–2100.
 - **Models:** `claude-haiku-5-5` (bulk) and `claude-sonnet-5-5` (strong), overridable via `SPROUT_BULK_MODEL` / `SPROUT_STRONG_MODEL`. IDs are taken from the `claude-api` skill's model table (dated 2026-10-06); re-check before Phase 2.
 - **Deviation from the plan's layout:** `costs.py` and `db.py` are not created yet (they belong to Phases 1–2). No console-script entry point (`uv init` adds one; removed as unused).
 
@@ -160,7 +160,7 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 3. Fixes: the repair message now lists the citable ledger URLs, and the prompt says to fetch a page before citing it.
 4. Second pass: Cleo and Quantexa still `invalid`. Cause was a real ledger bug (`https://x.com` vs `https://x.com/`); fixed by ignoring trailing slash and host case.
 5. During re-runs: one Tractable run had web search unavailable and handled it honestly with nulls; one Cleo run ended `refused` (transient), then succeeded on retry.
-6. The model left `amount_gbp` null for non-GBP rounds, so approximate rates (0.75 GBP per USD, 0.85 per EUR) were added to the prompt.
+6. The model left funding amounts null for non-USD rounds, so approximate conversion rates into USD were added to the prompt.
 7. Final pass on unchanged code: 10/10. The `run_log` still holds 8 `error` rows (invalid/refused/error) from the iteration phase.
 
 ### Open items (need you)
@@ -168,7 +168,7 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 2. **Check the first console invoice** against the assumption of US$10 per 1,000 web searches (taken from the `claude-api` skill, where it appears only in a Managed Agents note). Cost per company is dominated by this number.
 3. **`USD_TO_GBP = 0.76`** in `costs.py` is an approximation (rounded up) from web readings of about 1.34 to 1.35 USD per GBP, dated 2026-10-19; no authoritative source was reachable. Refresh if you want it sourced.
 4. ~~`data/sprout.db` is tracked by git~~ **Resolved (2026-10-25):** untracked `sprout.db`; committed `data/sprout_snapshot.db` instead (refresh by hand: `cp data/sprout.db data/sprout_snapshot.db`). `config.get_settings()` falls back to the snapshot when the live db is missing (Streamlit Cloud has no persistent disk). The DB the agent found held 305 companies, not the 876 recorded in the Phase 1 notes (that was probably a different local DB); it now holds 314.
-5. **`Stage` has no Series D/E/F.** The agent maps them to "Series C+" or "Growth" and says so in the note. Consider extending the enum or adding a stage note in Phase 3.
+5. Some already-enriched companies have facts stored under stage labels or field names that predate the current schema; re-run `sprout.enrich` on them to refresh.
 6. Not tested live: `--strong` (Sonnet 5.5), forced `tool_choice` on Haiku 5.5, the over-100K-token price tier, and the 512-token minimum cacheable prefix.
 
 ### Decisions locked in
@@ -187,7 +187,7 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 
 ### Things later phases must know
 - **Model output is non-deterministic.** Even with the ledger, an occasional run ends `invalid` (invented homepage URL, correctly rejected) or `refused` (transient). Phase 3 needs retries and `enrichment_state`.
-- **The model sometimes leaves `amount_gbp` null for non-GBP rounds** despite the prompt. Null is the safe failure, but it understates funding coverage.
+- **The model sometimes leaves funding amounts null for non-USD figures** despite the prompt. Null is the safe failure, but it understates funding coverage.
 - **Search results arrive encrypted**, so snippet-only claims cannot be audited from our side. The code caps them at `medium` and the model records the source in the note. A verifier (Phase 3) is the real check.
 - **A claimed website can be wrong** (Airborne Robotics' site returned another company's content); it is stored at medium confidence with a caveat in the note.
 - **Cost is dominated by the web search** (about 70 percent); lowering `max_uses` or caching search results is the lever, not the model.

@@ -41,11 +41,11 @@ def test_taxonomy_matches_fixed_categories():
 
 def test_category_and_stage_reject_unknown_labels():
     assert Category("Healthtech and digital health") is Category.HEALTHTECH_AND_DIGITAL_HEALTH
-    assert Stage("Series C+") is Stage.SERIES_C_PLUS
+    assert Stage("Series D") is Stage.SERIES_D
     with pytest.raises(ValueError):
         Category("Healthcare")
     with pytest.raises(ValueError):
-        Stage("Series D")
+        Stage("Series Z")
 
 
 def test_sourced_not_disclosed_is_valid_without_source():
@@ -86,13 +86,14 @@ def test_empty_profile_defaults_to_not_disclosed():
     p = CompanyProfile(name="Acme AI")
     assert p.category is Category.OTHER
     assert p.stage.value is None
-    assert p.total_raised_gbp.value is None
+    assert p.total_raised_million_usd.value is None
+    assert p.valuation_million_usd.value is None
     assert p.news == []
 
 
 def test_default_sourced_fields_are_not_shared_between_profiles():
     a, b = CompanyProfile(name="A"), CompanyProfile(name="B")
-    assert a.total_raised_gbp is not b.total_raised_gbp
+    assert a.total_raised_million_usd is not b.total_raised_million_usd
 
 
 def test_full_profile_round_trips_through_json():
@@ -101,11 +102,14 @@ def test_full_profile_round_trips_through_json():
         name="Acme AI",
         category=Category.HEALTHTECH_AND_DIGITAL_HEALTH,
         stage=Sourced[Stage](value=Stage.SEED, source_url=SRC, confidence=Confidence.MEDIUM),
-        total_raised_gbp=Sourced[int](
-            value=3_000_000, source_url=SRC, retrieved_at=now, note="US$3.8m converted"
+        total_raised_million_usd=Sourced[int](
+            value=4, source_url=SRC, retrieved_at=now, note="GBP 3.0m converted"
         ),
-        last_round=Sourced[FundingRound](
-            value=FundingRound(stage=Stage.SEED, amount_gbp=3_000_000, investors=["Seedcamp"]),
+        valuation_million_usd=Sourced[int](
+            value=20, source_url=SRC, retrieved_at=now, note="Valued at US$20m"
+        ),
+        funding_rounds=Sourced[list[FundingRound]](
+            value=[FundingRound(stage=Stage.SEED, amount_million_usd=4, investors=["Seedcamp"])],
             source_url=SRC,
         ),
         news=[NewsItem(title="Acme raises seed", url=SRC)],
@@ -119,10 +123,10 @@ def test_full_profile_round_trips_through_json():
         {"name": ""},
         {"name": "X", "category": "Fintech"},
         {"name": "X", "unexpected": 1},
-        {"name": "X", "total_raised_gbp": {"value": -5, "source_url": SRC}},
+        {"name": "X", "total_raised_million_usd": {"value": -5, "source_url": SRC}},
         {"name": "X", "founded": {"value": 1066, "source_url": SRC}},
         {"name": "X", "stage": {"value": "Series Z", "source_url": SRC}},
-        {"name": "X", "total_raised_gbp": {"value": 1_000_000}},  # fabricated: no source
+        {"name": "X", "total_raised_million_usd": {"value": 1}},  # fabricated: no source
     ],
 )
 def test_invalid_profiles_are_rejected(bad):

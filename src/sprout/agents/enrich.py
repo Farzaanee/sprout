@@ -49,7 +49,7 @@ DEFAULT_BUDGET = Budget(max_iterations=12, max_gbp=Decimal("0.10"))
 DEFAULT_EFFORT = "low"
 MAX_OUTPUT_TOKENS = 6_000
 MAX_LISTED_URLS = 25
-FUNDING_FIELDS = ("total_raised_gbp", "last_round")
+FUNDING_FIELDS = ("total_raised_million_usd", "valuation_million_usd", "funding_rounds")
 # The model supplies none of these: identity is the DB row, time is stamped from the ledger,
 # and news arrives in Phase 3.
 _NOT_MODEL_OUTPUT = ("name", "news")
@@ -70,8 +70,9 @@ running low on turns or budget, submit what you have.
 What to submit
 - category: exactly one of: {"; ".join(c.value for c in Category)}. Judge by what the company \
 does, not by its name. Use "Other" if nothing fits.
-- website, hq (city and country, e.g. "London, UK"), founded (year), stage, total_raised_gbp, \
-last_round, business_model, target_user, one_liner (a factual description of at most 25 words).
+- website, hq (city and country, e.g. "London, UK"), founded (year), stage, \
+total_raised_million_usd, valuation_million_usd, funding_rounds, business_model, target_user, \
+one_liner (a factual description of at most 25 words).
 - stage is one of: {", ".join(s.value for s in Stage if s is not Stage.UNKNOWN)}. Use a null \
 value rather than "Unknown".
 
@@ -84,15 +85,20 @@ are sure exists: if you want to cite a site, fetch_page it first. Copy URLs exac
 - confidence: high = the company's own site, the official register, or a primary press release \
 states it; medium = reputable press or an indirect statement; low = a search snippet or an \
 inference.
-- Funding: total_raised_gbp is a whole number of pounds. Only state it if a source states the \
-total, or one source lists every round. last_round covers one round from a single source \
-(stage, amount_gbp, announced date as YYYY-MM-DD, investors). Do not derive funding from a \
-valuation. If the source gives another currency, convert it into GBP at about 0.75 GBP per USD \
-or 0.85 GBP per EUR (an approximate figure is fine) rather than leaving amount_gbp null. Always \
-put the source's wording in the note for any funding value, with the ORIGINAL figure, currency \
-and rate used (for example "Reported as US$12m, converted at about 0.75" or "Reported as up to \
-£5m"). Watch units (thousand, million, billion) and words like "up to" or "valued at". If the \
-source is silent on funding, the value is null.
+- Funding: total_raised_million_usd, valuation_million_usd and each round's amount_million_usd \
+are whole numbers of millions of US dollars. total_raised_million_usd needs a source stating the \
+total, or one source listing every round. valuation_million_usd is the company's most recently \
+reported valuation; do not derive it from funding raised, or funding from a valuation. \
+funding_rounds is every round (stage, amount_million_usd, announced date as YYYY-MM-DD, \
+investors) you can find in a single source, not just the latest; prefer a source that lists the \
+whole funding history (for example a funding database page or a press roundup) over one that \
+covers only one round. If a \
+source gives another currency, convert it rather than leaving the value null, at about 1.3 USD \
+per GBP or 1.1 USD per EUR (an approximate figure is fine). Always put the source's wording in \
+the note for any funding or valuation value, with the ORIGINAL figure, currency and rate used \
+(for example "Reported as £12m, converted at about 1.3" or "Valued at up to US$1bn"). Watch units \
+(thousand, million, billion) and words like "up to" or "valued at". If the source is silent, the \
+value is null.
 
 Identity
 - Many companies share names. The Companies House number, incorporation date and location you \
