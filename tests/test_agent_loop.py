@@ -13,10 +13,10 @@ from fakes import (
     tool_use_turn,
 )
 from sprout.agents.loop import Budget, Tool, ToolOutcome, run_agent
-from sprout.costs import UnknownModelError, Usage, cost_gbp
+from sprout.costs import UnknownModelError, Usage, cost_usd
 
 MODEL = "claude-haiku-5-5"
-BUDGET = Budget(max_iterations=6, max_gbp=Decimal("1"))
+BUDGET = Budget(max_iterations=6, max_usd=Decimal("1"))
 
 
 def echo_tool(calls: list | None = None) -> Tool:
@@ -70,7 +70,7 @@ def test_happy_path_sends_cache_markers_and_returns_tool_results():
     assert result.stop == "submitted" and result.payload == {"got": {"x": 1}}
     assert result.iterations == 2 and result.tool_calls == {"echo": 1, "submit": 1}
     assert result.usage.cache_write_tokens == 2000 and result.usage.cache_read_tokens == 2000
-    assert result.cost_gbp == cost_gbp(MODEL, result.usage) > 0
+    assert result.cost_usd == cost_usd(MODEL, result.usage) > 0
 
     first, second = client.requests
     assert first["tool_choice"] == {"type": "auto"}
@@ -104,7 +104,7 @@ def test_invalid_after_repair_stops_without_a_third_call():
 
 def test_iteration_cap_is_exact_and_last_turn_gets_a_wrap_up_notice():
     client = ScriptedClient(*[tool_use_turn(("echo", {"q": i})) for i in range(10)])
-    result = run(client, [echo_tool()], Budget(max_iterations=3, max_gbp=Decimal("1")))
+    result = run(client, [echo_tool()], Budget(max_iterations=3, max_usd=Decimal("1")))
     assert result.stop == "max_iter" and result.iterations == 3 and client.calls == 3
     notices = [
         [b for b in r["messages"][-1]["content"] if b.get("type") == "text"]
@@ -114,21 +114,21 @@ def test_iteration_cap_is_exact_and_last_turn_gets_a_wrap_up_notice():
     assert "submit_profile" in notices[1][0]["text"]
 
 
-def test_tiny_gbp_cap_stops_after_the_first_response():
+def test_tiny_usd_cap_stops_after_the_first_response():
     client = ScriptedClient(
         *[tool_use_turn(("echo", {}), input=5000, output=500) for _ in range(5)]
     )
-    result = run(client, [echo_tool()], Budget(max_iterations=10, max_gbp=Decimal("0.000001")))
+    result = run(client, [echo_tool()], Budget(max_iterations=10, max_usd=Decimal("0.000001")))
     assert result.stop == "budget" and client.calls == 1
-    assert result.cost_gbp > Decimal("0.000001")  # soft cap: overshoot by at most one response
+    assert result.cost_usd > Decimal("0.000001")  # soft cap: overshoot by at most one response
 
 
-def test_gbp_cap_adds_wrap_up_notice_at_80_percent():
-    one_call = cost_gbp(MODEL, Usage(input_tokens=1000))
+def test_usd_cap_adds_wrap_up_notice_at_80_percent():
+    one_call = cost_usd(MODEL, Usage(input_tokens=1000))
     client = ScriptedClient(
         tool_use_turn(("echo", {}), input=1000), tool_use_turn(("echo", {}), input=1000)
     )
-    budget = Budget(max_iterations=10, max_gbp=one_call * Decimal("1.1"))
+    budget = Budget(max_iterations=10, max_usd=one_call * Decimal("1.1"))
     result = run(client, [echo_tool()], budget)
     assert result.stop == "budget" and client.calls == 2
     last = client.requests[1]["messages"][-1]["content"]
@@ -212,6 +212,6 @@ def test_unpriced_model_fails_before_any_call():
 
 def test_budget_validation():
     with pytest.raises(ValueError):
-        Budget(max_iterations=0, max_gbp=Decimal("1"))
+        Budget(max_iterations=0, max_usd=Decimal("1"))
     with pytest.raises(ValueError):
-        Budget(max_iterations=1, max_gbp=Decimal("0"))
+        Budget(max_iterations=1, max_usd=Decimal("0"))

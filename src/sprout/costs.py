@@ -7,12 +7,6 @@ closed so a typo in `SPROUT_BULK_MODEL` cannot silently bypass the spend caps.
 from dataclasses import dataclass
 from decimal import Decimal
 
-# USD to GBP: ASSUMPTION, dated 2026-10-19. Taken from approximate web readings of GBP/USD at
-# about 1.34 to 1.35 in September 2026 (no authoritative October source was reachable), then
-# rounded up to 0.76 so caps are not under-counted. A stale rate only skews the GBP figure by a
-# few percent; there is deliberately no live FX lookup in the cost path.
-USD_TO_GBP = Decimal("0.76")
-
 _MILLION = Decimal(1_000_000)
 
 
@@ -89,7 +83,3 @@ def cost_usd(model: str, usage: Usage) -> Decimal:
         + usage.cache_read_tokens * price.cache_read
     ) / _MILLION
     return tokens + usage.web_searches * WEB_SEARCH_USD_EACH
-
-
-def cost_gbp(model: str, usage: Usage) -> Decimal:
-    return cost_usd(model, usage) * USD_TO_GBP

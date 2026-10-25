@@ -11,7 +11,7 @@ Sprout discovers UK AI startups, groups them by a fixed 16-category taxonomy, an
 **Goals**
 - About 150 sourced profiles; quality measured on a hand-labelled golden set of 30.
 - Provenance over completeness. Every fact carries `source_url`, `retrieved_at`, `confidence`. "Not disclosed" is valid. A non-null value without a source is rejected in code.
-- Budgeted: about £20 total API spend, under about £10 per full run, a cap on every run, cost logged.
+- Budgeted: about US$26 total API spend, under about US$13 per full run, a cap on every run, cost logged.
 - Scraped content is untrusted data, never instructions.
 
 **Non-goals:** embeddings / "similar companies"; complete UK coverage; real-time freshness (weekly refresh).
@@ -88,7 +88,7 @@ flowchart TB
     CLI["python -m sprout.enrich (shim): resolve_company maps a name or company number to a company row"]
     subgraph AGENT["agents/ (anthropic is imported only by loop.py)"]
         ENR["enrich.py: system prompt, submit_profile schema and validation, enrich_company, enrich_with_result, CLI main, run_log stats"]
-        LOOP["loop.py: run_agent, stop-reason handling, iteration and GBP guards, one repair"]
+        LOOP["loop.py: run_agent, stop-reason handling, iteration and USD guards, one repair"]
         TOOLS["tools.py: build_tools, tool handlers, SourceLedger, untrusted-content wrapping"]
     end
     subgraph TOOLSET["Tools offered to the model"]
@@ -98,7 +98,7 @@ flowchart TB
         T4["submit_profile: custom, terminal, not strict, schema derived from CompanyProfile"]
     end
     LLM(["Anthropic API"])
-    COST["costs.py: price table, USD to GBP constant, Usage, cost_gbp"]
+    COST["costs.py: price table, Usage, cost_usd"]
     CHECK["validate_submission: Pydantic, source URL in ledger, funding note present"]
     DBW["db.py: save_profile (one save_fact per Sourced field, company.category), add_company_by_number, logged_run kind enrich"]
     SQL[("SQLite: company, fact, run_log")]
@@ -133,18 +133,18 @@ flowchart TB
 
 | Option | For | Against | Verdict |
 |---|---|---|---|
-| Server-side `web_search` (type string `web_search_20260209`, confirmed by live calls) | No extra key, adapter or tests; results are in the same response; `max_uses` is a hard cap | Billed per search on top of tokens (USD 10 per 1,000 is assumed from the `claude-api` skill and not yet checked against an invoice); results come back in blocks we do not wrap; adds `server_tool_use` and `pause_turn` handling; results arrive encrypted so snippet-only claims cannot be audited by us; not cacheable by us | Built. Measured average GBP 0.0105 per company against the GBP 0.05 target; search is about 70 percent of that |
+| Server-side `web_search` (type string `web_search_20260209`, confirmed by live calls) | No extra key, adapter or tests; results are in the same response; `max_uses` is a hard cap | Billed per search on top of tokens (USD 10 per 1,000 is assumed from the `claude-api` skill and not yet checked against an invoice); results come back in blocks we do not wrap; adds `server_tool_use` and `pause_turn` handling; results arrive encrypted so snippet-only claims cannot be audited by us; not cacheable by us | Built. Measured average USD 0.0138 per company against the USD 0.07 target; search is about 70 percent of that |
 | Custom search tool (Brave or Tavily) | Our own cache and rate limit; results wrapped as untrusted; cost may be lower | New key, adapter, tests and a pricing check | Not needed: cost is far below target. Reconsider only if auditability of snippets matters more than the extra adapter |
 | Server-side `web_fetch` | Zero code | Bypasses `WebFetcher` protections | Rejected |
 
 - **Swap point:** the tool list is built in one function, `build_tools(fetcher, ch, ledger)` in `agents/tools.py`; replacing the search entry with a custom handler touches that function, the price table and nothing else. The lever for lowering cost is `WEB_SEARCH_MAX_USES` (or caching search results), not the model.
 - **Server-side tool mechanics the loop handles:** the response may contain `server_tool_use` and `web_search_tool_result` blocks, which are appended to the history unchanged (they carry encrypted content needed on the next turn). `stop_reason: "pause_turn"` appends the assistant content and calls again without a user message, and counts as an iteration (covered by a scripted-client test only; not seen in the live runs recorded in the notes). Search errors (`max_uses_exceeded`, `unavailable`, and similar) arrive as result blocks, not exceptions; one live Tractable run had search unavailable and the model submitted honest nulls. `usage.server_tool_use.web_search_requests` is added to cost. URLs in search results reach the seen-URL ledger through the `on_search_urls` callback passed to `run_agent` (the loop stays generic; `enrich.py` supplies the callback).
-- **Model facts carried into Phase 2 (verified live on Haiku 5.5):** bulk `claude-haiku-5-5` is the default enrichment model, `claude-sonnet-5-5` is selectable (`--strong`, not tested live). The loop sends `tool_choice: {"type": "auto"}`, and the system prompt names `submit_profile` as the required final step. Forced `tool_choice` was reported to return 400 and was not re-tested. `submit_profile` is **not** `strict`: the API rejected the derived schema ("29 parameters with type arrays or anyOf, limit 16"), so Pydantic validation plus one repair attempt is the enforcement (the fallback the design allowed; see D18). Thinking tokens are billed as output, so they are inside `usage.output_tokens` and the GBP budget. Effort is passed as `output_config={"effort": ...}`, default `low` (CLI `--effort low|medium|high`).
+- **Model facts carried into Phase 2 (verified live on Haiku 5.5):** bulk `claude-haiku-5-5` is the default enrichment model, `claude-sonnet-5-5` is selectable (`--strong`, not tested live). The loop sends `tool_choice: {"type": "auto"}`, and the system prompt names `submit_profile` as the required final step. Forced `tool_choice` was reported to return 400 and was not re-tested. `submit_profile` is **not** `strict`: the API rejected the derived schema ("29 parameters with type arrays or anyOf, limit 16"), so Pydantic validation plus one repair attempt is the enforcement (the fallback the design allowed; see D18). Thinking tokens are billed as output, so they are inside `usage.output_tokens` and the USD budget. Effort is passed as `output_config={"effort": ...}`, default `low` (CLI `--effort low|medium|high`).
 - **Prompt caching (confirmed live):** the system block carries `cache_control: ephemeral` and so does a top-level `cache_control` on `messages.create`, which caches the growing conversation so each iteration re-reads earlier turns at the read price. Across the live runs about 455k tokens were written and 1.50M read, so `cache_creation_input_tokens > 0` holds. The tool list order is fixed because tool definitions sit at the start of the cached prefix.
 - **Prompt injection:** every custom tool result (page text, Companies House data) is wrapped in `<untrusted_content source="URL">...</untrusted_content>`, any opening or closing delimiter inside the text is neutralised before wrapping, results are truncated to 8,000 characters with a `[truncated]` marker, and the system prompt states that anything inside is data and never instructions. Search snippets arrive outside our wrapping, so the same system-prompt rule covers them. No tool the model can call writes anything; DB writes happen in our code after validation. Residual risk: `fetch_page` takes a model-chosen URL, so injected text could try to leak context through a query string. There are no secrets in context; an allow/deny list is Phase 5. No injection fixtures exist yet (Phase 5).
 - **Provenance enforced in code, beyond Pydantic (D16, built in `validate_submission`):** `retrieved_at` is not model output. The submit schema omits it and our code stamps it from the ledger (time the URL was fetched or seen in search). A `source_url` must be a URL the tools actually returned; matching ignores tracking params, fragments, host case and a trailing slash (a plain `https://x.com` versus `https://x.com/` mismatch caused false rejections before this was fixed). A URL the model produced from memory is rejected and fed back as a repair whose message lists up to 25 citable URLs. A funding fact (`total_raised_million_usd`, `valuation_million_usd`, `funding_rounds`) must carry a `note` with the original figure and currency. A source seen only in a search snippet and never fetched caps confidence at `medium`. The check applies to non-null values only; a null value with no source always passes.
 - **[AMBIGUOUS], resolved:** `submit_profile`'s schema is generated from `CompanyProfile` (`submit_profile_schema()`): `$ref`s are inlined, `name`, `news` and `retrieved_at` are removed, all remaining properties are made required, and the keywords `title`, `default`, `minimum`, `maximum`, `minLength`, `format` and `description` are dropped, so numeric bounds on `founded` and `amount_million_usd` are enforced by Pydantic only. Because strict mode refused the schema anyway, nothing relies on the API enforcing it.
-- **Caveats on the pilot:** the 10-company result (10/10 `submitted`, average GBP 0.0105) is the final pass; the first pass was 6/10 and the review of the profiles was done by the implementing agent, not the user. Non-determinism remains: an occasional run ends `invalid` or `refused`, and the model sometimes leaves funding amounts null for non-USD figures despite the prompt (safe but understates funding coverage).
+- **Caveats on the pilot:** the 10-company result (10/10 `submitted`, average USD 0.0138) is the final pass; the first pass was 6/10 and the review of the profiles was done by the implementing agent, not the user. Non-determinism remains: an occasional run ends `invalid` or `refused`, and the model sometimes leaves funding amounts null for non-USD figures despite the prompt (safe but understates funding coverage).
 
 ### 2.4 Phase 3: Multi-agent pipeline (planned)
 
@@ -452,10 +452,10 @@ Rules: `models.py` and `costs.py` depend on nothing in `sprout`; `sources/*` nev
 | `candidates.py` | Name and SIC heuristic | `assess()` | none |
 | `db.py` | SQLModel tables and writes | `init_db` (create tables, then additive `ALTER TABLE` for missing nullable columns), `upsert_company`, `save_fact`, `add_news_items`, `logged_run`, `save_profile`, `add_company_by_number` | failures logged in `run_log`, re-raised; non-additive schema change raises `RuntimeError` telling you to reset the DB |
 | `ingest.py` | Phase 1 orchestration | `python -m sprout.ingest` | exit code 1 on failed feeds |
-| `costs.py` | Price table, USD to GBP, `Usage`, GBP cost (pure) | `PRICES`, `USD_TO_GBP`, `WEB_SEARCH_USD_EACH`, `Usage`, `cost_usd`, `cost_gbp` | `UnknownModelError` for an unpriced model (fails closed) |
+| `costs.py` | Price table, `Usage`, USD cost (pure) | `PRICES`, `WEB_SEARCH_USD_EACH`, `Usage`, `cost_usd` | `UnknownModelError` for an unpriced model (fails closed) |
 | `agents/loop.py` | Generic tool-use loop; the only pipeline module importing `anthropic` | `run_agent`, `make_client`, `Budget`, `Tool`, `ToolOutcome`, `LoopResult` | never raises for API, tool or model problems: returns a `LoopResult.stop` code; `ValueError` from `Budget` for bad caps; `UnknownModelError` before the first call |
 | `agents/tools.py` | Tool specs, handlers, seen-URL ledger, untrusted wrapping | `build_tools`, `SourceLedger`, `wrap_untrusted` | handlers return error outcomes, never raise into the loop |
-| `agents/enrich.py` | Prompt, `submit_profile` schema and validation, persistence, `enrich` run_log row, CLI | `enrich_company`, `enrich_with_result`, `validate_submission`, `submit_profile_schema`, `resolve_company`, `main` | `EnrichmentFailed(stop, cost_gbp)` on any non-success; `CompanyNotFound` for the CLI; exit 0 ok, 1 any skip or failure, 2 missing Anthropic key |
+| `agents/enrich.py` | Prompt, `submit_profile` schema and validation, persistence, `enrich` run_log row, CLI | `enrich_company`, `enrich_with_result`, `validate_submission`, `submit_profile_schema`, `resolve_company`, `main` | `EnrichmentFailed(stop, cost_usd)` on any non-success; `CompanyNotFound` for the CLI; exit 0 ok, 1 any skip or failure, 2 missing Anthropic key |
 | `enrich.py` | `python -m sprout.enrich` shim | `main` re-export | see `agents/enrich.py` |
 | `app/queries.py` | Streamlit-free read queries | `search_companies`, `company_facts`, `search_news`, `parse_phases` | none |
 
@@ -467,22 +467,20 @@ Rules: `models.py` and `costs.py` depend on nothing in `sprout`; `sources/*` nev
 
 ```python
 # costs.py - pure: no I/O, no imports from sprout
-USD_TO_GBP = Decimal("0.76")   # approximation dated 2026-10-19, rounded up (see D14)
 @dataclass(frozen=True)
 class Price: input: Decimal; output: Decimal; cache_write: Decimal; cache_read: Decimal  # USD per million tokens
 PRICES: dict[str, Price]       # keyed by exact model ID (haiku-5-5, sonnet-5-5); WEB_SEARCH_USD_EACH = Decimal("0.01")
 @dataclass
 class Usage:                   # supports +, accumulated per run
     input_tokens: int; output_tokens: int; cache_read_tokens: int; cache_write_tokens: int; web_searches: int
-def cost_usd(model: str, usage: Usage) -> Decimal
-def cost_gbp(model: str, usage: Usage) -> Decimal   # raises UnknownModelError for an unpriced model
+def cost_usd(model: str, usage: Usage) -> Decimal   # raises UnknownModelError for an unpriced model
 
 # agents/loop.py - the only pipeline module importing anthropic
 class MessagesClient(Protocol):            # what the loop needs; the test seam
     messages: Any                          # .create(**kwargs) -> response with .content, .stop_reason, .usage
 def make_client(api_key: str) -> MessagesClient       # real anthropic.Anthropic, 120 s timeout, SDK retries on
 @dataclass(frozen=True)
-class Budget: max_iterations: int; max_gbp: Decimal; max_repairs: int = 1   # validated: iterations >= 1, gbp > 0
+class Budget: max_iterations: int; max_usd: Decimal; max_repairs: int = 1   # validated: iterations >= 1, usd > 0
 @dataclass(frozen=True)
 class Tool:
     spec: dict                             # sent to the API (custom tool or server-side tool type)
@@ -492,7 +490,7 @@ class Tool:
 class ToolOutcome: text: str; is_error: bool = False; payload: Any = None   # payload set => accepted submission
 @dataclass
 class LoopResult:
-    payload: Any | None; usage: Usage; cost_gbp: Decimal; iterations: int; repairs: int; tool_calls: dict[str, int]
+    payload: Any | None; usage: Usage; cost_usd: Decimal; iterations: int; repairs: int; tool_calls: dict[str, int]
     stop: Literal["submitted","invalid","max_iter","budget","no_submit","truncated","refused","error"]
     error: str | None
 def run_agent(client, *, model, system, messages, tools, budget, max_tokens, effort,
@@ -506,12 +504,12 @@ class SourceLedger:                               # URLs the tools returned, wit
 def wrap_untrusted(source_url: str, text: str, max_chars: int = 8_000) -> str    # delimiters, neutralise tags, truncate
 
 # agents/enrich.py
-DEFAULT_BUDGET = Budget(max_iterations=12, max_gbp=Decimal("0.10"))   # kept after the live run; MAX_OUTPUT_TOKENS = 6_000
+DEFAULT_BUDGET = Budget(max_iterations=12, max_usd=Decimal("0.13"))   # kept after the live run; MAX_OUTPUT_TOKENS = 6_000
 @dataclass(frozen=True)
 class Deps: client; fetcher; ch; settings; model: str; effort: str = "low"
 def enrich_company(session, company, deps, budget=DEFAULT_BUDGET) -> CompanyProfile   # raises EnrichmentFailed(stop, cost)
 def enrich_with_result(session, company, deps, budget=DEFAULT_BUDGET) -> tuple[CompanyProfile, LoopResult]
-def main(argv) -> int        # python -m sprout.enrich NAME_OR_NUMBER...  --strong  --max-gbp  --max-iterations  --effort  --show
+def main(argv) -> int        # python -m sprout.enrich NAME_OR_NUMBER...  --strong  --max-usd  --max-iterations  --effort  --show
 
 # db.py additions
 def save_profile(session, company, profile: CompanyProfile) -> None     # save_fact per Sourced field; company.category
@@ -530,11 +528,11 @@ def add_company_by_number(session, number: str, data: dict) -> Company   # for p
 | `max_tokens` | `truncated` (a cut-off `tool_use` input is not trusted). |
 | `refusal` | `refused`. |
 | SDK `APIError` after the SDK's own retries | `error`; usage so far is still returned. |
-| Guards | Checked before every call: iterations used >= `max_iterations` gives `max_iter`; spent >= `max_gbp` gives `budget`. On the last allowed iteration, or once spend reaches 80 percent of the cap, the next user message adds "budget nearly used, call submit_profile now". The GBP cap is soft by at most one response (cost is known only after a call); `max_tokens` bounds that overshoot, and tests assert the exact call count with a tiny cap. |
+| Guards | Checked before every call: iterations used >= `max_iterations` gives `max_iter`; spent >= `max_usd` gives `budget`. On the last allowed iteration, or once spend reaches 80 percent of the cap, the next user message adds "budget nearly used, call submit_profile now". The USD cap is soft by at most one response (cost is known only after a call); `max_tokens` bounds that overshoot, and tests assert the exact call count with a tiny cap. |
 
-Only a validated `submit_profile` carries facts, so on any non-`submitted` stop nothing is written to `fact` or `category`; the cost is still recorded. The only per-run caps are iterations, GBP, search `max_uses` (3) and the tool-result character cap.
+Only a validated `submit_profile` carries facts, so on any non-`submitted` stop nothing is written to `fact` or `category`; the cost is still recorded. The only per-run caps are iterations, USD, search `max_uses` (3) and the tool-result character cap.
 
-**[DRIFT]** Earlier text in this document (4.2, 4.7) also promised a per-run fetch cap and 4.3 promised "partial" facts on a cap stop. Neither exists: page fetches are bounded only by the iteration cap, and no partial profile is ever written. There is also no batch-level GBP cap: the CLI enforces `--max-gbp` per company and only prints the total, so a long target list can spend `n * max_gbp`. Add a batch cap in Phase 3's orchestrator.
+**[DRIFT]** Earlier text in this document (4.2, 4.7) also promised a per-run fetch cap and 4.3 promised "partial" facts on a cap stop. Neither exists: page fetches are bounded only by the iteration cap, and no partial profile is ever written. There is also no batch-level USD cap: the CLI enforces `--max-usd` per company and only prints the total, so a long target list can spend `n * max_usd`. Add a batch cap in Phase 3's orchestrator.
 
 **Other planned modules (Phases 3 and 4):**
 
@@ -602,7 +600,7 @@ erDiagram
         datetime started_at
         datetime finished_at
         string status
-        json stats "enrich runs: tokens, web searches, cost_gbp, stop, iterations, company_id"
+        json stats "enrich runs: tokens, web searches, cost_usd, stop, iterations, company_id"
         string error
     }
 ```
@@ -620,11 +618,11 @@ Phase 2 added exactly one schema change, `company.category` (shown in the diagra
  "stop": "submitted", "iterations": 6, "repairs": 0,
  "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0,
  "web_searches": 0, "tool_calls": {"fetch_page": 0, "lookup_companies_house": 0},
- "cost_gbp": 0.0, "usd_to_gbp": 0.76, "budget": {"max_iterations": 12, "max_gbp": 0.10},
+ "cost_usd": 0.0, "budget": {"max_iterations": 12, "max_usd": 0.13},
  "error": null}
 ```
 
-  Thinking tokens are inside `output_tokens`. Average cost per company is `SELECT avg(json_extract(stats, '$.cost_gbp')) FROM run_log WHERE kind='enrich'`; note that the dev DB also holds 8 `error` rows from the iteration phase, so filter on `stats.stop = 'submitted'` for the headline figure (measured: GBP 0.0105 over the final 10-company run, GBP 0.0102 over 22 successful runs). Per-company status is not a column until `enrichment_state` (Phase 3, which will reference `run_log.id`).
+  Thinking tokens are inside `output_tokens`. Average cost per company is `SELECT avg(json_extract(stats, '$.cost_usd')) FROM run_log WHERE kind='enrich'`; note that the dev DB also holds 8 `error` rows from the iteration phase, so filter on `stats.stop = 'submitted'` for the headline figure (measured: USD 0.0138 over the final 10-company run, USD 0.0134 over 22 successful runs). Per-company status is not a column until `enrichment_state` (Phase 3, which will reference `run_log.id`).
 - **Profile persistence (built as designed):** `save_profile` iterates `CompanyProfile.model_fields`, calling `save_fact` for every `Sourced` field (`website`, `hq`, `founded`, `stage`, `total_raised_million_usd`, `valuation_million_usd`, `funding_rounds`, `business_model`, `target_user`, `one_liner`), so a new `Sourced` field persists with no db change. "Not disclosed" is stored as a NULL-value fact so the dashboard can tell "researched, nothing found" from "never tried"; the winning-value rule (4.1) must ignore a NULL fact when a valued one exists. `news` is not persisted in Phase 2 (`news_item` has no company link until Phase 3) and `name` is ignored (identity is the row). A re-run overwrites facts from the same URL and adds facts from new URLs; older facts from URLs the new run no longer cites remain. **[DRIFT]** consequence not stated before: a field that was valued in run 1 and null in run 2 ends with both a valued fact and a NULL-value fact, and `company.category` is simply overwritten, so the winning-value rule (4.1) is needed before any front end reads facts. `load_profile` is deferred to Phase 3 or 4; Phase 2 tests read back through `fact` rows.
 
 Planned additions (Phase 3 and later):
@@ -654,7 +652,7 @@ erDiagram
         datetime last_ok_at
         string error
         int run_log_id FK
-        float cost_gbp
+        float cost_usd
     }
 ```
 
@@ -676,7 +674,7 @@ erDiagram
 - Deterministic supervisor selects companies and runs workers with `asyncio` under a concurrency limit.
 - Per company: enrich, then classify (bulk model), news, then verify (only for funding or stage claims). Classifier and news can run in parallel.
 - Models: bulk `claude-haiku-5-5` for extraction/classification; strong `claude-sonnet-5-5` for verification/synthesis; overridable via `SPROUT_BULK_MODEL` / `SPROUT_STRONG_MODEL`. IDs were taken from the `claude-api` skill on 2026-10-06; live Phase 2 calls succeeded with `claude-haiku-5-5` (the default). `claude-sonnet-5-5` (`--strong`) is priced but was not run live. Any unpriced override fails closed in `costs.py`.
-- Loop (built in Phase 2, see 2.3 and 3.3): `tool_choice: auto` plus a prompt instruction naming `submit_profile`, explicit effort, thinking tokens in budget, prompt-cached prefix and conversation, `pause_turn` and `server_tool_use` handled, per-run caps of iterations, GBP and searches (`max_uses`). No per-run fetch cap and no batch-level cap (see the [DRIFT] note in 3.3).
+- Loop (built in Phase 2, see 2.3 and 3.3): `tool_choice: auto` plus a prompt instruction naming `submit_profile`, explicit effort, thinking tokens in budget, prompt-cached prefix and conversation, `pause_turn` and `server_tool_use` handled, per-run caps of iterations, USD and searches (`max_uses`). No per-run fetch cap and no batch-level cap (see the [DRIFT] note in 3.3).
 - Resume: the unit of work is a company; one transaction per company; fresh `ok` rows are skipped.
 - A company failure sets status `failed` and the run continues. Target at least 85% `ok`.
 
@@ -697,14 +695,14 @@ erDiagram
 | LLM | SDK `APIError` after SDK retries (429/5xx) | Stop `error`; usage so far logged; the `run_log` row is `status=error` and the CLI continues with the next target |
 | LLM | Invalid structured output | One repair attempt (Pydantic errors as compact field paths and messages, not the whole input echoed), else stop `invalid`; nothing persisted |
 | LLM | `source_url` not in the seen-URL ledger, funding fact without a `note` | Treated as invalid output: same single repair attempt, and the error lists up to 25 citable URLs. Seen live: invented homepages were rejected and repaired |
-| LLM | Iteration or £ cap | Stop with `max_iter` or `budget`; nothing is persisted (no partial profile); `run_log` row keeps stats and cost. **[DRIFT]** the earlier "keep partial facts, mark `partial`" is not implemented. Phase 3 `enrichment_state` will need to decide whether to retry or accept partial results |
+| LLM | Iteration or USD cap | Stop with `max_iter` or `budget`; nothing is persisted (no partial profile); `run_log` row keeps stats and cost. **[DRIFT]** the earlier "keep partial facts, mark `partial`" is not implemented. Phase 3 `enrichment_state` will need to decide whether to retry or accept partial results |
 | LLM | Sources disagree | Record both, lower confidence, flag |
 | MCP tool | Bad input or DB error | Compact actionable text; never write to stdout |
 
 ### 4.4 Testing
 - Unit tests for models, candidates, DB helpers. Adapter tests with `httpx.MockTransport`. `streamlit.testing` smoke tests. 169 tests pass (re-run 2026-10-19); the only live test (`-m live`, `tests/test_live_api.py`) is the Phase 0 hello call and is skipped without a key.
 - **Fake-client seam (built):** `run_agent` takes any object with `messages.create(**kwargs)`, and reads only `content[*].type/id/name/input/text`, `stop_reason` and `usage.*` (including `server_tool_use.web_search_requests`). `tests/fakes.py` provides a `ScriptedClient` that returns queued responses (or raises a queued exception) built from `SimpleNamespace` objects with helpers (`text_turn`, `tool_use_turn`, `server_search_turn`, `pause_turn`, plus `response`, `usage`, `search_blocks`) and records every request, with a snapshot of the message list, so tests can assert on cache markers, `tool_choice` and message history. It raises if the loop makes more calls than scripted. The loop appends `response.content` to history unchanged, which works for both SDK and fake objects. Tool handlers are tested with the existing `httpx.MockTransport` fixtures through `WebFetcher` and `CompaniesHouseClient`.
-- **Phase 2 tests (built):** `test_costs.py` (exact Decimal arithmetic, fail-closed unknown model, usage addition), `test_agent_loop.py` (cache markers, repair path, second invalid gives `invalid`, exact iteration cap with wrap-up notice, tiny GBP cap, 80 percent wrap-up, `pause_turn`, `end_turn` reminder, terminal stop reasons, truncated `tool_use` not executed, handler errors and unknown tools, `APIError` keeps usage, unpriced model fails before any call, budget validation), `test_agent_tools.py` (wrapper, ledger, tool order, server-side search entry, fetch and Companies House tools), `test_enrich.py` (schema derivation, provenance checks, happy path, repair, no persistence on failure with cost recorded, caps, re-run overwrite, `resolve_company`, CLI), and `test_db.py` additions (`save_profile`, `add_company_by_number`, additive `init_db`).
+- **Phase 2 tests (built):** `test_costs.py` (exact Decimal arithmetic, fail-closed unknown model, usage addition), `test_agent_loop.py` (cache markers, repair path, second invalid gives `invalid`, exact iteration cap with wrap-up notice, tiny USD cap, 80 percent wrap-up, `pause_turn`, `end_turn` reminder, terminal stop reasons, truncated `tool_use` not executed, handler errors and unknown tools, `APIError` keeps usage, unpriced model fails before any call, budget validation), `test_agent_tools.py` (wrapper, ledger, tool order, server-side search entry, fetch and Companies House tools), `test_enrich.py` (schema derivation, provenance checks, happy path, repair, no persistence on failure with cost recorded, caps, re-run overwrite, `resolve_company`, CLI), and `test_db.py` additions (`save_profile`, `add_company_by_number`, additive `init_db`).
 - **[DRIFT]** the planned `-m live` single-company enrichment test was deliberately not added, so a plain `pytest` with a key never spends money. Live behaviour (prompt caching, schema rejection, the 10-company run) is evidenced only by the manual runs in the implementation notes; `--strong`, forced `tool_choice` and `pause_turn` have no live evidence.
 - Planned later: MCP tools tested directly on a temp DB; injection and SSRF fixtures as plain pytest cases.
 - Golden-set evals run on demand, not per push (cost).
@@ -713,7 +711,7 @@ erDiagram
 ### 4.5 Configuration
 - Env plus `.env` via `get_settings()`: `ANTHROPIC_API_KEY`, `COMPANIES_HOUSE_API_KEY`, `SPROUT_BULK_MODEL`, `SPROUT_STRONG_MODEL`, `SPROUT_DB_PATH`, `SPROUT_CACHE_DIR`, `SPROUT_ENABLE_ACTIONS`.
 - Secrets never committed; `.env`, `*.db`, `.cache/` are gitignored.
-- Phase 2 added per-run £ and iteration caps (`--max-gbp`, `--max-iterations`, defaults GBP 0.10 and 12 in `agents/enrich.py`), `--effort` and `--strong`, and a price table and USD to GBP constant in `costs.py` (code, not env, so a run is reproducible from the commit). No new env vars or dependencies. No search-backend setting: Phase 2 hard-wires server-side search (D13) and the swap point is `build_tools`.
+- Phase 2 added per-run USD and iteration caps (`--max-usd`, `--max-iterations`, defaults USD 0.13 and 12 in `agents/enrich.py`), `--effort` and `--strong`, and a price table in `costs.py` (code, not env, so a run is reproducible from the commit). No new env vars or dependencies. No search-backend setting: Phase 2 hard-wires server-side search (D13) and the swap point is `build_tools`.
 - No migrations framework. Phase 2 added additive-column handling in `init_db` (D15, nullable columns only); delete `data/sprout.db` for non-additive changes, or adopt Alembic by the end of Phase 3 if one is needed.
 
 ### 4.6 Security
@@ -724,8 +722,8 @@ erDiagram
 - Streamlit actions are off unless `SPROUT_ENABLE_ACTIONS=1`; public deployments are read-only with no keys.
 
 ### 4.7 Cost and observability
-- `costs.py` (built) converts API `usage` (input, output including thinking, cache read, cache write, plus per-search charges for server-side `web_search`) to GBP with a documented USD to GBP constant (0.76, an approximation dated 2026-10-19). It computes cost only; the caps are enforced in `loop.py` (`Budget`) against the running `Usage` total. Haiku 5.5 is priced at the lower rate card; its prompts over 100K tokens would double, which per-call prompts stay well below because tool results are capped (not exercised live).
-- Search is billed separately from tokens, so `web_searches` is its own `stats` field and `max_uses` is a hard per-run cap. Measured: about 70 percent of a run's cost is the single search at an assumed US$0.01. That rate is not yet confirmed against a console invoice, so the GBP figures inherit that uncertainty.
+- `costs.py` (built) converts API `usage` (input, output including thinking, cache read, cache write, plus per-search charges for server-side `web_search`) to USD. It computes cost only; the caps are enforced in `loop.py` (`Budget`) against the running `Usage` total. Haiku 5.5 is priced at the lower rate card; its prompts over 100K tokens would double, which per-call prompts stay well below because tool results are capped (not exercised live).
+- Search is billed separately from tokens, so `web_searches` is its own `stats` field and `max_uses` is a hard per-run cap. Measured: about 70 percent of a run's cost is the single search at an assumed US$0.01. That rate is not yet confirmed against a console invoice, so the USD figures inherit that uncertainty.
 - `run_log.stats` is today's observability record (shape in 3.4). Add structured logging to stderr.
 
 ## 5. Key design decisions
@@ -744,8 +742,8 @@ erDiagram
 | D10 | Shared service layer for dashboard and MCP | One rule set for winning value and "not disclosed" | Requires extracting `queries` |
 | D11 | Read-only deployments ship a snapshot DB | Free hosts lack persistent disk | Delivery mechanism must be agreed (A9) |
 | D12 | `refresh_company` is the only model-invokable write, capped | Limits blast radius | Needs cooldown and status response |
-| D13 | Phase 2: server-side `web_search`; custom `fetch_page` (wraps `WebFetcher`) and `lookup_companies_house`; no server-side `web_fetch` | Keeps robots, SSRF, size and cache protections on every page read; no new key or adapter | Search is billed per query and returns unwrapped, encrypted snippets. **Built; holds** after the 10-company run (average GBP 0.0105, search about 70 percent of it), so no fallback to a custom backend. Phase 4's MCP swap of `fetch_page` stays open (A1) |
-| D14 | `costs.py` is a pure module (price table keyed by exact model ID, per-search price, `Usage`, `cost_gbp`). USD to GBP is one constant in that file, dated in a comment, rounded up so caps are not under-counted, and written to `run_log.stats` on every run. Caps are enforced in `loop.py`, not `costs.py` | Prices change with model IDs, so they are code that is tested and reviewed, not env; the rate moves slowly relative to the GBP 0.05 target | A stale rate drifts; no live FX lookup (a network call in the cost path is worse). Unpriced model fails closed. **Built:** `USD_TO_GBP = 0.76` is an unsourced approximation dated 2026-10-19, and the US$0.01 per search is unconfirmed against an invoice |
+| D13 | Phase 2: server-side `web_search`; custom `fetch_page` (wraps `WebFetcher`) and `lookup_companies_house`; no server-side `web_fetch` | Keeps robots, SSRF, size and cache protections on every page read; no new key or adapter | Search is billed per query and returns unwrapped, encrypted snippets. **Built; holds** after the 10-company run (average USD 0.0138, search about 70 percent of it), so no fallback to a custom backend. Phase 4's MCP swap of `fetch_page` stays open (A1) |
+| D14 | `costs.py` is a pure module (price table keyed by exact model ID, per-search price, `Usage`, `cost_usd`), written to `run_log.stats` on every run. Caps are enforced in `loop.py`, not `costs.py` | Prices change with model IDs, so they are code that is tested and reviewed, not env; prices move slowly relative to the USD 0.07 target | Unpriced model fails closed. **Built:** the US$0.01 per search is unconfirmed against an invoice |
 | D15 | Additive-column step in `init_db` instead of deleting the DB or adding Alembic now | Keeps ingest data and paid enrichment output; about 20 lines; covers Phase 3 additive changes | Cannot rename, retype or add constraints; those need a reset or Alembic. **Built**, but nullable columns only (the design also allowed a constant default) |
 | D16 | Provenance is stamped by code: `retrieved_at` from the seen-URL ledger, `source_url` must be a URL a tool returned, funding facts need a `note` | The prompt cannot be the only defence against invented sources or timestamps (top risk) | A real but wrong URL still passes; verifier and evals cover that (a claimed website can be wrong, e.g. Airborne Robotics). Slightly stricter than the plan. **Built** in `validate_submission`; ledger matching ignores trailing slash, host case, fragments and tracking params |
 | D17 | `loop.py` is generic: terminal tools, handler callbacks, duck-typed client protocol; `enrich.py` owns the profile-specific checks | One loop can serve classifier, news and verifier agents in Phase 3 | The generic `Tool` and `ToolOutcome` types are an abstraction paid for before the second user; kept because the fake-client seam needs the boundary anyway. **Built.** The `on_search_urls` callback is the one place `enrich.py` reaches into the loop; no second user exists yet |
@@ -759,9 +757,9 @@ erDiagram
 |---|---|---|
 | Hallucinated or misattributed funding | High | Code-enforced sources, verifier, fabricated-funding gate at most 3%, pass the company number for disambiguation |
 | Candidate pool noise inflates cost | High | Rank by `candidate_score`, cheap pre-screen, pilot 10-20 companies first |
-| Cost overrun (measured GBP 0.0105 per company in Phase 2 against a GBP 0.05 target; under £10 for 150 in Phase 3; £20 total) | Medium (was High) | Hard caps per company, bulk routing, prompt caching. No batch-level cap yet (see 3.3 [DRIFT]); add one before the orchestrator runs 150 companies. Measurement rests on an unconfirmed search price and an approximate FX rate |
+| Cost overrun (measured USD 0.0138 per company in Phase 2 against a USD 0.07 target; under US$13 for 150 in Phase 3; US$26 total) | Medium (was High) | Hard caps per company, bulk routing, prompt caching. No batch-level cap yet (see 3.3 [DRIFT]); add one before the orchestrator runs 150 companies. Measurement rests on an unconfirmed search price |
 | Prompt injection via pages | High | Delimiters, no write tools, validation, fixtures, existing size/type limits |
-| Runaway agent loops | Medium | Iteration and £ caps, per-run `max_uses` and fetch limits, last-iteration wrap-up message, tested with a tiny cap |
+| Runaway agent loops | Medium | Iteration and USD caps, per-run `max_uses` and fetch limits, last-iteration wrap-up message, tested with a tiny cap |
 | Server-side search billing eats the per-company target | Low (measured) | `max_uses` is 3, searches are counted in `stats`; search is about 70 percent of cost but the total is a fifth of target. Check the first console invoice for the US$10 per 1,000 assumption |
 | `pause_turn` or `server_tool_use` blocks mishandled (dropped blocks give API 400s or lost context) | Medium | Append `response.content` unchanged; scripted-client tests for pause and search turns. `server_tool_use` blocks worked live; `pause_turn` has not been seen live |
 | Same-name company confusion | High | Pass company number, incorporation date, SIC codes and locality in the user message; `lookup_companies_house` result is the identity anchor; prompt says to reject pages that do not match |
@@ -783,7 +781,7 @@ erDiagram
 ### 6.2 Plan ambiguities
 - **A1** Search/fetch tooling differs across Phases 1, 2 and 4. **Phase 2 part resolved and built (D13):** server-side search only, all page reads through `WebFetcher`. Still open for Phase 4: replacing `fetch_page` with an MCP server (see 2.5).
 - **A2** Candidates: "~200" vs "at least 200" vs 876 loaded vs 150 enriched; no rule for choosing the 150.
-- **A3** Cost arithmetic leaves no budget for evals (LLM judge, repeated runs) or prompt iteration. Phase 2 evidence: all live development spend was about GBP 0.32 (30 enrich runs) against the roughly GBP 3 ceiling, so the proposed split leaves room; the GBP 4 eval and GBP 3 reserve lines still need your confirmation.
+- **A3** Cost arithmetic leaves no budget for evals (LLM judge, repeated runs) or prompt iteration. Phase 2 evidence: all live development spend was about USD 0.42 (30 enrich runs) against the roughly USD 4 ceiling, so the proposed split leaves room; the USD 5 eval and USD 4 reserve lines still need your confirmation.
 - **A4** Phase 3 per-company status has no home in the Phase 1 schema (`enrichment_state`).
 - **A5** News has no company link, big-news score or type (`company_news`).
 - **A6** Phase 6 "funding history" is not supported by the model.
@@ -803,9 +801,9 @@ erDiagram
 1. **Phase 2 (done; items below were open before it):**
    - *Resolved and built:* search backend (A1, D13); costs and FX constant (D14); `category` reaching the dev DB (D15); provenance enforced in code (D16); fake-client seam and loop contract (3.3, 4.4); injection handling (2.3, 4.6); `strict` schema question (not accepted, D18); `tool_choice: auto`, effort shape (`output_config`), top-level `cache_control` and the `web_search_20260209` type string, all confirmed by live calls on Haiku 5.5; model IDs `claude-haiku-5-5` confirmed live.
    - *Settled with a proposal (D9):* no eval harness in Phase 2. The 10-company check was a manual review recorded in `implementation-notes.md`. A minimal harness is pulled forward to the start of Phase 3, before the multi-agent split is judged.
-   - *Still needs you:* review the 10 profiles yourself (the existing review was by the implementing agent); check the first console invoice against US$10 per 1,000 searches; confirm or source `USD_TO_GBP = 0.76`; decide whether `data/sprout.db` stays tracked by git; confirm the GBP split for A3. The Phase 0 hello and `pytest -m live` criterion is not recorded as run in the notes (live enrichment calls did succeed with the configured key and model).
+   - *Still needs you:* review the 10 profiles yourself (the existing review was by the implementing agent); check the first console invoice against US$10 per 1,000 searches; decide whether `data/sprout.db` stays tracked by git; confirm the USD split for A3. The Phase 0 hello and `pytest -m live` criterion is not recorded as run in the notes (live enrichment calls did succeed with the configured key and model).
    - *Not tested live:* `--strong` (Sonnet 5.5), forced `tool_choice` on Haiku 5.5, the over-100K-token price tier, `pause_turn`, and the minimum cacheable prefix (caching did work in practice).
-2. **Before Phase 3:** schema additions (`enrichment_state`, `company_news`); a batch-level GBP cap and retry policy; the winning-value rule (A17); candidate pre-screen and selection of 150 (A2); concurrency model for the sync client; migration approach.
+2. **Before Phase 3:** schema additions (`enrichment_state`, `company_news`); a batch-level USD cap and retry policy; the winning-value rule (A17); candidate pre-screen and selection of 150 (A2); concurrency model for the sync client; migration approach.
 3. **Before Phase 4:** extract the service layer; define the winning-value rule; define `refresh_company` (A14).
 4. **Before Phases 6-7:** snapshot delivery (A9); data licensing and robots recheck.
 
@@ -815,7 +813,7 @@ erDiagram
 |---|---|---|---|
 | 0 Setup and definitions | 2 | Done, one criterion unverified | Claude hello call unverified (no key then); CI action versions unconfirmed |
 | 1 Data foundations | 6 | Done (876 candidates, 115 news items, second run made 0 HTTP requests; the DB inspected in Phase 2 held 305 companies, now 314, see notes) | Candidate quality review |
-| 2 Single-company enrichment | 8 | Done, with caveats (169 tests pass, ruff clean; 10/10 live pilot, average GBP 0.0105 per company) | Your review of the 10 profiles; invoice check of the search price and FX constant; tiny-cap criterion verified with mocks only; no `-m live` enrichment test; `--strong` untested live; no batch-level cap; `data/sprout.db` tracked by git |
+| 2 Single-company enrichment | 8 | Done, with caveats (169 tests pass, ruff clean; 10/10 live pilot, average USD 0.0138 per company) | Your review of the 10 profiles; invoice check of the search price; tiny-cap criterion verified with mocks only; no `-m live` enrichment test; `--strong` untested live; no batch-level cap; `data/sprout.db` tracked by git |
 | 3 Multi-agent pipeline | 8 | Not started | Everything plus schema additions; `loop.py`, `tools.py` pattern and `costs.py` are ready to reuse (D17) |
 | 4 MCP server | 6 | Not started (`mcp` dependency installed) | Everything; `app/queries.py` seeds the shared layer |
 | 5 Evals and guardrails | 6 | Not started (partial SSRF protections in `web.py`) | Golden set, `run_evals`, fixtures, allow/deny list, judge |

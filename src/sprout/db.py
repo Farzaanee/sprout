@@ -229,6 +229,23 @@ def add_company_by_number(session: Session, number: str, data: dict[str, Any]) -
     return company
 
 
+def delete_profile(session: Session, company: Company) -> int:
+    """Delete every stored `fact` row for a company and clear its `category`. Returns rows deleted.
+
+    For re-enriching a company under a changed schema: old facts persist under their old field
+    names (`save_fact` never deletes), so a straight re-run leaves them alongside the new ones.
+    """
+    if company.id is None:
+        raise ValueError("company must be saved before its profile can be deleted")
+    rows = session.exec(select(Fact).where(Fact.company_id == company.id)).all()
+    for row in rows:
+        session.delete(row)
+    company.category = None
+    session.add(company)
+    session.flush()
+    return len(rows)
+
+
 def save_profile(session: Session, company: Company, profile: CompanyProfile) -> None:
     """Persist a validated profile: one fact per `Sourced` field plus `company.category`.
 

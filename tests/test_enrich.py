@@ -228,7 +228,8 @@ def test_happy_path_persists_facts_category_and_run_stats(session, company, deps
     assert (stats["input_tokens"], stats["output_tokens"]) == (1200, 300)
     assert (stats["cache_write_tokens"], stats["web_searches"]) == (4000, 1)
     assert stats["tool_calls"] == {"submit_profile": 1}
-    assert stats["cost_gbp"] > 0 and stats["budget"] == {"max_iterations": 12, "max_gbp": 0.1}
+    assert stats["cost_usd"] > 0
+    assert stats["budget"] == {"max_iterations": 12, "max_usd": 0.13}
     first = client.requests[0]
     assert [t.get("name") for t in first["tools"]] == [
         "web_search",
@@ -269,13 +270,14 @@ def test_invalid_after_repair_writes_nothing_but_records_the_cost(session, compa
     )
     with pytest.raises(EnrichmentFailed) as err:
         enrich_company(session, company, deps_for(client))
-    assert err.value.stop == "invalid" and err.value.cost_gbp > 0
+    assert err.value.stop == "invalid" and err.value.cost_usd > 0
     session.refresh(company)
     assert company.category is None
     assert facts_of(session, company) == {}
     (run,) = runs(session)
     assert run.status == "error" and "invalid" in run.error
-    assert run.stats["stop"] == "invalid" and run.stats["cost_gbp"] > 0
+    assert run.stats["stop"] == "invalid"
+    assert run.stats["cost_usd"] > 0
     assert run.stats["input_tokens"] == 2000
 
 
@@ -293,17 +295,17 @@ def test_funding_without_note_goes_through_repair(session, company, deps_for):
     assert stored["total_raised_million_usd"].note == "Reported as £5m"
 
 
-def test_tiny_gbp_cap_stops_the_loop_and_logs_the_spend(session, company, deps_for):
+def test_tiny_usd_cap_stops_the_loop_and_logs_the_spend(session, company, deps_for):
     client = ScriptedClient(
         *[tool_use_turn(("fetch_page", {"url": "https://x.example"}), input=5000) for _ in range(5)]
     )
-    budget = Budget(max_iterations=12, max_gbp=Decimal("0.000001"))
+    budget = Budget(max_iterations=12, max_usd=Decimal("0.000001"))
     with pytest.raises(EnrichmentFailed) as err:
         enrich_company(session, company, deps_for(client), budget)
     assert err.value.stop == "budget" and client.calls == 1
     (run,) = runs(session)
     assert run.stats["stop"] == "budget" and run.stats["iterations"] == 1
-    assert run.stats["input_tokens"] == 5000 and run.stats["cost_gbp"] > 0
+    assert run.stats["input_tokens"] == 5000 and run.stats["cost_usd"] > 0
 
 
 def test_tiny_iteration_cap(session, company, deps_for):
@@ -411,10 +413,11 @@ def cli_env(tmp_path, monkeypatch):
 def test_cli_enriches_and_prints_a_summary(cli_env, monkeypatch, capsys):
     client = ScriptedClient(server_search_turn([SEEN], ("submit_profile", submission())))
     monkeypatch.setattr(enrich_mod, "make_client", lambda key: client)
-    assert enrich_cli.main(["12345678", "--max-gbp", "0.05", "--max-iterations", "4"]) == 0
+    assert enrich_cli.main(["12345678", "--max-usd", "0.05", "--max-iterations", "4"]) == 0
     out = capsys.readouterr().out
     assert "ok   ACME AI LTD" in out and "category='AI models and applications'" in out
-    assert "sourced_facts=3" in out and "total cost GBP" in out
+    assert "sourced_facts=3" in out and "cost=USD" in out
+    assert "total cost USD" in out
 
 
 def test_cli_uses_the_strong_model_and_reports_failures(cli_env, monkeypatch, capsys):
@@ -424,7 +427,23 @@ def test_cli_uses_the_strong_model_and_reports_failures(cli_env, monkeypatch, ca
     captured = capsys.readouterr()
     assert client.requests[0]["model"] == "claude-sonnet-5-5"
     assert "FAIL ACME AI LTD" in captured.err and "no_submit" in captured.err
+    assert "cost=USD" in captured.err
     assert "skip nobody-here" in captured.err
+
+
+def test_cli_reset_deletes_existing_facts_before_enriching(cli_env, monkeypatch, capsys):
+    engine = get_engine(cli_env.db_path)
+    with Session(engine) as s:
+        company = s.exec(select(Company).where(Company.company_number == "12345678")).one()
+        enrich_mod.save_profile(
+            s, company, enrich_mod.CompanyProfile(name=company.name, category=Category.OTHER)
+        )
+        s.commit()
+
+    client = ScriptedClient(server_search_turn([SEEN], ("submit_profile", submission())))
+    monkeypatch.setattr(enrich_mod, "make_client", lambda key: client)
+    assert enrich_cli.main(["12345678", "--reset"]) == 0
+    assert "reset ACME AI LTD: deleted" in capsys.readouterr().err
 
 
 def test_cli_without_an_anthropic_key_exits_2(cli_env, monkeypatch, capsys):

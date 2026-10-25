@@ -2,8 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from sprout import costs
-from sprout.costs import UnknownModelError, Usage, cost_gbp, cost_usd
+from sprout.costs import UnknownModelError, Usage, cost_usd
 
 
 def test_haiku_cost_is_exact_decimal_arithmetic():
@@ -15,7 +14,6 @@ def test_haiku_cost_is_exact_decimal_arithmetic():
     )
     # 0.10 + 0.50 + 0.125 + 0.01 USD per million of each
     assert cost_usd("claude-haiku-5-5", usage) == Decimal("0.735")
-    assert cost_gbp("claude-haiku-5-5", usage) == Decimal("0.735") * costs.USD_TO_GBP
 
 
 def test_sonnet_prices_and_web_searches():
@@ -26,7 +24,7 @@ def test_sonnet_prices_and_web_searches():
 
 def test_unknown_model_fails_closed():
     with pytest.raises(UnknownModelError, match="claude-nope"):
-        cost_gbp("claude-nope", Usage())
+        cost_usd("claude-nope", Usage())
 
 
 def test_usage_adds_every_field():
@@ -35,4 +33,4 @@ def test_usage_adds_every_field():
 
 
 def test_zero_usage_costs_nothing():
-    assert cost_gbp("claude-haiku-5-5", Usage()) == 0
+    assert cost_usd("claude-haiku-5-5", Usage()) == 0

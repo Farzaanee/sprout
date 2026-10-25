@@ -147,6 +147,35 @@ def test_save_profile_requires_a_saved_company(session):
         save_profile(session, Company(name="x"), CompanyProfile(name="x"))
 
 
+def test_delete_profile_clears_facts_and_category(session):
+    from sprout.db import delete_profile, save_profile
+    from sprout.models import Category, CompanyProfile
+
+    company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
+    profile = CompanyProfile(
+        name="Acme AI Ltd",
+        category=Category.ROBOTICS_AND_AUTOMATION,
+        hq=Sourced[str](value="London", source_url="https://example.com/a"),
+    )
+    save_profile(session, company, profile)
+    session.commit()
+
+    deleted = delete_profile(session, company)
+    session.commit()
+
+    assert deleted == 10  # every Sourced field on CompanyProfile (name, category, news excluded)
+    assert session.exec(select(Fact).where(Fact.company_id == company.id)).all() == []
+    session.refresh(company)
+    assert company.category is None
+
+
+def test_delete_profile_requires_a_saved_company(session):
+    from sprout.db import delete_profile
+
+    with pytest.raises(ValueError):
+        delete_profile(session, Company(name="x"))
+
+
 def test_add_company_by_number_creates_a_row_from_a_company_profile(session):
     from sprout.db import add_company_by_number
 

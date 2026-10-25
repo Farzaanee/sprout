@@ -4,7 +4,7 @@ This is the only pipeline module that imports `anthropic`, so SDK drift, error t
 test seam live in one file. The loop is generic: tools are plain specs plus handlers, a terminal
 tool ends the run, and the caller owns what a valid submission means.
 
-Guards are checked before every API call, so the iteration cap is exact and the GBP cap is soft
+Guards are checked before every API call, so the iteration cap is exact and the USD cap is soft
 by at most one response (cost is only known after the call; `max_tokens` bounds the overshoot).
 """
 
@@ -16,7 +16,7 @@ from typing import Any, Literal, Protocol
 
 import anthropic
 
-from sprout.costs import Usage, cost_gbp
+from sprout.costs import Usage, cost_usd
 
 Stop = Literal[
     "submitted", "invalid", "max_iter", "budget", "no_submit", "truncated", "refused", "error"
@@ -49,14 +49,14 @@ def make_client(api_key: str) -> MessagesClient:
 @dataclass(frozen=True)
 class Budget:
     max_iterations: int
-    max_gbp: Decimal
+    max_usd: Decimal
     max_repairs: int = 1
 
     def __post_init__(self) -> None:
         if self.max_iterations < 1:
             raise ValueError("max_iterations must be at least 1")
-        if self.max_gbp <= 0:
-            raise ValueError("max_gbp must be positive")
+        if self.max_usd <= 0:
+            raise ValueError("max_usd must be positive")
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,7 @@ class Tool:
 class LoopResult:
     payload: Any | None = None
     usage: Usage = field(default_factory=Usage)
-    cost_gbp: Decimal = Decimal(0)
+    cost_usd: Decimal = Decimal(0)
     iterations: int = 0
     repairs: int = 0
     tool_calls: dict[str, int] = field(default_factory=dict)
@@ -141,7 +141,7 @@ def run_agent(
     effort: str,
     on_search_urls: Callable[[list[str]], None] | None = None,
 ) -> LoopResult:
-    cost_gbp(model, Usage())  # fail closed on an unpriced model before spending anything
+    cost_usd(model, Usage())  # fail closed on an unpriced model before spending anything
     by_name = {t.spec["name"]: t for t in tools}
     specs = [t.spec for t in tools]
     history = list(messages)
@@ -158,11 +158,11 @@ def run_agent(
     while True:
         if result.iterations >= budget.max_iterations:
             return finish("max_iter", f"iteration cap of {budget.max_iterations} reached")
-        if result.cost_gbp >= budget.max_gbp:
-            return finish("budget", f"GBP cap of {budget.max_gbp} reached")
+        if result.cost_usd >= budget.max_usd:
+            return finish("budget", f"USD cap of {budget.max_usd} reached")
         if pending:
             last_iteration = result.iterations + 1 >= budget.max_iterations
-            if last_iteration or result.cost_gbp >= budget.max_gbp * WRAP_UP_FRACTION:
+            if last_iteration or result.cost_usd >= budget.max_usd * WRAP_UP_FRACTION:
                 pending.append({"type": "text", "text": WRAP_UP_NOTICE})
             history.append({"role": "user", "content": pending})
             pending = []
@@ -185,7 +185,7 @@ def run_agent(
 
         result.iterations += 1
         result.usage = result.usage + _usage_of(response)
-        result.cost_gbp = cost_gbp(model, result.usage)
+        result.cost_usd = cost_usd(model, result.usage)
         content = list(response.content)
         if content:
             history.append({"role": "assistant", "content": content})

@@ -19,7 +19,6 @@ from typing import Any
 from pydantic import ValidationError
 from sqlmodel import Session, func, select
 
-from sprout import costs
 from sprout.agents.loop import (
     Budget,
     LoopResult,
@@ -34,6 +33,7 @@ from sprout.config import MissingConfigError, Settings, get_settings
 from sprout.db import (
     Company,
     add_company_by_number,
+    delete_profile,
     get_engine,
     init_db,
     logged_run,
@@ -45,7 +45,7 @@ from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.http import FetchError
 from sprout.sources.web import WebFetcher
 
-DEFAULT_BUDGET = Budget(max_iterations=12, max_gbp=Decimal("0.10"))
+DEFAULT_BUDGET = Budget(max_iterations=12, max_usd=Decimal("0.13"))
 DEFAULT_EFFORT = "low"
 MAX_OUTPUT_TOKENS = 6_000
 MAX_LISTED_URLS = 25
@@ -121,10 +121,10 @@ class SubmissionError(ValueError):
 
 
 class EnrichmentFailed(RuntimeError):
-    def __init__(self, stop: str, cost_gbp: Decimal, detail: str | None) -> None:
+    def __init__(self, stop: str, cost_usd: Decimal, detail: str | None) -> None:
         super().__init__(f"enrichment ended with stop={stop!r}" + (f": {detail}" if detail else ""))
         self.stop = stop
-        self.cost_gbp = cost_gbp
+        self.cost_usd = cost_usd
 
 
 @dataclass(frozen=True)
@@ -297,9 +297,8 @@ def _stats(company: Company, deps: Deps, budget: Budget, result: LoopResult) -> 
         "cache_write_tokens": usage.cache_write_tokens,
         "web_searches": usage.web_searches,
         "tool_calls": result.tool_calls,
-        "cost_gbp": round(float(result.cost_gbp), 6),
-        "usd_to_gbp": float(costs.USD_TO_GBP),
-        "budget": {"max_iterations": budget.max_iterations, "max_gbp": float(budget.max_gbp)},
+        "cost_usd": round(float(result.cost_usd), 6),
+        "budget": {"max_iterations": budget.max_iterations, "max_usd": float(budget.max_usd)},
         "error": result.error,
     }
 
@@ -336,7 +335,7 @@ def enrich_with_result(
         # still cost money and that must stay on record.
         session.commit()
         if result.stop != "submitted" or not accepted:
-            raise EnrichmentFailed(result.stop, result.cost_gbp, result.error)
+            raise EnrichmentFailed(result.stop, result.cost_usd, result.error)
         save_profile(session, company, accepted[-1])
     return accepted[-1], result
 
@@ -395,10 +394,15 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="sprout.enrich", description=__doc__)
     parser.add_argument("targets", nargs="+", metavar="NAME_OR_NUMBER")
     parser.add_argument("--strong", action="store_true", help="use the strong model")
-    parser.add_argument("--max-gbp", type=Decimal, default=DEFAULT_BUDGET.max_gbp)
+    parser.add_argument("--max-usd", type=Decimal, default=DEFAULT_BUDGET.max_usd)
     parser.add_argument("--max-iterations", type=int, default=DEFAULT_BUDGET.max_iterations)
     parser.add_argument("--effort", choices=["low", "medium", "high"], default=DEFAULT_EFFORT)
     parser.add_argument("--show", action="store_true", help="print each accepted profile as JSON")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="delete the company's existing facts and category before re-enriching",
+    )
     return parser.parse_args(argv)
 
 
@@ -407,13 +411,13 @@ def _summary(profile: CompanyProfile, company: Company, result: LoopResult) -> s
     return (
         f"ok   {company.name} ({company.company_number}): category={profile.category.value!r} "
         f"sourced_facts={sourced} iterations={result.iterations} "
-        f"searches={result.usage.web_searches} cost=GBP {result.cost_gbp:.4f}"
+        f"searches={result.usage.web_searches} cost=USD {result.cost_usd:.4f}"
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    budget = Budget(max_iterations=args.max_iterations, max_gbp=args.max_gbp)
+    budget = Budget(max_iterations=args.max_iterations, max_usd=args.max_usd)
     settings = get_settings()
     model = settings.strong_model if args.strong else settings.bulk_model
     exit_code = 0
@@ -425,7 +429,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     engine = get_engine(settings.db_path)
     init_db(engine)
-    total = Decimal(0)
+    total_usd = Decimal(0)
     with ExitStack() as stack, Session(engine) as session:
         fetcher = WebFetcher(stack.enter_context(web.make_http_client(settings.cache_dir)))
         ch = None
@@ -442,22 +446,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"skip {target}: {exc}", file=sys.stderr)
                 exit_code = 1
                 continue
+            if args.reset:
+                deleted = delete_profile(session, company)
+                session.commit()
+                print(f"reset {company.name}: deleted {deleted} facts", file=sys.stderr)
             try:
                 profile, result = enrich_with_result(session, company, deps, budget)
             except EnrichmentFailed as exc:
-                total += exc.cost_gbp
+                total_usd += exc.cost_usd
                 print(
                     f"FAIL {company.name} ({company.company_number}): {exc} "
-                    f"cost=GBP {exc.cost_gbp:.4f}",
+                    f"cost=USD {exc.cost_usd:.4f}",
                     file=sys.stderr,
                 )
                 exit_code = 1
                 continue
-            total += result.cost_gbp
+            total_usd += result.cost_usd
             print(_summary(profile, company, result))
             if args.show:
                 print(profile.model_dump_json(indent=2))
-    print(f"total cost GBP {total:.4f} ({model})")
+    print(f"total cost USD {total_usd:.4f} ({model})")
     return exit_code
 
 
