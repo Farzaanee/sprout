@@ -1,4 +1,4 @@
-.PHONY: run ingest test lint hooks
+.PHONY: run ingest test lint hooks snapshot
 
 run:
 	uv run streamlit run streamlit_app.py
@@ -14,3 +14,6 @@ lint:
 
 hooks:
 	git config core.hooksPath .githooks
+
+snapshot:
+	cp data/sprout.db data/sprout_snapshot.db
