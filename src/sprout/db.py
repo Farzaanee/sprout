@@ -1,6 +1,6 @@
 """SQLite schema (SQLModel) and the small set of write helpers ingestion needs.
 
-Tables: `company`, `fact` (provenance), `news_item`, `run_log`. All timestamps are
+Tables: `company`, `fact` (provenance), `funding_round`, `news_item`, `run_log`. All timestamps are
 timezone-aware UTC.
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy import JSON, Column, Engine, UniqueConstraint, inspect, text
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from sprout.candidates import Assessment, assess
-from sprout.models import CompanyProfile, NewsItem, Sourced
+from sprout.models import CompanyProfile, FundingRound, NewsItem, Sourced
 from sprout.sources.companies_house import CompanyHit, parse_hit
 from sprout.sources.rss import normalise_url
 
@@ -59,6 +59,24 @@ class Fact(SQLModel, table=True):
     company_id: int = Field(foreign_key="company.id", index=True)
     field: str = Field(index=True)
     value_json: str | None = None
+    source_url: str | None = None
+    retrieved_at: datetime
+    confidence: str
+    note: str | None = None
+
+
+class FundingRoundRow(SQLModel, table=True):
+    """One funding round with its own provenance (a company has many, each cited separately)."""
+
+    __tablename__ = "funding_round"
+    __table_args__ = {"extend_existing": True}
+
+    id: int | None = Field(default=None, primary_key=True)
+    company_id: int = Field(foreign_key="company.id", index=True)
+    stage: str
+    amount_million_usd: int | None = None
+    announced: date | None = None
+    investors: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     source_url: str | None = None
     retrieved_at: datetime
     confidence: str
@@ -229,8 +247,47 @@ def add_company_by_number(session: Session, number: str, data: dict[str, Any]) -
     return company
 
 
+def _delete_funding_rounds(session: Session, company_id: int) -> int:
+    rows = session.exec(select(FundingRoundRow).where(FundingRoundRow.company_id == company_id))
+    count = 0
+    for row in rows:
+        session.delete(row)
+        count += 1
+    return count
+
+
+def save_funding_rounds(
+    session: Session, company_id: int, rounds: Iterable[Sourced[FundingRound]]
+) -> None:
+    """Replace a company's funding rounds with `rounds`; value-less entries are skipped.
+
+    Replaced wholesale, not per source: a re-run returns the full list, and keeping rounds from an
+    earlier run would duplicate any round now cited from a different page.
+    """
+    _delete_funding_rounds(session, company_id)
+    for item in rounds:
+        if item.value is None:
+            continue
+        session.add(
+            FundingRoundRow(
+                company_id=company_id,
+                stage=item.value.stage.value,
+                amount_million_usd=item.value.amount_million_usd,
+                announced=item.value.announced,
+                investors=list(item.value.investors),
+                source_url=str(item.source_url) if item.source_url else None,
+                retrieved_at=item.retrieved_at,
+                confidence=item.confidence.value,
+                note=item.note,
+            )
+        )
+    session.flush()
+
+
 def delete_profile(session: Session, company: Company) -> int:
-    """Delete every stored `fact` row for a company and clear its `category`. Returns rows deleted.
+    """Delete every stored `fact` and `funding_round` row for a company and clear its `category`.
+
+    Returns the number of `fact` rows deleted.
 
     For re-enriching a company under a changed schema: old facts persist under their old field
     names (`save_fact` never deletes), so a straight re-run leaves them alongside the new ones.
@@ -240,6 +297,7 @@ def delete_profile(session: Session, company: Company) -> int:
     rows = session.exec(select(Fact).where(Fact.company_id == company.id)).all()
     for row in rows:
         session.delete(row)
+    _delete_funding_rounds(session, company.id)
     company.category = None
     session.add(company)
     session.flush()
@@ -247,7 +305,7 @@ def delete_profile(session: Session, company: Company) -> int:
 
 
 def save_profile(session: Session, company: Company, profile: CompanyProfile) -> None:
-    """Persist a validated profile: one fact per `Sourced` field plus `company.category`.
+    """Persist a validated profile: one fact per `Sourced` field, its funding rounds, and category.
 
     Not-disclosed fields are stored as NULL-value facts (researched, nothing found). `news` is not
     stored here (news items have no company link yet) and `name` is ignored (the row is the
@@ -259,6 +317,7 @@ def save_profile(session: Session, company: Company, profile: CompanyProfile) ->
         value = getattr(profile, name)
         if isinstance(value, Sourced):
             save_fact(session, company.id, name, value)
+    save_funding_rounds(session, company.id, profile.funding_rounds)
     company.category = profile.category.value
     session.add(company)
     session.flush()

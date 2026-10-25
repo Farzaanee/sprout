@@ -89,10 +89,10 @@ inference.
 are whole numbers of millions of US dollars. total_raised_million_usd needs a source stating the \
 total, or one source listing every round. valuation_million_usd is the company's most recently \
 reported valuation; do not derive it from funding raised, or funding from a valuation. \
-funding_rounds is every round (stage, amount_million_usd, announced date as YYYY-MM-DD, \
-investors) you can find in a single source, not just the latest; prefer a source that lists the \
-whole funding history (for example a funding database page or a press roundup) over one that \
-covers only one round. If a \
+funding_rounds is a list with one entry per round you can find, not just the latest (stage, \
+amount_million_usd, announced date as YYYY-MM-DD, investors). Each round has its own source_url, \
+confidence and note, and rounds may come from different sources (for example one page for the \
+latest raise and another for the funding history). Use an empty list if none is found. If a \
 source gives another currency, convert it rather than leaving the value null, at about 1.3 USD \
 per GBP or 1.1 USD per EUR (an approximate figure is fine). Always put the source's wording in \
 the note for any funding or valuation value, with the ORIGINAL figure, currency and rate used \
@@ -171,8 +171,9 @@ def submit_profile_schema() -> dict[str, Any]:
     for name in _NOT_MODEL_OUTPUT:
         inlined["properties"].pop(name, None)
     for prop in inlined["properties"].values():
-        if isinstance(prop, dict) and "retrieved_at" in prop.get("properties", {}):
-            del prop["properties"]["retrieved_at"]
+        # A list field (funding_rounds) holds the Sourced objects under "items".
+        sourced = prop.get("items", prop) if isinstance(prop, dict) else {}
+        sourced.get("properties", {}).pop("retrieved_at", None)
     return _simplify(inlined)
 
 
@@ -182,8 +183,12 @@ def _compact_errors(exc: ValidationError) -> str:
 
 
 def _sourced_fields(profile: CompanyProfile) -> dict[str, Sourced[Any]]:
+    """Every sourced value by label; each funding round is listed as `funding_rounds[i]`."""
     values = {n: getattr(profile, n) for n in CompanyProfile.model_fields}
-    return {n: v for n, v in values.items() if isinstance(v, Sourced)}
+    fields = {n: v for n, v in values.items() if isinstance(v, Sourced)}
+    for i, round_ in enumerate(profile.funding_rounds):
+        fields[f"funding_rounds[{i}]"] = round_
+    return fields
 
 
 def validate_submission(
@@ -196,11 +201,17 @@ def validate_submission(
     data = {k: v for k, v in raw.items() if k not in _NOT_MODEL_OUTPUT}
     data["name"] = company_name
     now = datetime.now(UTC)
+
+    def stamped(value: dict[str, Any]) -> dict[str, Any]:
+        url = value.get("source_url")
+        entry = ledger.get(url) if isinstance(url, str) else None
+        return {**value, "retrieved_at": (entry.first_seen_at if entry else now)}
+
     for key, value in list(data.items()):
         if isinstance(value, dict) and key in CompanyProfile.model_fields:
-            url = value.get("source_url")
-            entry = ledger.get(url) if isinstance(url, str) else None
-            data[key] = {**value, "retrieved_at": (entry.first_seen_at if entry else now)}
+            data[key] = stamped(value)
+        elif key == "funding_rounds" and isinstance(value, list):
+            data[key] = [stamped(r) if isinstance(r, dict) else r for r in value]
     try:
         profile = CompanyProfile.model_validate(data)
     except ValidationError as exc:
@@ -220,7 +231,7 @@ def validate_submission(
             continue
         if not entry.fetched and fact.confidence is Confidence.HIGH:
             fact.confidence = Confidence.MEDIUM  # seen in a search result, never read
-        if name in FUNDING_FIELDS and not (fact.note and fact.note.strip()):
+        if name.split("[")[0] in FUNDING_FIELDS and not (fact.note and fact.note.strip()):
             problems.append(
                 f"{name}: a funding value needs a note quoting the source's wording and the "
                 "original figure and currency."

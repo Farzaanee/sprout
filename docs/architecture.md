@@ -100,7 +100,7 @@ flowchart TB
     LLM(["Anthropic API"])
     COST["costs.py: price table, Usage, cost_usd"]
     CHECK["validate_submission: Pydantic, source URL in ledger, funding note present"]
-    DBW["db.py: save_profile (one save_fact per Sourced field, company.category), add_company_by_number, logged_run kind enrich"]
+    DBW["db.py: save_profile (one save_fact per Sourced field, funding_rounds to its own table, company.category), add_company_by_number, logged_run kind enrich"]
     SQL[("SQLite: company, fact, run_log")]
     WF["sources/web.py: WebFetcher"]
     CHC["sources/companies_house.py"]
@@ -623,7 +623,7 @@ Phase 2 added exactly one schema change, `company.category` (shown in the diagra
 ```
 
   Thinking tokens are inside `output_tokens`. Average cost per company is `SELECT avg(json_extract(stats, '$.cost_usd')) FROM run_log WHERE kind='enrich'`; note that the dev DB also holds 8 `error` rows from the iteration phase, so filter on `stats.stop = 'submitted'` for the headline figure (measured: USD 0.0138 over the final 10-company run, USD 0.0134 over 22 successful runs). Per-company status is not a column until `enrichment_state` (Phase 3, which will reference `run_log.id`).
-- **Profile persistence (built as designed):** `save_profile` iterates `CompanyProfile.model_fields`, calling `save_fact` for every `Sourced` field (`website`, `hq`, `founded`, `stage`, `total_raised_million_usd`, `valuation_million_usd`, `funding_rounds`, `business_model`, `target_user`, `one_liner`), so a new `Sourced` field persists with no db change. "Not disclosed" is stored as a NULL-value fact so the dashboard can tell "researched, nothing found" from "never tried"; the winning-value rule (4.1) must ignore a NULL fact when a valued one exists. `news` is not persisted in Phase 2 (`news_item` has no company link until Phase 3) and `name` is ignored (identity is the row). A re-run overwrites facts from the same URL and adds facts from new URLs; older facts from URLs the new run no longer cites remain. **[DRIFT]** consequence not stated before: a field that was valued in run 1 and null in run 2 ends with both a valued fact and a NULL-value fact, and `company.category` is simply overwritten, so the winning-value rule (4.1) is needed before any front end reads facts. `load_profile` is deferred to Phase 3 or 4; Phase 2 tests read back through `fact` rows.
+- **Profile persistence (built as designed):** `save_profile` iterates `CompanyProfile.model_fields`, calling `save_fact` for every `Sourced` field (`website`, `hq`, `founded`, `stage`, `total_raised_million_usd`, `valuation_million_usd`, `business_model`, `target_user`, `one_liner`), so a new `Sourced` field persists with no db change. "Not disclosed" is stored as a NULL-value fact so the dashboard can tell "researched, nothing found" from "never tried"; the winning-value rule (4.1) must ignore a NULL fact when a valued one exists. `news` is not persisted in Phase 2 (`news_item` has no company link until Phase 3) and `name` is ignored (identity is the row). A re-run overwrites facts from the same URL and adds facts from new URLs; older facts from URLs the new run no longer cites remain. **[DRIFT]** consequence not stated before: a field that was valued in run 1 and null in run 2 ends with both a valued fact and a NULL-value fact, and `company.category` is simply overwritten, so the winning-value rule (4.1) is needed before any front end reads facts. `load_profile` is deferred to Phase 3 or 4; Phase 2 tests read back through `fact` rows. **[DRIFT], later:** `funding_rounds` moved out of this list. It is now `list[Sourced[FundingRound]]`, each round sourced separately, persisted by `save_profile` into its own `funding_round` table (not `fact`) via `save_funding_rounds`, which replaces the company's rounds on every save rather than merging by source. `delete_profile` clears both `fact` and `funding_round` rows.
 
 Planned additions (Phase 3 and later):
 
@@ -657,7 +657,7 @@ erDiagram
 ```
 
 - `category` is a plain column (built in Phase 2, above). `company_news` links news to companies. `enrichment_state` gives per-company status, error and cost (needed for resumability). `fact` may need a `verification` column.
-- `CompanyProfile` is the agent output contract; storage flattens each `Sourced` field into `fact` rows (built in Phase 2, `save_profile`). A `load_profile(session, company_id)` must still be written. `FundingRound` is stored as JSON in `value_json`.
+- `CompanyProfile` is the agent output contract; storage flattens each `Sourced` field into `fact` rows (built in Phase 2, `save_profile`). A `load_profile(session, company_id)` must still be written. **[DRIFT], later:** `FundingRound` is no longer stored as JSON in `value_json`; each round is its own row in `funding_round`, sourced independently (see 4.1 and the Phase 2 profile persistence note above).
 
 ## 4. Cross-cutting concerns
 
@@ -667,7 +667,7 @@ erDiagram
 - Multiple sources per field coexist, which lets the verifier record disagreement.
 - Not provenance-bearing: `category`, `news_item` (source is the feed), free-text fields.
 - **[AMBIGUOUS]** No rule for which value wins when a field has several facts. Proposed: highest confidence, then most recent, and surface "sources disagree". Put it in the service layer.
-- **[AMBIGUOUS]** Same-source re-extraction overwrites; no history. Phase 6 "funding history" needs a `funding_round` table or list, or should be cut.
+- **[AMBIGUOUS], resolved later:** Same-source re-extraction overwrites; no history. Phase 6 "funding history" needs a `funding_round` table or list, or should be cut. Built: a `funding_round` table, one row per round, each sourced independently; `save_profile` replaces the company's rounds on every save, so there is still no history across runs, only within the latest one.
 - SQLite treats NULLs as distinct in UNIQUE constraints; `save_fact` dedupes in application code. Do not rely on the constraint alone.
 
 ### 4.2 Agent orchestration

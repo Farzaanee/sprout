@@ -105,9 +105,8 @@ class CompanyProfile(_Strict):
     valuation_million_usd: Sourced[Annotated[int, Field(ge=0)]] = Field(
         default_factory=Sourced[Annotated[int, Field(ge=0)]]
     )
-    funding_rounds: Sourced[list[FundingRound]] = Field(
-        default_factory=Sourced[list[FundingRound]]
-    )
+    # Each round carries its own source, so rounds can come from different pages.
+    funding_rounds: list[Sourced[FundingRound]] = Field(default_factory=list)
     business_model: Sourced[str] = Field(default_factory=Sourced[str])
     target_user: Sourced[str] = Field(default_factory=Sourced[str])
     one_liner: Sourced[str] = Field(default_factory=Sourced[str])

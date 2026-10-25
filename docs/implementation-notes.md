@@ -38,7 +38,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 - **Every `Sourced` field defaults to "not disclosed"** (via `default_factory`, so profiles never share an instance). An empty `CompanyProfile(name=...)` is valid and states nothing it cannot back up.
 - **`category` is a plain `Category`, not `Sourced`.** It is a classification against our own taxonomy, not a fact found at a URL. Defaults to `Other`. If you'd rather have a per-profile rationale/confidence, add it in Phase 3 with the classifier.
 - **Money is whole USD as `int` (`>= 0`)**, not float, to avoid rounding artefacts; original-currency detail goes in `note`.
-- **`funding_rounds`** is `Sourced[list[FundingRound]]` (each round has stage, amount_million_usd, announced date, investors): one source covers the whole list. `founded` is bounded to 1800–2100.
+- **`funding_rounds`** is `list[Sourced[FundingRound]]` (each round has stage, amount_million_usd, announced date, investors, and its own source, confidence and note), stored in the `funding_round` table and replaced wholesale on each `save_profile`. `founded` is bounded to 1800–2100.
 - **Models:** `claude-haiku-5-5` (bulk) and `claude-sonnet-5-5` (strong), overridable via `SPROUT_BULK_MODEL` / `SPROUT_STRONG_MODEL`. IDs are taken from the `claude-api` skill's model table (dated 2026-10-06); re-check before Phase 2.
 - **Deviation from the plan's layout:** `costs.py` and `db.py` are not created yet (they belong to Phases 1–2). No console-script entry point (`uv init` adds one; removed as unused).
 

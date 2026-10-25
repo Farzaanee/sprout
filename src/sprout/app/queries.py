@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlmodel import Session, col, func, select
 
-from sprout.db import Company, Fact, NewsItemRow, RunLog
+from sprout.db import Company, Fact, FundingRoundRow, NewsItemRow, RunLog
 from sprout.sources.companies_house import PUBLIC_COMPANY_URL
 
 
@@ -114,6 +114,16 @@ def company_facts(session: Session, company_id: int) -> list[Fact]:
     return list(
         session.exec(
             select(Fact).where(Fact.company_id == company_id).order_by(col(Fact.field))
+        ).all()
+    )
+
+
+def company_funding_rounds(session: Session, company_id: int) -> list[FundingRoundRow]:
+    return list(
+        session.exec(
+            select(FundingRoundRow)
+            .where(FundingRoundRow.company_id == company_id)
+            .order_by(col(FundingRoundRow.announced).desc())
         ).all()
     )
 

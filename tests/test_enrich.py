@@ -45,7 +45,7 @@ def submission(**overrides):
         "stage": NOT_DISCLOSED,
         "total_raised_million_usd": NOT_DISCLOSED,
         "valuation_million_usd": NOT_DISCLOSED,
-        "funding_rounds": NOT_DISCLOSED,
+        "funding_rounds": [],
         "business_model": NOT_DISCLOSED,
         "target_user": NOT_DISCLOSED,
         "one_liner": fact("Builds AI agents."),
@@ -117,6 +117,9 @@ def test_submit_schema_is_derived_from_the_model_without_code_stamped_fields():
     assert set(schema["required"]) == set(schema["properties"])
     text = str(schema)
     assert "retrieved_at" not in text and "$ref" not in text and "$defs" not in text
+    rounds = schema["properties"]["funding_rounds"]
+    assert rounds["type"] == "array"
+    assert rounds["items"]["required"] == ["value", "source_url", "confidence", "note"]
     assert schema["properties"]["category"]["enum"] == [c.value for c in Category]
     assert schema["properties"]["hq"]["required"] == ["value", "source_url", "confidence", "note"]
 
@@ -166,11 +169,47 @@ def test_funding_value_without_note_is_rejected_and_with_note_accepted():
     assert validate_submission(raw, "ACME", ledger).total_raised_million_usd.value == 12
 
 
-def test_funding_rounds_also_needs_a_note():
-    round_ = {"stage": "Seed", "amount_million_usd": 2, "announced": "2024-05-01", "investors": []}
-    raw = submission(funding_rounds=fact([round_], FUNDING_URL, "medium"))
-    with pytest.raises(SubmissionError, match="funding_rounds"):
+SEED = {"stage": "Seed", "amount_million_usd": 2, "announced": "2024-05-01", "investors": []}
+SERIES_A = {**SEED, "stage": "Series A", "amount_million_usd": 9}
+
+
+def test_each_funding_round_needs_its_own_note():
+    raw = submission(
+        funding_rounds=[fact(SEED, FUNDING_URL, "medium", "GBP 1.5m"), fact(SERIES_A, SEEN)]
+    )
+    with pytest.raises(SubmissionError, match=r"funding_rounds\[1\]: a funding value needs a note"):
+        validate_submission(raw, "ACME", ledger_with(SEEN, FUNDING_URL))
+    raw["funding_rounds"][1]["note"] = "US$9m"
+    assert len(validate_submission(raw, "ACME", ledger_with(SEEN, FUNDING_URL)).funding_rounds) == 2
+
+
+def test_funding_round_with_an_uncited_url_is_rejected_per_round():
+    raw = submission(
+        funding_rounds=[
+            fact(SEED, FUNDING_URL, "medium", "GBP 1.5m"),
+            fact(SERIES_A, "https://made.up/round", "medium", "US$9m"),
+        ]
+    )
+    with pytest.raises(SubmissionError) as err:
         validate_submission(raw, "ACME", ledger_with(FUNDING_URL))
+    assert r"funding_rounds[1]: source_url https://made.up/round" in str(err.value)
+    assert r"funding_rounds[0]" not in str(err.value)
+
+
+def test_funding_rounds_come_from_different_sources_with_ledger_time_and_downgrade():
+    ledger = SourceLedger()
+    ledger.add(FUNDING_URL, fetched=True)
+    ledger.add(SEEN, fetched=False)
+    raw = submission(
+        funding_rounds=[
+            fact(SEED, FUNDING_URL, "high", "GBP 1.5m"),
+            fact(SERIES_A, SEEN, "high", "US$9m"),
+        ]
+    )
+    seed, series_a = validate_submission(raw, "ACME", ledger).funding_rounds
+    assert (seed.confidence, series_a.confidence) == (Confidence.HIGH, Confidence.MEDIUM)
+    assert seed.retrieved_at == ledger.get(FUNDING_URL).first_seen_at
+    assert str(series_a.source_url) == SEEN
 
 
 def test_search_only_source_cannot_claim_high_confidence():

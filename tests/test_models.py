@@ -108,10 +108,12 @@ def test_full_profile_round_trips_through_json():
         valuation_million_usd=Sourced[int](
             value=20, source_url=SRC, retrieved_at=now, note="Valued at US$20m"
         ),
-        funding_rounds=Sourced[list[FundingRound]](
-            value=[FundingRound(stage=Stage.SEED, amount_million_usd=4, investors=["Seedcamp"])],
-            source_url=SRC,
-        ),
+        funding_rounds=[
+            Sourced[FundingRound](
+                value=FundingRound(stage=Stage.SEED, amount_million_usd=4, investors=["Seedcamp"]),
+                source_url=SRC,
+            )
+        ],
         news=[NewsItem(title="Acme raises seed", url=SRC)],
     )
     assert CompanyProfile.model_validate_json(p.model_dump_json()) == p
@@ -127,6 +129,7 @@ def test_full_profile_round_trips_through_json():
         {"name": "X", "founded": {"value": 1066, "source_url": SRC}},
         {"name": "X", "stage": {"value": "Series Z", "source_url": SRC}},
         {"name": "X", "total_raised_million_usd": {"value": 1}},  # fabricated: no source
+        {"name": "X", "funding_rounds": [{"value": {"stage": "Seed"}}]},  # round with no source
     ],
 )
 def test_invalid_profiles_are_rejected(bad):

@@ -57,10 +57,10 @@ tests/
 | 0 | Setup & definitions | 2 |
 | 1 | Data foundations | 6 |
 | 2 | First agent: single-company enrichment | 8 |
-| 3 | Multi-agent pipeline at scale | 8 |
-| 4 | MCP server | 6 |
-| 5 | Evals & guardrails | 6 |
-| 6 | Dashboard | 5 |
+| 3 | Evals & guardrails | 6 |
+| 4 | Multi-agent pipeline at scale | 8 |
+| 5 | Dashboard | 5 |
+| 6 | MCP server | 6 |
 | 7 | Automation, deployment & documentation | 4 |
 | | **Total** | **45** |
 
@@ -131,53 +131,7 @@ tests/
 
 ---
 
-## Phase 3 - Multi-agent pipeline at scale (≈8h)
-**Objectives:** split the work across specialised agents and run the whole pipeline over ~150 companies.
-
-**Steps**
-1. **Classifier:** cheap-model agent assigns category/sub-category from the fixed taxonomy plus a short rationale; unknown → "Other".
-2. **News agent:** for each company, collect recent items (RSS match + search), dedupe near-duplicates, and score "big news" (funding round, acquisition, major partnership, regulatory event, leadership change) with a short summary.
-3. **Verifier:** for any funding/stage claim, find a second independent source; downgrade confidence or flag when sources disagree.
-4. **Orchestrator:** supervisor that decides which companies need work (new, stale, low-confidence), runs agents concurrently with a concurrency limit, and records per-company status/errors so a failure doesn't stop the run.
-5. **Discovery agent:** read startup-list pages and news to propose companies missing from Companies House heuristics.
-6. Make the pipeline resumable and idempotent (skip fresh, retry failed).
-
-**Acceptance criteria**
-- `python -m sprout.orchestrator --limit 150` completes, with ≥85% of companies ending in status `ok`, and total cost within budget (< ~US$13 for the full run).
-- Interrupting and restarting the run does not repeat completed work.
-- Each company has a category, stage (or Unknown), funding (or "not disclosed"), business model, target user, and ≥1 news item where news exists, all with source URLs.
-- Written note in the repo explaining why this is multi-agent (or where a single agent would suffice) and the cost/quality trade-offs.
-
-**Risks & caveats:** More agents means more cost, latency and failure modes, and each hand-off can lose or distort information. Add a specialised agent only when it measurably improves the evals, otherwise merge it back. Concurrency can trip API rate limits (429s), so cap parallelism and handle retries. Stale or conflicting sources are normal: the verifier should record disagreement rather than force a single answer. The "big news" score is subjective; define the rubric in the prompt and check it on a sample. Run 10–20 companies before the full 150 to avoid an expensive bad run.
-
-**Learnings:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, verification/cross-checking patterns, failure isolation.
-
----
-
-## Phase 4 - MCP server (≈6h)
-**Objectives:** expose the dataset to any MCP client, and consume at least one external MCP server.
-
-**Steps**
-1. Build the server with FastMCP (stdio transport) with tools: `search_companies(category, stage, min_raised_million_usd)`, `get_company(name)`, `list_categories()`, `latest_news(category, days)`, `refresh_company(name)`.
-2. Add a resource (`sprout://categories`) and a prompt template (`market_brief(category)`).
-3. Write clear tool descriptions and input schemas (these are what the client model reads); return compact, citation-bearing JSON.
-4. Register the server in Claude Desktop / Claude Code and test with natural-language questions.
-5. Replace the custom `fetch_page` tool in the enrichment agent with an off-the-shelf fetch/search MCP server via an MCP client session, so both sides are exercised.
-6. Add optional streamable-HTTP transport and compare with stdio.
-
-**Acceptance criteria**
-- The server passes the MCP Inspector (tools, resource, prompt listed and callable).
-- In Claude Desktop/Code, the question "Which UK healthtech and digital health AI startups raised a seed round recently?" is answered using Sprout's tools, with source links.
-- `refresh_company` is clearly marked as a state-changing tool and respects the cost cap.
-- Unit tests call the tool functions directly against a test DB.
-
-**Risks & caveats:** The MCP SDK and the spec evolve quickly, so pin the version and check the current docs rather than relying on older examples. A stdio server must never write logs or `print` to stdout, because that corrupts the protocol; log to stderr or a file. Vague tool descriptions lead the client model to call the wrong tool, and large JSON responses waste the client's context, so return compact results. A state-changing tool such as `refresh_company` spends money when called by a model, so require explicit parameters and enforce the cost cap server-side. Claude Desktop config errors fail silently; test with the MCP Inspector first.
-
-**Learnings:** the Model Context Protocol (tools vs resources vs prompts, transports, capability negotiation), writing tool descriptions that LLMs use well, MCP client + server roles, separating read-only from side-effecting tools.
-
----
-
-## Phase 5 - Evals & guardrails (≈6h)
+## Phase 3 - Evals & guardrails (≈6h)
 **Objectives:** quantify quality, protect against bad inputs, and make regressions visible.
 
 **Steps**
@@ -200,7 +154,30 @@ tests/
 
 ---
 
-## Phase 6 - Dashboard (≈5h)
+## Phase 4 - Multi-agent pipeline at scale (≈8h)
+**Objectives:** split the work across specialised agents and run the whole pipeline over ~50 companies (for now).
+
+**Steps**
+1. **Classifier:** cheap-model agent assigns category/sub-category from the fixed taxonomy plus a short rationale; unknown → "Other".
+2. **News agent:** for each company, collect recent items (RSS match + search), dedupe near-duplicates, and score "big news" (funding round, acquisition, major partnership, regulatory event, leadership change) with a short summary.
+3. **Verifier:** for any funding/stage claim, find a second independent source; downgrade confidence or flag when sources disagree.
+4. **Orchestrator:** supervisor that decides which companies need work (new, stale, low-confidence), runs agents concurrently with a concurrency limit, and records per-company status/errors so a failure doesn't stop the run.
+5. **Discovery agent:** read startup-list pages and news to propose companies missing from Companies House heuristics.
+6. Make the pipeline resumable and idempotent (skip fresh, retry failed).
+
+**Acceptance criteria**
+- `python -m sprout.orchestrator --limit 50` completes, with ≥85% of companies ending in status `ok`, and total cost within budget (< ~US$5 for the full run).
+- Interrupting and restarting the run does not repeat completed work.
+- Each company has a category, stage (or Unknown), funding (or "not disclosed"), business model, target user, and ≥1 news item where news exists, all with source URLs.
+- Written note in the repo explaining why this is multi-agent (or where a single agent would suffice) and the cost/quality trade-offs.
+
+**Risks & caveats:** More agents means more cost, latency and failure modes, and each hand-off can lose or distort information. Add a specialised agent only when it measurably improves the evals, otherwise merge it back. Concurrency can trip API rate limits (429s), so cap parallelism and handle retries. Stale or conflicting sources are normal: the verifier should record disagreement rather than force a single answer. The "big news" score is subjective; define the rubric in the prompt and check it on a sample. Run 10–20 companies before the full 50 to avoid an expensive bad run.
+
+**Learnings:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, verification/cross-checking patterns, failure isolation.
+
+---
+
+## Phase 5 - Dashboard (≈5h)
 **Objectives:** a clear interface for exploring the market.
 
 **Steps**
@@ -219,6 +196,29 @@ tests/
 **Risks & caveats:** Streamlit reruns the whole script on every interaction, so cache data loads and keep queries indexed. A polished chart can make shaky data look authoritative: surface coverage (for example "funding known for 62% of companies") and never plot missing values as zero. The "Ask" box adds an LLM call per question, so rate-limit it and keep it read-only; if time is short, drop it, since the MCP server already provides natural-language access. Do not expose API keys in the deployed app.
 
 **Learnings:** data-app development with Streamlit (state, caching), presenting uncertain data honestly, reusing a single service layer across UI and MCP.
+
+---
+
+## Phase 6 - MCP server (≈6h)
+**Objectives:** expose the dataset to any MCP client, and consume at least one external MCP server.
+
+**Steps**
+1. Build the server with FastMCP (stdio transport) with tools: `search_companies(category, stage, min_raised_million_usd)`, `get_company(name)`, `list_categories()`, `latest_news(category, days)`, `refresh_company(name)`.
+2. Add a resource (`sprout://categories`) and a prompt template (`market_brief(category)`).
+3. Write clear tool descriptions and input schemas (these are what the client model reads); return compact, citation-bearing JSON.
+4. Register the server in Claude Desktop / Claude Code and test with natural-language questions.
+5. Replace the custom `fetch_page` tool in the enrichment agent with an off-the-shelf fetch/search MCP server via an MCP client session, so both sides are exercised.
+6. Add optional streamable-HTTP transport and compare with stdio.
+
+**Acceptance criteria**
+- The server passes the MCP Inspector (tools, resource, prompt listed and callable).
+- In Claude Desktop/Code, the question "Which UK healthtech and digital health AI startups raised a seed round recently?" is answered using Sprout's tools, with source links.
+- `refresh_company` is clearly marked as a state-changing tool and respects the cost cap.
+- Unit tests call the tool functions directly against a test DB.
+
+**Risks & caveats:** The MCP SDK and the spec evolve quickly, so pin the version and check the current docs rather than relying on older examples. A stdio server must never write logs or `print` to stdout, because that corrupts the protocol; log to stderr or a file. Vague tool descriptions lead the client model to call the wrong tool, and large JSON responses waste the client's context, so return compact results. A state-changing tool such as `refresh_company` spends money when called by a model, so require explicit parameters and enforce the cost cap server-side. Claude Desktop config errors fail silently; test with the MCP Inspector first.
+
+**Learnings:** the Model Context Protocol (tools vs resources vs prompts, transports, capability negotiation), writing tool descriptions that LLMs use well, MCP client + server roles, separating read-only from side-effecting tools.
 
 ---
 
@@ -258,10 +258,10 @@ tests/
 | Costs creep up | Cheap-model routing, caching, per-run caps, spend limit in the console |
 | Scraping blocked or ToS issues | robots.txt, rate limits, prefer APIs/RSS, store snippets + links not full copies |
 | Stale data | Per-fact `retrieved_at`, weekly refresh of stale entries |
-| Scope creep | Fixed 150-company target; cut list above |
+| Scope creep | Fixed 50-company target for now; cut list above |
 
 ## Definition of done
-- Pipeline produces ≥150 sourced company profiles across the taxonomy.
+- Pipeline produces ≥50 sourced company profiles across the taxonomy (for now).
 - Eval table in the README meets stated thresholds.
 - MCP server works from Claude Desktop/Code; dashboard runs from a clean clone.
 - Cost per full run and known limitations are documented.

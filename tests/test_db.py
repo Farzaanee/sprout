@@ -7,6 +7,7 @@ from sprout.candidates import assess
 from sprout.db import (
     Company,
     Fact,
+    FundingRoundRow,
     NewsItemRow,
     RunLog,
     add_news_items,
@@ -65,20 +66,12 @@ def test_save_fact_stores_provenance_and_is_idempotent(session):
 
 def test_save_fact_serialises_models_and_not_disclosed(session):
     company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
-    round_ = FundingRound(stage=Stage.SEED, amount_million_usd=1)
-    save_fact(
-        session,
-        company.id,
-        "funding_rounds",
-        Sourced[list[FundingRound]](value=[round_], source_url="https://example.com/r"),
-    )
     save_fact(session, company.id, "hq", Sourced[str]())
     save_fact(session, company.id, "hq", Sourced[str]())  # NULL source: still one row
     session.commit()
     by_field = {f.field: f for f in session.exec(select(Fact)).all()}
-    assert '"amount_million_usd":1' in by_field["funding_rounds"].value_json
     assert by_field["hq"].value_json is None
-    assert len(by_field) == 2 and len(session.exec(select(Fact)).all()) == 2
+    assert len(by_field) == 1 and len(session.exec(select(Fact)).all()) == 1
 
 
 def test_add_news_items_dedupes_by_url(session):
@@ -118,11 +111,13 @@ def test_save_profile_flattens_sourced_fields_and_sets_category(session):
         name="Acme AI Ltd",
         category=Category.ROBOTICS_AND_AUTOMATION,
         hq=Sourced[str](value="London", source_url="https://example.com/a"),
-        funding_rounds=Sourced[list[FundingRound]](
-            value=[FundingRound(stage=Stage.SEED, amount_million_usd=1)],
-            source_url="https://example.com/r",
-            note="GBP 1m as reported",
-        ),
+        funding_rounds=[
+            Sourced[FundingRound](
+                value=FundingRound(stage=Stage.SEED, amount_million_usd=1),
+                source_url="https://example.com/r",
+                note="GBP 1m as reported",
+            )
+        ],
     )
     save_profile(session, company, profile)
     session.commit()
@@ -130,13 +125,51 @@ def test_save_profile_flattens_sourced_fields_and_sets_category(session):
     rows = {f.field: f for f in session.exec(select(Fact))}
     assert set(rows) == {
         "website", "hq", "founded", "stage", "total_raised_million_usd", "valuation_million_usd",
-        "funding_rounds", "business_model", "target_user", "one_liner",
+        "business_model", "target_user", "one_liner",
     }  # fmt: skip
     assert rows["hq"].value_json == '"London"' and rows["hq"].source_url == "https://example.com/a"
-    assert '"amount_million_usd":1' in rows["funding_rounds"].value_json
     assert rows["website"].value_json is None and rows["website"].source_url is None
     session.refresh(company)
     assert company.category == "Robotics and automation"
+
+
+def test_save_profile_stores_each_round_with_its_own_source_and_replaces_on_resave(session):
+    from sprout.db import save_profile
+    from sprout.models import CompanyProfile
+
+    company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
+
+    def rounds(*specs):
+        return [
+            Sourced[FundingRound](
+                value=FundingRound(stage=stage, amount_million_usd=amount, investors=["Seedcamp"]),
+                source_url=url,
+                confidence=Confidence.MEDIUM,
+                note=note,
+            )
+            for stage, amount, url, note in specs
+        ]
+
+    first = rounds(
+        (Stage.SEED, 1, "https://example.com/seed", "GBP 1m"),
+        (Stage.SERIES_A, 9, "https://example.com/a", "US$9m"),
+    )
+    save_profile(session, company, CompanyProfile(name="Acme", funding_rounds=first))
+    session.commit()
+    stored = session.exec(select(FundingRoundRow).order_by(FundingRoundRow.id)).all()
+    assert [(r.stage, r.amount_million_usd, r.source_url, r.note) for r in stored] == [
+        ("Seed", 1, "https://example.com/seed", "GBP 1m"),
+        ("Series A", 9, "https://example.com/a", "US$9m"),
+    ]
+    assert stored[0].investors == ["Seedcamp"] and stored[0].confidence == "medium"
+    assert stored[0].company_id == company.id and stored[0].announced is None
+
+    second = rounds((Stage.SEED, 2, "https://example.com/other", "GBP 2m"))
+    second.append(Sourced[FundingRound]())  # undisclosed entry is not stored
+    save_profile(session, company, CompanyProfile(name="Acme", funding_rounds=second))
+    session.commit()
+    (only,) = session.exec(select(FundingRoundRow)).all()
+    assert (only.amount_million_usd, only.source_url) == (2, "https://example.com/other")
 
 
 def test_save_profile_requires_a_saved_company(session):
@@ -156,15 +189,22 @@ def test_delete_profile_clears_facts_and_category(session):
         name="Acme AI Ltd",
         category=Category.ROBOTICS_AND_AUTOMATION,
         hq=Sourced[str](value="London", source_url="https://example.com/a"),
+        funding_rounds=[
+            Sourced[FundingRound](
+                value=FundingRound(stage=Stage.SEED), source_url="https://example.com/r"
+            )
+        ],
     )
     save_profile(session, company, profile)
     session.commit()
+    assert len(session.exec(select(FundingRoundRow)).all()) == 1
 
     deleted = delete_profile(session, company)
     session.commit()
 
-    assert deleted == 10  # every Sourced field on CompanyProfile (name, category, news excluded)
+    assert deleted == 9  # every single-valued Sourced field (rounds live in funding_round)
     assert session.exec(select(Fact).where(Fact.company_id == company.id)).all() == []
+    assert session.exec(select(FundingRoundRow)).all() == []
     session.refresh(company)
     assert company.category is None
 

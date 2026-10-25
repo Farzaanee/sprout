@@ -170,6 +170,31 @@ def render_companies() -> None:
             column_config={"source": st.column_config.LinkColumn("source", display_text="open")},
         )
 
+        rounds = queries.company_funding_rounds(session, chosen.id)
+        st.caption("Funding rounds")
+        if not rounds:
+            st.caption("No funding rounds found.")
+        else:
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "stage": r.stage,
+                        "amount (US$m)": r.amount_million_usd,
+                        "announced": r.announced,
+                        "investors": ", ".join(r.investors),
+                        "confidence": r.confidence,
+                        "note": r.note,
+                        "source": r.source_url,
+                    }
+                    for r in rounds
+                ),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "source": st.column_config.LinkColumn("source", display_text="open")
+                },
+            )
+
 
 def render_news() -> None:
     text = st.text_input("Search title or summary")
