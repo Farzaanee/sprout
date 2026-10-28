@@ -1,3 +1,4 @@
+from datetime import UTC
 from decimal import Decimal
 
 import anthropic
@@ -9,10 +10,17 @@ from fakes import (
     pause_turn,
     response,
     server_search_turn,
+    text_block,
     text_turn,
     tool_use_turn,
 )
-from sprout.agents.loop import Budget, Tool, ToolOutcome, run_agent
+from sprout.agents.loop import (
+    LOGGED_TEXT_MAX_CHARS,
+    Budget,
+    Tool,
+    ToolOutcome,
+    run_agent,
+)
 from sprout.costs import UnknownModelError, Usage, cost_usd
 
 MODEL = "claude-haiku-5-5"
@@ -215,3 +223,113 @@ def test_budget_validation():
         Budget(max_iterations=0, max_usd=Decimal("1"))
     with pytest.raises(ValueError):
         Budget(max_iterations=1, max_usd=Decimal("0"))
+
+
+def test_steps_match_iterations_and_sum_to_the_run_totals():
+    client = ScriptedClient(
+        tool_use_turn(("echo", {"q": "a"}), input=100, output=50, cache_write=2000),
+        pause_turn(["https://a.example/x"], input=7, output=3, searches=1),
+        tool_use_turn(("submit", {"x": 1}), input=10, output=20, cache_read=2000),
+    )
+    result = run(client, [echo_tool(), search_tool(), submit_tool()])
+    assert len(result.steps) == result.iterations == 3
+    assert [s.iteration for s in result.steps] == [1, 2, 3]
+    assert [s.stop_reason for s in result.steps] == ["tool_use", "pause_turn", "tool_use"]
+    total = Usage()
+    for step in result.steps:
+        total = total + step.usage
+        assert step.cost_usd == cost_usd(MODEL, step.usage)
+        assert step.at.tzinfo is UTC
+    assert total == result.usage
+    assert sum(s.cost_usd for s in result.steps) == result.cost_usd
+    assert result.steps[0].usage == Usage(
+        input_tokens=100, output_tokens=50, cache_write_tokens=2000
+    )
+
+
+def test_step_tool_names_keep_order_duplicates_and_server_side_calls():
+    client = ScriptedClient(
+        server_search_turn(
+            ["https://a.example/x"], ("echo", {"q": 1}), ("echo", {"q": 2}), searches=1
+        ),
+        pause_turn(["https://b.example/y"], searches=1),
+        text_turn("I am done"),
+        tool_use_turn(("submit", {})),
+    )
+    result = run(client, [search_tool(), echo_tool(), submit_tool()])
+    names = [s.tool_names for s in result.steps]
+    assert names == [("web_search", "echo", "echo"), ("web_search",), (), ("submit",)]
+    assert result.steps[1].stop_reason == "pause_turn"
+    assert (
+        result.steps[2].stop_reason == "end_turn" and result.steps[2].response_text == "I am done"
+    )
+
+
+def test_tool_errors_are_counted_per_step_including_a_rejected_submission():
+    def boom(args):
+        raise RuntimeError("kaput")
+
+    tools = [Tool(spec={"name": "boom", "input_schema": {}}, handler=boom), submit_tool(2)]
+    client = ScriptedClient(
+        tool_use_turn(("boom", {}), ("nope", {}), ("boom", {})),
+        tool_use_turn(("submit", {})),
+        tool_use_turn(("submit", {})),
+    )
+    result = run(client, tools)
+    assert result.stop == "submitted"
+    assert [s.tool_errors for s in result.steps] == [3, 1, 0]
+
+
+def test_a_second_rejected_submission_is_counted_before_the_run_ends():
+    client = ScriptedClient(tool_use_turn(("submit", {})), tool_use_turn(("submit", {})))
+    result = run(client, [submit_tool(accept_on=99)])
+    assert result.stop == "invalid"
+    assert [s.tool_errors for s in result.steps] == [1, 1]
+
+
+def test_response_text_joins_text_blocks_and_skips_thinking_and_tool_inputs():
+    thinking = type("Thinking", (), {"type": "thinking", "thinking": "SECRET REASONING"})()
+    turn = response(
+        [
+            thinking,
+            text_block("first"),
+            text_block("second"),
+            *tool_use_turn(("echo", {"q": "https://secret.example/url"})).content,
+        ],
+        "tool_use",
+    )
+    result = run(ScriptedClient(turn, tool_use_turn(("submit", {}))), [echo_tool(), submit_tool()])
+    step = result.steps[0]
+    assert step.response_text == "first\nsecond"
+    assert "SECRET" not in repr(step) and "secret.example" not in repr(step)
+
+
+@pytest.mark.parametrize(
+    ("length", "truncated"),
+    [(LOGGED_TEXT_MAX_CHARS, False), (LOGGED_TEXT_MAX_CHARS + 1, True)],
+)
+def test_response_text_is_cut_at_the_cap_with_a_marker(length, truncated):
+    result = run(ScriptedClient(text_turn("x" * length), text_turn("y")), [submit_tool()])
+    text = result.steps[0].response_text
+    if truncated:
+        assert text == "x" * LOGGED_TEXT_MAX_CHARS + " [truncated]"
+    else:
+        assert text == "x" * length
+
+
+def test_api_error_produces_no_step_and_sets_error_type():
+    error = anthropic.APIConnectionError(request=httpx2.Request("POST", "https://x.example"))
+    result = run(ScriptedClient(tool_use_turn(("echo", {}), input=100), error), [echo_tool()])
+    assert result.error_type == "APIConnectionError"
+    assert len(result.steps) == result.iterations == 1
+
+
+def test_unexpected_stop_reason_sets_error_type_and_still_logs_its_step():
+    result = run(ScriptedClient(response([text_block("hm")], "weird_reason")), [submit_tool()])
+    assert result.stop == "error" and result.error_type == "unexpected_stop_reason"
+    assert [s.stop_reason for s in result.steps] == ["weird_reason"]
+
+
+def test_error_type_is_none_when_the_run_does_not_error():
+    result = run(ScriptedClient(tool_use_turn(("submit", {}))), [submit_tool()])
+    assert result.error_type is None

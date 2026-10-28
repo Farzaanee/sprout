@@ -11,6 +11,7 @@ by at most one response (cost is only known after the call; `max_tokens` bounds 
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal, Protocol
 
@@ -25,6 +26,8 @@ Stop = Literal[
 CACHE_MARKER = {"type": "ephemeral"}
 WRAP_UP_FRACTION = Decimal("0.8")
 REQUEST_TIMEOUT_SECONDS = 120.0
+LOGGED_TEXT_MAX_CHARS = 1_000
+TRUNCATED_MARKER = " [truncated]"
 
 NO_SUBMIT_REMINDER = (
     "You have not submitted a profile. Call the submit_profile tool now with what you have "
@@ -74,6 +77,20 @@ class Tool:
 
 
 @dataclass
+class StepRecord:
+    """One model response. Tool inputs and thinking blocks are deliberately not recorded."""
+
+    iteration: int
+    at: datetime
+    stop_reason: str | None
+    tool_names: tuple[str, ...]
+    tool_errors: int
+    usage: Usage
+    cost_usd: Decimal
+    response_text: str
+
+
+@dataclass
 class LoopResult:
     payload: Any | None = None
     usage: Usage = field(default_factory=Usage)
@@ -83,6 +100,8 @@ class LoopResult:
     tool_calls: dict[str, int] = field(default_factory=dict)
     stop: Stop = "error"
     error: str | None = None
+    error_type: str | None = None
+    steps: list[StepRecord] = field(default_factory=list)
 
 
 def _usage_of(response: Any) -> Usage:
@@ -94,6 +113,31 @@ def _usage_of(response: Any) -> Usage:
         cache_read_tokens=getattr(raw, "cache_read_input_tokens", 0) or 0,
         cache_write_tokens=getattr(raw, "cache_creation_input_tokens", 0) or 0,
         web_searches=getattr(server, "web_search_requests", 0) or 0,
+    )
+
+
+def _logged_text(content: list[Any]) -> str:
+    text = "\n".join(
+        b.text for b in content if getattr(b, "type", None) == "text" and getattr(b, "text", None)
+    )
+    if len(text) > LOGGED_TEXT_MAX_CHARS:
+        return text[:LOGGED_TEXT_MAX_CHARS] + TRUNCATED_MARKER
+    return text
+
+
+def _step_of(model: str, iteration: int, response: Any, content: list[Any]) -> StepRecord:
+    usage = _usage_of(response)
+    return StepRecord(
+        iteration=iteration,
+        at=datetime.now(UTC),
+        stop_reason=getattr(response, "stop_reason", None),
+        tool_names=tuple(
+            b.name for b in content if getattr(b, "type", None) in ("server_tool_use", "tool_use")
+        ),
+        tool_errors=0,
+        usage=usage,
+        cost_usd=cost_usd(model, usage),
+        response_text=_logged_text(content),
     )
 
 
@@ -150,8 +194,8 @@ def run_agent(
     result = LoopResult()
     reminded = False
 
-    def finish(stop: Stop, error: str | None = None) -> LoopResult:
-        result.stop, result.error = stop, error
+    def finish(stop: Stop, error: str | None = None, error_type: str | None = None) -> LoopResult:
+        result.stop, result.error, result.error_type = stop, error, error_type
         result.tool_calls = dict(calls)
         return result
 
@@ -181,12 +225,14 @@ def run_agent(
                 messages=history,
             )
         except anthropic.APIError as exc:
-            return finish("error", f"{type(exc).__name__}: {exc}"[:500])
+            return finish("error", f"{type(exc).__name__}: {exc}"[:500], type(exc).__name__)
 
         result.iterations += 1
         result.usage = result.usage + _usage_of(response)
         result.cost_usd = cost_usd(model, result.usage)
         content = list(response.content)
+        step = _step_of(model, result.iterations, response, content)
+        result.steps.append(step)
         if content:
             history.append({"role": "assistant", "content": content})
         if on_search_urls is not None:
@@ -210,6 +256,8 @@ def run_agent(
                 tool = by_name.get(block.name)
                 outcome = _run_tool(tool, block.name, dict(block.input))
                 calls[block.name] += 1
+                if outcome.is_error:
+                    step.tool_errors += 1
                 if tool is not None and tool.terminal:
                     if outcome.payload is not None:
                         result.payload = outcome.payload
@@ -228,4 +276,4 @@ def run_agent(
             pending = [{"type": "text", "text": NO_SUBMIT_REMINDER}]
             continue
 
-        return finish("error", f"unexpected stop_reason {stop_reason!r}")
+        return finish("error", f"unexpected stop_reason {stop_reason!r}", "unexpected_stop_reason")
