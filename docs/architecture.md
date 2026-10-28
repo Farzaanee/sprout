@@ -1044,10 +1044,20 @@ One row per **iteration**, meaning one `messages.create` call and the response i
 ```python
 # agents/loop.py additions (DB-free)
 LOGGED_TEXT_MAX_CHARS = 1_000
+
+
 @dataclass
 class StepRecord:
-    iteration: int; at: datetime; stop_reason: str | None
-    tool_names: tuple[str, ...]; tool_errors: int; usage: Usage; cost_usd: Decimal; response_text: str
+    iteration: int
+    at: datetime
+    stop_reason: str | None
+    tool_names: tuple[str, ...]
+    tool_errors: int
+    usage: Usage
+    cost_usd: Decimal
+    response_text: str
+
+
 # LoopResult gains: steps: list[StepRecord] = []  and  error_type: str | None = None
 ```
 
