@@ -1,4 +1,5 @@
-from datetime import date
+import json
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlmodel import Session, select
@@ -10,6 +11,7 @@ from sprout.db import (
     FundingRoundRow,
     NewsItemRow,
     RunLog,
+    RunLogStep,
     add_news_items,
     get_engine,
     init_db,
@@ -265,3 +267,114 @@ def test_init_db_adds_new_columns_to_an_old_database_and_keeps_rows(tmp_path):
         )  # fmt: skip
         row.category = "Other"
         s.commit()
+
+
+def _old_run_log_db(tmp_path):
+    """A pre-Phase-3 database: run_log without `failure_category`, no run_log_step table."""
+    from sqlalchemy import text
+
+    engine = get_engine(tmp_path / "old_runs.db")
+    rows = [  # (id, kind, status, stats)
+        (1, "enrich", "ok", {"stop": "submitted"}),
+        (2, "enrich", "ok", {"stop": "invalid"}),
+        (3, "enrich", "error", {"stop": "refused"}),
+        (4, "enrich", "error", {}),  # crashed before any stats: internal_error
+        (5, "enrich", "running", {}),  # unfinished: left alone
+        (6, "ingest_ch", "error", {"stop": "invalid"}),  # not an enrich run: left alone
+        (7, "enrich", "ok", {"stop": "brand_new_stop"}),
+    ]
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE run_log (id INTEGER PRIMARY KEY, kind VARCHAR NOT NULL, "
+                "started_at DATETIME NOT NULL, finished_at DATETIME, status VARCHAR NOT NULL, "
+                "stats JSON NOT NULL, error VARCHAR)"
+            )
+        )
+        for id_, kind, status, stats in rows:
+            conn.execute(
+                text(
+                    "INSERT INTO run_log (id, kind, started_at, status, stats) "
+                    "VALUES (:id, :kind, '2026-01-01 00:00:00', :status, :stats)"
+                ),
+                {"id": id_, "kind": kind, "status": status, "stats": json.dumps(stats)},
+            )
+    return engine
+
+
+def test_init_db_migrates_old_run_log_keeping_rows_and_adds_step_table(tmp_path):
+    from sqlalchemy import inspect
+
+    engine = _old_run_log_db(tmp_path)
+    init_db(engine)
+    assert inspect(engine).has_table("run_log_step")
+    with Session(engine) as s:
+        runs = s.exec(select(RunLog).order_by(RunLog.id)).all()
+        assert [r.id for r in runs] == [1, 2, 3, 4, 5, 6, 7]
+        assert runs[1].stats == {"stop": "invalid"}
+        s.add(RunLogStep(run_log_id=1, iteration=1, created_at=datetime.now(UTC), tool_name=None))
+        s.commit()
+        step = s.exec(select(RunLogStep)).one()
+        assert (step.tool_errors, step.cost_usd, step.response_text) == (0, 0.0, None)
+
+
+def test_backfill_classifies_failed_enrich_runs_and_is_idempotent(tmp_path):
+    engine = _old_run_log_db(tmp_path)
+    init_db(engine)
+    expected = [None, "invalid_output", "refusal", "internal_error", None, None, "internal_error"]
+    with Session(engine) as s:
+        runs = s.exec(select(RunLog).order_by(RunLog.id)).all()
+        assert [r.failure_category for r in runs] == expected
+        runs[1].failure_category = "budget_cap"  # a later manual or newer value must survive
+        s.commit()
+    init_db(engine)
+    with Session(engine) as s:
+        runs = s.exec(select(RunLog).order_by(RunLog.id)).all()
+        assert [r.failure_category for r in runs] == [
+            None, "budget_cap", "refusal", "internal_error", None, None, "internal_error",
+        ]  # fmt: skip
+
+
+def test_logged_run_failure_defaults_to_internal_error(session):
+    with pytest.raises(RuntimeError):
+        with logged_run(session, "demo"):
+            raise RuntimeError("boom")
+    with logged_run(session, "demo"):
+        pass
+    failed, ok = session.exec(select(RunLog).order_by(RunLog.id)).all()
+    assert failed.failure_category == "internal_error"
+    assert ok.failure_category is None
+
+
+def test_logged_run_keeps_a_category_committed_before_the_failure(session):
+    with pytest.raises(RuntimeError):
+        with logged_run(session, "enrich") as run:
+            run.failure_category = "refusal"
+            session.add(run)
+            session.commit()
+            raise RuntimeError("boom")
+    (row,) = session.exec(select(RunLog)).all()
+    assert row.failure_category == "refusal"
+
+
+def test_logged_run_drops_an_uncommitted_category_on_failure(session):
+    with pytest.raises(RuntimeError):
+        with logged_run(session, "enrich") as run:
+            run.failure_category = "refusal"  # never committed: rolled back
+            raise RuntimeError("boom")
+    (row,) = session.exec(select(RunLog)).all()
+    assert row.failure_category == "internal_error"
+
+
+def test_run_log_step_is_unique_per_run_and_iteration(session):
+    from sqlalchemy.exc import IntegrityError
+
+    with logged_run(session, "enrich") as run:
+        pass
+    now = datetime.now(UTC)
+    session.add(RunLogStep(run_log_id=run.id, iteration=1, created_at=now))
+    session.add(RunLogStep(run_log_id=run.id, iteration=2, created_at=now))
+    session.commit()
+    session.add(RunLogStep(run_log_id=run.id, iteration=2, created_at=now))
+    with pytest.raises(IntegrityError):
+        session.commit()

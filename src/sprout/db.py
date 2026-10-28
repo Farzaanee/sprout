@@ -1,6 +1,7 @@
 """SQLite schema (SQLModel) and the small set of write helpers ingestion needs.
 
-Tables: `company`, `fact` (provenance), `funding_round`, `news_item`, `run_log`. All timestamps are
+Tables: `company`, `fact` (provenance), `funding_round`, `news_item`, `run_log`, `run_log_step`. All
+timestamps are
 timezone-aware UTC.
 """
 
@@ -12,9 +13,10 @@ from typing import Any
 
 from pydantic_core import to_json
 from sqlalchemy import JSON, Column, Engine, UniqueConstraint, inspect, text
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from sprout.candidates import Assessment, assess
+from sprout.failures import FailureCategory, failure_category_for
 from sprout.models import CompanyProfile, FundingRound, NewsItem, Sourced
 from sprout.sources.companies_house import CompanyHit, parse_hit
 from sprout.sources.rss import normalise_url
@@ -107,6 +109,34 @@ class RunLog(SQLModel, table=True):
     status: str = "running"  # running | ok | error
     stats: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     error: str | None = None
+    # A failures.FailureCategory value; NULL means success (or not applicable). No index: create_all
+    # would not add it to an existing table.
+    failure_category: str | None = None
+
+
+class RunLogStep(SQLModel, table=True):
+    """One model response (loop iteration) of a run: tools called, usage, cost, truncated text."""
+
+    __tablename__ = "run_log_step"
+    __table_args__ = (
+        UniqueConstraint("run_log_id", "iteration"),
+        {"extend_existing": True},
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    run_log_id: int = Field(foreign_key="run_log.id")
+    iteration: int  # 1-based
+    created_at: datetime  # stamped by the loop when the response arrived
+    stop_reason: str | None = None
+    tool_name: str | None = None  # comma-joined in call order, duplicates kept; NULL when none
+    tool_errors: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    web_searches: int = 0
+    cost_usd: float = 0.0
+    response_text: str | None = None  # untrusted model text, capped by the loop
 
 
 def get_engine(path: Path | str) -> Engine:
@@ -116,9 +146,30 @@ def get_engine(path: Path | str) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """Create missing tables, then add missing nullable columns to existing ones (no data loss)."""
+    """Create missing tables, add missing nullable columns (no data loss), backfill categories."""
     SQLModel.metadata.create_all(engine)
     _add_missing_columns(engine)
+    with Session(engine) as session:
+        _backfill_failure_categories(session)
+
+
+def _backfill_failure_categories(session: Session) -> None:
+    """Classify historical failed `enrich` runs; idempotent (only touches NULL categories)."""
+    rows = session.exec(
+        select(RunLog).where(RunLog.kind == "enrich", col(RunLog.failure_category).is_(None))
+    ).all()
+    for row in rows:
+        stop = (row.stats or {}).get("stop")
+        if stop is None and row.status == "error":
+            category = FailureCategory.INTERNAL_ERROR
+        elif stop is None:
+            continue
+        else:
+            category = failure_category_for(stop)
+        if category is not None:
+            row.failure_category = category.value
+            session.add(row)
+    session.commit()
 
 
 def _add_missing_columns(engine: Engine) -> None:
@@ -230,6 +281,8 @@ def logged_run(session: Session, kind: str) -> Iterator[RunLog]:
     except BaseException as exc:
         session.rollback()
         run.status = "error"
+        if run.failure_category is None:  # rollback reloads the committed value, so this is it
+            run.failure_category = FailureCategory.INTERNAL_ERROR.value
         run.error = f"{type(exc).__name__}: {exc}"[:1000]
         run.finished_at = utcnow()
         session.add(run)
