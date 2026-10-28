@@ -23,6 +23,7 @@ from sprout.agents.loop import (
     Budget,
     LoopResult,
     MessagesClient,
+    StepRecord,
     Tool,
     ToolOutcome,
     make_client,
@@ -32,6 +33,7 @@ from sprout.agents.tools import SourceLedger, build_tools
 from sprout.config import MissingConfigError, Settings, get_settings
 from sprout.db import (
     Company,
+    RunLogStep,
     add_company_by_number,
     delete_profile,
     get_engine,
@@ -39,6 +41,7 @@ from sprout.db import (
     logged_run,
     save_profile,
 )
+from sprout.failures import failure_category_for
 from sprout.models import Category, CompanyProfile, Confidence, Sourced, Stage
 from sprout.sources import companies_house, web
 from sprout.sources.companies_house import CompaniesHouseClient
@@ -311,7 +314,27 @@ def _stats(company: Company, deps: Deps, budget: Budget, result: LoopResult) -> 
         "cost_usd": round(float(result.cost_usd), 6),
         "budget": {"max_iterations": budget.max_iterations, "max_usd": float(budget.max_usd)},
         "error": result.error,
+        "error_type": result.error_type,
     }
+
+
+def _step_row(run_id: int, step: StepRecord) -> RunLogStep:
+    usage = step.usage
+    return RunLogStep(
+        run_log_id=run_id,
+        iteration=step.iteration,
+        created_at=step.at,
+        stop_reason=step.stop_reason,
+        tool_name=",".join(step.tool_names) or None,
+        tool_errors=step.tool_errors,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        web_searches=usage.web_searches,
+        cost_usd=round(float(step.cost_usd), 6),
+        response_text=step.response_text,
+    )
 
 
 def enrich_company(
@@ -342,8 +365,12 @@ def enrich_with_result(
             on_search_urls=lambda urls: [ledger.add(u, fetched=False) for u in urls],
         )
         run.stats = _stats(company, deps, budget, result)
-        # logged_run rolls back on exceptions, so commit the stats before raising: a failed run
-        # still cost money and that must stay on record.
+        failure = failure_category_for(result.stop)
+        run.failure_category = failure.value if failure else None
+        assert run.id is not None  # logged_run commits the row before yielding
+        session.add_all(_step_row(run.id, step) for step in result.steps)
+        # logged_run rolls back on exceptions, so commit stats, category and steps before
+        # raising: a failed run still cost money and that must stay on record.
         session.commit()
         if result.stop != "submitted" or not accepted:
             raise EnrichmentFailed(result.stop, result.cost_usd, result.error)

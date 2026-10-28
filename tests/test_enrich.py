@@ -1,11 +1,12 @@
 from datetime import date
 from decimal import Decimal
 
+import anthropic
 import httpx
 import pytest
 from sqlmodel import Session, select
 
-from fakes import ScriptedClient, server_search_turn, text_turn, tool_use_turn
+from fakes import ScriptedClient, response, server_search_turn, text_turn, tool_use_turn
 from sprout import enrich as enrich_cli
 from sprout.agents import enrich as enrich_mod
 from sprout.agents.enrich import (
@@ -21,7 +22,7 @@ from sprout.agents.enrich import (
 from sprout.agents.loop import Budget
 from sprout.agents.tools import SourceLedger
 from sprout.config import Settings
-from sprout.db import Company, Fact, RunLog, get_engine, init_db
+from sprout.db import Company, Fact, RunLog, RunLogStep, get_engine, init_db
 from sprout.models import Category, Confidence
 from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.web import WebFetcher
@@ -322,9 +323,7 @@ def test_invalid_after_repair_writes_nothing_but_records_the_cost(session, compa
 
 def test_funding_without_note_goes_through_repair(session, company, deps_for):
     unnoted = submission(total_raised_million_usd=fact(6, FUNDING_URL, "medium"))
-    noted = submission(
-        total_raised_million_usd=fact(6, FUNDING_URL, "medium", "Reported as £5m")
-    )
+    noted = submission(total_raised_million_usd=fact(6, FUNDING_URL, "medium", "Reported as £5m"))
     client = ScriptedClient(
         server_search_turn([SEEN, FUNDING_URL], ("submit_profile", unnoted)),
         tool_use_turn(("submit_profile", noted)),
@@ -373,6 +372,130 @@ def test_rerun_overwrites_same_source_facts(session, company, deps_for):
         enrich_company(session, company, deps_for(client))
     rows = session.exec(select(Fact).where(Fact.field == "hq")).all()
     assert [r.value_json for r in rows] == ['"Leeds, UK"']
+
+
+# ---- observability: steps and failure category ---------------------------------------------
+
+
+def steps_of(session, run):
+    return session.exec(
+        select(RunLogStep).where(RunLogStep.run_log_id == run.id).order_by(RunLogStep.iteration)
+    ).all()
+
+
+def test_success_persists_one_step_per_response_and_no_failure_category(session, company, deps_for):
+    client = ScriptedClient(
+        server_search_turn(
+            [SEEN],
+            ("fetch_page", {"url": SEEN}),
+            input=1000,
+            output=100,
+            cache_write=3000,
+            searches=1,
+        ),  # fmt: skip
+        tool_use_turn(("submit_profile", submission()), input=200, output=400, cache_read=3000),
+    )
+    enrich_company(session, company, deps_for(client))
+    (run,) = runs(session)
+    assert run.status == "ok" and run.failure_category is None
+    assert run.stats["error_type"] is None
+    first, second = steps_of(session, run)
+    assert (first.iteration, first.tool_name, first.stop_reason) == (
+        1, "web_search,fetch_page", "tool_use",
+    )  # fmt: skip
+    assert (first.input_tokens, first.output_tokens) == (1000, 100)
+    assert (first.cache_write_tokens, first.web_searches, first.tool_errors) == (3000, 1, 1)
+    assert (second.iteration, second.tool_name) == (2, "submit_profile")
+    assert (second.cache_read_tokens, second.web_searches, second.tool_errors) == (3000, 0, 0)
+    assert first.created_at <= second.created_at
+    assert sum(s.cost_usd for s in (first, second)) == pytest.approx(
+        run.stats["cost_usd"], abs=1e-5
+    )
+
+
+def test_a_step_without_tools_has_no_tool_name_and_keeps_its_text(session, company, deps_for):
+    client = ScriptedClient(text_turn("thinking aloud"), text_turn("still nothing"))
+    with pytest.raises(EnrichmentFailed):
+        enrich_company(session, company, deps_for(client))
+    (run,) = runs(session)
+    steps = steps_of(session, run)
+    assert [s.tool_name for s in steps] == [None, None]
+    assert [s.response_text for s in steps] == ["thinking aloud", "still nothing"]
+    assert [s.stop_reason for s in steps] == ["end_turn", "end_turn"]
+
+
+def bad_submission():
+    return submission(hq=fact("London", url="https://invented.example/x"))
+
+
+def fetch_turns(count):
+    return [tool_use_turn(("fetch_page", {"url": "https://x.example"})) for _ in range(count)]
+
+
+API_ERROR = anthropic.APIConnectionError(request=httpx.Request("POST", "https://x.example"))
+
+
+@pytest.mark.parametrize(
+    ("script", "budget", "category", "iterations"),
+    [
+        (
+            [server_search_turn([SEEN], ("submit_profile", bad_submission())),
+             tool_use_turn(("submit_profile", bad_submission()))],
+            Budget(12, Decimal("1")), "invalid_output", 2,
+        ),
+        (fetch_turns(3), Budget(2, Decimal("1")), "iteration_cap", 2),
+        (
+            [tool_use_turn(("fetch_page", {"url": "https://x.example"}), input=5000)],
+            Budget(12, Decimal("0.000001")), "budget_cap", 1,
+        ),
+        ([text_turn(), text_turn()], Budget(12, Decimal("1")), "no_submission", 2),
+        ([response([], "max_tokens", input=10)], Budget(12, Decimal("1")), "output_truncated", 1),
+        ([response([], "refusal", input=10)], Budget(12, Decimal("1")), "refusal", 1),
+        ([tool_use_turn(("fetch_page", {"url": "https://x.example"}), input=100), API_ERROR],
+         Budget(12, Decimal("1")), "api_error", 1),
+    ],
+    ids=["invalid", "max_iter", "budget", "no_submit", "truncated", "refused", "api_error"],
+)  # fmt: skip
+def test_every_non_success_stop_commits_its_category_and_steps(
+    session, company, deps_for, script, budget, category, iterations
+):
+    with pytest.raises(EnrichmentFailed):
+        enrich_company(session, company, deps_for(ScriptedClient(*script)), budget)
+    session.expire_all()  # read what was committed, not what the session holds in memory
+    (run,) = runs(session)
+    assert run.status == "error" and run.failure_category == category
+    steps = steps_of(session, run)
+    assert len(steps) == run.stats["iterations"] == iterations
+    assert [s.iteration for s in steps] == list(range(1, iterations + 1))
+
+
+def test_api_error_records_the_exception_class_in_stats(session, company, deps_for):
+    client = ScriptedClient(API_ERROR)
+    with pytest.raises(EnrichmentFailed):
+        enrich_company(session, company, deps_for(client))
+    (run,) = runs(session)
+    assert run.failure_category == "api_error"
+    assert run.stats["error_type"] == "APIConnectionError"
+    assert steps_of(session, run) == []  # a failed call produced no response, so no step
+
+
+def test_save_profile_failure_after_submission_is_internal_error_with_steps_kept(
+    session, company, deps_for, monkeypatch
+):
+    def boom(*args, **kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(enrich_mod, "save_profile", boom)
+    client = ScriptedClient(server_search_turn([SEEN], ("submit_profile", submission())))
+    with pytest.raises(RuntimeError, match="disk full"):
+        enrich_company(session, company, deps_for(client))
+    session.expire_all()
+    (run,) = runs(session)
+    assert run.status == "error" and run.failure_category == "internal_error"
+    assert "RuntimeError: disk full" in run.error
+    assert run.stats["stop"] == "submitted"
+    (step,) = steps_of(session, run)
+    assert step.tool_name == "web_search,submit_profile"
 
 
 # ---- resolving targets and the CLI -----------------------------------------------------------
