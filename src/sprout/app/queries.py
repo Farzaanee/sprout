@@ -191,6 +191,14 @@ def _number(stats: dict[str, Any], key: str) -> float:
     return float(value) if isinstance(value, int | float) else 0.0
 
 
+def _cost_usd(stats: dict[str, Any]) -> float:
+    # Runs logged before the USD switch hold cost_gbp and usd_to_gbp instead of cost_usd.
+    if isinstance(stats.get("cost_usd"), int | float):
+        return _number(stats, "cost_usd")
+    rate = _number(stats, "usd_to_gbp")
+    return _number(stats, "cost_gbp") / rate if rate else 0.0
+
+
 def enrich_runs(
     session: Session,
     *,
@@ -231,7 +239,7 @@ def enrich_runs(
             failure_category=run.failure_category,
             error_type=run.stats.get("error_type"),
             iterations=int(_number(run.stats, "iterations")),
-            cost_usd=_number(run.stats, "cost_usd"),
+            cost_usd=_cost_usd(run.stats),
             web_searches=int(_number(run.stats, "web_searches")),
             steps_logged=step_counts.get(run.id, 0),
             error=run.error,
@@ -256,7 +264,7 @@ def cost_trend(session: Session, *, limit: int = 200) -> list[TrendPoint]:
     runs = session.exec(_enrich_query().order_by(col(RunLog.id).desc()).limit(limit)).all()
     points = []
     for run in reversed(runs):
-        cost = _number(run.stats, "cost_usd")
+        cost = _cost_usd(run.stats)
         iterations = int(_number(run.stats, "iterations"))
         points.append(
             TrendPoint(
@@ -277,7 +285,7 @@ def daily_outcomes(session: Session) -> list[DayOutcome]:
         totals = days.setdefault(run.started_at.date(), [0, 0, 0.0])
         totals[0] += 1
         totals[1] += run.failure_category is not None
-        totals[2] += _number(run.stats, "cost_usd")
+        totals[2] += _cost_usd(run.stats)
     return [DayOutcome(day, int(r), int(f), c) for day, (r, f, c) in sorted(days.items())]
 
 

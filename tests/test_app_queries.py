@@ -237,6 +237,16 @@ def test_daily_outcomes_per_utc_day(session, runs):
     ]
 
 
+def test_legacy_gbp_cost_is_converted_to_usd(session):
+    legacy = {"iterations": 2, "cost_gbp": 0.0076, "usd_to_gbp": 0.76}
+    run = _run(session, 1, stats=legacy)
+    _run(session, 1, stats={"cost_gbp": 0.5, "usd_to_gbp": 0})  # unusable rate
+    assert queries.enrich_runs(session, limit=2)[1].cost_usd == pytest.approx(0.01)
+    assert queries.cost_trend(session)[0].cost_usd == pytest.approx(0.01)
+    assert queries.cost_trend(session)[0].run_id == run.id
+    assert queries.daily_outcomes(session)[0].cost_usd == pytest.approx(0.01)
+
+
 def test_run_steps_ordered_by_iteration_and_scoped_to_run(session, runs):
     for iteration in (3, 1, 2):
         _step(session, runs[0], iteration)
