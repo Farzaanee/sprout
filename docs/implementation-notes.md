@@ -200,3 +200,50 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
   - Latent nit in `_simplify` ([src/sprout/agents/enrich.py](src/sprout/agents/enrich.py)): it drops any dict key named `title`, `default`, `minimum`, `format` etc., including a `CompanyProfile` field with such a name inside `properties`. No current field collides.
   - `agents/enrich.py` is about 460 lines (agent, schema, CLI, `resolve_company`); split it when Phase 5 adds an orchestrator.
   - `pause_turn` has only mock evidence; `--strong` and forced `tool_choice` were never run live.
+
+---
+
+## Phase 3 - Observability
+
+**Status: done, with one live check not achieved.** Steps and failure categories are recorded for every enrichment run, queryable through five new functions and shown in a new Observability tab. `uv run pytest -q` passes (229 tests) and `uv run ruff check` is clean. The live check wrote steps and categories end to end against the real API, but the planned deterministic `iteration_cap` run could not be produced because `--max-iterations 2` hits an API 400 (see "Open items"). The step 3c findings batch is recorded separately below once run.
+
+### What was built
+| Item | Where |
+|---|---|
+| `FailureCategory` (8 values) and `failure_category_for(stop)`, pure | [src/sprout/failures.py](src/sprout/failures.py) |
+| `RunLog.failure_category` (nullable), `RunLogStep` table, idempotent backfill in `init_db`, `logged_run` fallback to `internal_error` | [src/sprout/db.py](src/sprout/db.py) |
+| `StepRecord`, `LOGGED_TEXT_MAX_CHARS` (1,000), `LoopResult.steps` and `LoopResult.error_type`; one record per model response, no new parameter, loop still DB-free | [src/sprout/agents/loop.py](src/sprout/agents/loop.py) |
+| `_stats` gains `error_type`; `failure_category` set and `RunLogStep` rows added before the existing pre-raise commit (`_step_row`) | [src/sprout/agents/enrich.py](src/sprout/agents/enrich.py) |
+| `EnrichRun`, `TrendPoint`, `DayOutcome`; `enrich_runs`, `failure_counts`, `cost_trend`, `daily_outcomes`, `run_steps` | [src/sprout/app/queries.py](src/sprout/app/queries.py) |
+| `render_observability` and the Observability tab (after News, before gated Run & test); tabs now built from `(name, renderer)` pairs | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
+| Tests | `tests/test_failures.py` (new), additions to `test_agent_loop.py`, `test_db.py`, `test_enrich.py`, `test_app_queries.py`, `test_dashboard.py` |
+
+Commits: step 1 `3ba922b` (taxonomy and schema), step 2 `b93c0bb` (loop step records), step 3 `1082259` (enrich wiring), step 4 `8738494` (queries), step 5 `e500f56` (dashboard).
+
+### Acceptance criteria
+- [x] **Every enrichment run's steps are inspectable after the fact without rerunning it.** Verified live on runs 43, 44, 45 and 46 (`SELECT ... FROM run_log_step WHERE run_log_id = ?`), including the multi-tool pattern (`lookup_companies_house,web_search`), `tool_errors` (run 44 step 3, a rejected submission) and a failed run (run 45 and 46, `api_error`, one step each). Step costs sum exactly to `stats.cost_usd` for runs 43 (0.024016) and 44 (0.013197). Scripted tests cover `len(steps) == iterations`, summed step usage equal to `result.usage`, truncation at the cap, and steps plus category committed for every non-success stop (invalid, max_iter, budget, no_submit, truncated, refused, api error). **Caveat:** runs made before this phase have no steps (by design; the tab says so).
+- [x] **The dashboard groups failures by category and shows cost/error trends across runs.** Verified by `streamlit.testing` smoke tests only (empty, populated, no failures, no steps with iterations > 0 and == 0, `stats == {}`, and untrusted-markdown rendering). I did not open the tab in a browser.
+- [x] **Step logging does not change enrichment behaviour or materially slow down a run.** The loop never reads `steps`, makes no extra call and does no I/O; the persistence is one small INSERT batch inside a commit that already existed. All pre-existing loop and enrich tests pass unchanged. No timing was measured; "materially slower" is argued from the design, not benchmarked.
+- [ ] **Step 3a live check: `--max-iterations 2` gives a deterministic `iteration_cap` row with its two steps.** Not achieved. The `iteration_cap` path with its two committed steps is covered by a scripted test only. Live, the run ended `error` (see Open items). A live failed run (`api_error` with `error_type`, one step) was confirmed instead.
+
+Live spend for the check: four calls, about US$0.0376 (runs 43 to 46: 0.0240, 0.0132, 0.0002, 0.0002).
+
+### Open items (need you)
+1. **Pre-existing loop bug, reproducible with `--max-iterations 2`.** Both attempts (run 45, DYAD ARTIFICIAL INTELLIGENCE LIMITED 12626064, and run 46, ARTIFICIAL INTELLIGENCE CONSULTING LTD 14925003) ended `stop=error`, `BadRequestError` 400 on the second request: "`web_search` tool use ... was found without a corresponding `web_search_tool_result` block" (`messages.1`). Iteration 1 of every run emitted a server-side `web_search` together with a custom `lookup_companies_house` tool_use (`stop_reason=tool_use`, step `web_searches=0`, no search result block in the response). Runs 43 and 44 (default 12 iterations) accepted the same pattern. The two failures both had the cap of 2, where the second request also carries the wrap-up notice, so the cap may be a trigger, but this was not isolated. This is not caused by step logging (steps are read only after the loop ends), but it may affect real runs intermittently, and it blocks the planned live `iteration_cap` check. Needs a decision: fix in the loop (for example handle a response whose `server_tool_use` has no result, or avoid mixing server and custom tool calls) in a later phase or a fix-up. Not changed here (out of scope).
+2. `docs/architecture.md` shows as modified in the working tree (it reflows the `StepRecord` code block in 3.6; the cause, probably a formatter or hook, was not identified). It was left uncommitted and untouched by the implementers; a `git checkout` to discard it was blocked by the permission system, so decide whether to commit or discard it.
+3. The step 3c findings batch and Phase 4 proposals are in the section below (when present). No Phase 4 number has been changed.
+
+### Decisions locked in
+- **A27/A28/A29 kept as designed:** no tool-input or URL logging; `invalid_output` is not split into sub-reasons; one step row per model response, not per tool call (tool names comma-joined in `tool_name`).
+- Failure category is a real nullable column; NULL means success. Eight values; `internal_error` is set by `logged_run` when an exception escapes after the category is still NULL.
+- Steps and category are committed in the commit that already precedes `EnrichmentFailed`, so failed runs keep them.
+- `response_text` is capped at 1,000 characters plus a ` [truncated]` marker, rendered only via `st.code`/dataframes, never markdown. Run detail labels never include logged text.
+- Tabs are now a list of `(name, renderer)` pairs, zipped with `strict=True`.
+- `enrich_runs` with both a category and `failures_only=True` applies the category filter only.
+
+### Things later phases must know
+- `RunLogStep.created_at` must be timezone-aware on insert (a naive value raises in SQLModel); `started_at` reads back naive UTC.
+- `init_db` backfills `failure_category` from `stats.stop` for historic enrich rows, so a hand-seeded success row needs `stop: "submitted"`.
+- The Observability metrics and charts use the newest 200 runs (`enrich_runs` default limit); the failure-category chart covers all runs. Irrelevant at about 45 runs, relevant in Phase 5.
+- Steps are persisted at the end of a run, so a hard process kill loses that run's steps (as it already loses its stats). Live per-worker progress in Phase 5 needs the optional `on_step` callback described in the architecture (A29 notes).
+- Queries live in `app/queries.py`, Streamlit-free, reusable by the Phase 6 service layer; the file moves to `sprout/queries.py` before Phase 7.
