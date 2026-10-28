@@ -2,8 +2,8 @@
 
 Run locally: `uv run streamlit run streamlit_app.py`.
 
-Tabs: Progress (phases + data counts), Companies, News, Run & test. The Run & test tab can write
-to the database and spend API quota, so it is hidden unless `SPROUT_ENABLE_ACTIONS=1`.
+Tabs: Progress (phases + data counts), Companies, News, Observability, Run & test. The Run & test
+tab can write to the database and spend API quota, so it is hidden unless `SPROUT_ENABLE_ACTIONS=1`.
 """
 
 import contextlib
@@ -208,6 +208,140 @@ def render_news() -> None:
             st.write(item.summary)
 
 
+def _run_row(run: queries.EnrichRun) -> dict[str, object]:
+    """One table row; a run with no stats (still running or crashed) keeps blanks."""
+    has_stats = bool(run.stats)
+    return {
+        "run": run.run_id,
+        "started": run.started_at,
+        "company": run.company_name,
+        "status": run.status,
+        "stop": run.stop,
+        "category": run.failure_category,
+        "error type": run.error_type,
+        "iterations": run.iterations if has_stats else None,
+        "cost (US$)": run.cost_usd if has_stats else None,
+        "searches": run.web_searches if has_stats else None,
+        "steps logged": run.steps_logged,
+    }
+
+
+def _render_run_detail(session: Session, run: queries.EnrichRun) -> None:
+    # Logged text (response_text, errors) is untrusted: st.code and dataframes only, never markdown.
+    st.dataframe(pd.DataFrame([_run_row(run)]), hide_index=True, width="stretch")
+    steps = queries.run_steps(session, run.run_id)
+    if steps:
+        st.dataframe(
+            pd.DataFrame(
+                {
+                    "step": s.iteration,
+                    "time": s.created_at,
+                    "stop reason": s.stop_reason,
+                    "tools": s.tool_name,
+                    "tool errors": s.tool_errors,
+                    "input": s.input_tokens,
+                    "output": s.output_tokens,
+                    "cache read": s.cache_read_tokens,
+                    "cache write": s.cache_write_tokens,
+                    "searches": s.web_searches,
+                    "cost (US$)": s.cost_usd,
+                }
+                for s in steps
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        for s in steps:
+            if s.response_text:
+                with st.expander(f"Step {s.iteration} response"):
+                    st.code(s.response_text, language=None, wrap_lines=True)
+    elif run.iterations > 0:
+        st.info("This run predates step logging (Phase 3), run-level stats only.")
+    else:
+        st.info("No model response was received.")
+    for label, text in (("Run error", run.error), ("Stats error", run.stats.get("error"))):
+        if isinstance(text, str) and text and (label == "Run error" or text != run.error):
+            st.caption(label)
+            st.code(text, language=None, wrap_lines=True)
+
+
+def render_observability() -> None:
+    with _session() as session:
+        runs = queries.enrich_runs(session)
+        if not runs:
+            st.info(
+                "No enrichment runs yet. Run `uv run python -m sprout.enrich NAME_OR_NUMBER` "
+                "to create one."
+            )
+            return
+        counts = queries.failure_counts(session)
+        trend = queries.cost_trend(session)
+        days = queries.daily_outcomes(session)
+
+        failed = sum(r.failure_category is not None for r in runs)
+        total_cost = sum(r.cost_usd for r in runs)
+        total_iterations = sum(r.iterations for r in runs)
+        cols = st.columns(4)
+        cols[0].metric("Runs", len(runs))
+        cols[1].metric("Failed", failed)
+        cols[2].metric("Total cost (US$)", f"{total_cost:.2f}")
+        cols[3].metric(
+            "Mean cost per iteration (US$)",
+            f"{total_cost / total_iterations:.4f}" if total_iterations else "n/a",
+        )
+
+        st.subheader("Failures by category")
+        if counts:
+            st.bar_chart(pd.Series(counts, name="runs"))
+            st.dataframe(
+                pd.DataFrame({"category": list(counts), "runs": list(counts.values())}),
+                hide_index=True,
+                width="stretch",
+            )
+        else:
+            st.success("No failed runs")
+
+        st.subheader("Trends")
+        left, right = st.columns(2)
+        left.caption("Cost per iteration (US$), per run")
+        left.line_chart(
+            pd.DataFrame(
+                {"run": p.run_id, "cost per iteration": p.cost_per_iteration} for p in trend
+            ),
+            x="run",
+            y="cost per iteration",
+        )
+        right.caption("Failed runs per day")
+        right.bar_chart(
+            pd.DataFrame({"day": d.day, "failures": d.failures} for d in days),
+            x="day",
+            y="failures",
+        )
+
+        st.subheader("Runs")
+        filters = st.columns([2, 1])
+        category = filters[0].selectbox(
+            "Failure category", [""] + list(counts), format_func=lambda c: c or "any"
+        )
+        failures_only = filters[1].toggle("Failures only")
+        shown = queries.enrich_runs(
+            session, failure_category=category or None, failures_only=failures_only
+        )
+        st.caption(f"{len(shown)} runs")
+        if not shown:
+            return
+        st.dataframe(pd.DataFrame(_run_row(r) for r in shown), hide_index=True, width="stretch")
+
+        st.subheader("Run detail")
+        by_id = {r.run_id: r for r in shown}
+        chosen = st.selectbox(
+            "Run",
+            list(by_id),
+            format_func=lambda i: f"#{i} {by_id[i].started_at:%Y-%m-%d %H:%M} ({by_id[i].status})",
+        )
+        _render_run_detail(session, by_id[chosen])
+
+
 def render_run_and_test() -> None:
     settings = get_settings()
     st.write("Keys configured (values are never shown):")
@@ -245,11 +379,14 @@ def main() -> None:
     st.title("🌱 Sprout")
     st.caption("UK AI startup discovery: progress and test console")
 
-    names = ["Progress", "Companies", "News"]
+    tabs = [
+        ("Progress", render_progress),
+        ("Companies", render_companies),
+        ("News", render_news),
+        ("Observability", render_observability),
+    ]
     if actions_enabled():
-        names.append("Run & test")
-    tabs = st.tabs(names)
-    renderers = [render_progress, render_companies, render_news, render_run_and_test]
-    for tab, render in zip(tabs, renderers, strict=False):
+        tabs.append(("Run & test", render_run_and_test))
+    for tab, (_, render) in zip(st.tabs([name for name, _ in tabs]), tabs, strict=True):
         with tab:
             render()
