@@ -205,7 +205,7 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 
 ## Phase 3 - Observability
 
-**Status: done, with one live check not achieved.** Steps and failure categories are recorded for every enrichment run, queryable through five new functions and shown in a new Observability tab. `uv run pytest -q` passes (229 tests) and `uv run ruff check` is clean. The live check wrote steps and categories end to end against the real API, but the planned deterministic `iteration_cap` run could not be produced because `--max-iterations 2` hits an API 400 (see "Open items"). The step 3c findings batch is recorded separately below once run.
+**Status: done, with one live check not achieved.** Steps and failure categories are recorded for every enrichment run, queryable through five new functions and shown in a new Observability tab. `uv run pytest -q` passes (229 tests) and `uv run ruff check` is clean. The live check wrote steps and categories end to end against the real API, but the planned deterministic `iteration_cap` run could not be produced because `--max-iterations 2` hits an API 400 (see "Open items"). The step 3c findings batch (20 live runs) is recorded under "Step 3c findings" at the end of this section.
 
 ### What was built
 | Item | Where |
@@ -218,7 +218,9 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 | `render_observability` and the Observability tab (after News, before gated Run & test); tabs now built from `(name, renderer)` pairs | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
 | Tests | `tests/test_failures.py` (new), additions to `test_agent_loop.py`, `test_db.py`, `test_enrich.py`, `test_app_queries.py`, `test_dashboard.py` |
 
-Commits: step 1 `3ba922b` (taxonomy and schema), step 2 `b93c0bb` (loop step records), step 3 `1082259` (enrich wiring), step 4 `8738494` (queries), step 5 `e500f56` (dashboard).
+Commits: step 1 `3ba922b` (taxonomy and schema), step 2 `b93c0bb` (loop step records), step 3 `1082259` (enrich wiring), step 4 `8738494` (queries), step 5 `e500f56` (dashboard), fix `6ac974c` (see below).
+
+Found while analysing the findings batch: the 40 oldest `enrich` rows (ids 3 to 42) store `cost_gbp` and `usd_to_gbp` and no `cost_usd`, so the first version of the queries showed their cost as 0. `queries.py` now converts `cost_gbp / usd_to_gbp` when `cost_usd` is absent (commit `6ac974c`, one new test). Across all 64 enrich rows the tab now reports about US$0.91 in total.
 
 ### Acceptance criteria
 - [x] **Every enrichment run's steps are inspectable after the fact without rerunning it.** Verified live on runs 43, 44, 45 and 46 (`SELECT ... FROM run_log_step WHERE run_log_id = ?`), including the multi-tool pattern (`lookup_companies_house,web_search`), `tool_errors` (run 44 step 3, a rejected submission) and a failed run (run 45 and 46, `api_error`, one step each). Step costs sum exactly to `stats.cost_usd` for runs 43 (0.024016) and 44 (0.013197). Scripted tests cover `len(steps) == iterations`, summed step usage equal to `result.usage`, truncation at the cap, and steps plus category committed for every non-success stop (invalid, max_iter, budget, no_submit, truncated, refused, api error). **Caveat:** runs made before this phase have no steps (by design; the tab says so).
@@ -231,7 +233,7 @@ Live spend for the check: four calls, about US$0.0376 (runs 43 to 46: 0.0240, 0.
 ### Open items (need you)
 1. **Pre-existing loop bug, reproducible with `--max-iterations 2`.** Both attempts (run 45, DYAD ARTIFICIAL INTELLIGENCE LIMITED 12626064, and run 46, ARTIFICIAL INTELLIGENCE CONSULTING LTD 14925003) ended `stop=error`, `BadRequestError` 400 on the second request: "`web_search` tool use ... was found without a corresponding `web_search_tool_result` block" (`messages.1`). Iteration 1 of every run emitted a server-side `web_search` together with a custom `lookup_companies_house` tool_use (`stop_reason=tool_use`, step `web_searches=0`, no search result block in the response). Runs 43 and 44 (default 12 iterations) accepted the same pattern. The two failures both had the cap of 2, where the second request also carries the wrap-up notice, so the cap may be a trigger, but this was not isolated. This is not caused by step logging (steps are read only after the loop ends), but it may affect real runs intermittently, and it blocks the planned live `iteration_cap` check. Needs a decision: fix in the loop (for example handle a response whose `server_tool_use` has no result, or avoid mixing server and custom tool calls) in a later phase or a fix-up. Not changed here (out of scope).
 2. `docs/architecture.md` shows as modified in the working tree (it reflows the `StepRecord` code block in 3.6; the cause, probably a formatter or hook, was not identified). It was left uncommitted and untouched by the implementers; a `git checkout` to discard it was blocked by the permission system, so decide whether to commit or discard it.
-3. The step 3c findings batch and Phase 4 proposals are in the section below (when present). No Phase 4 number has been changed.
+3. The Phase 4 proposals under "Step 3c findings" need your decision. No Phase 4 number has been changed.
 
 ### Decisions locked in
 - **A27/A28/A29 kept as designed:** no tool-input or URL logging; `invalid_output` is not split into sub-reasons; one step row per model response, not per tool call (tool names comma-joined in `tool_name`).
@@ -247,3 +249,29 @@ Live spend for the check: four calls, about US$0.0376 (runs 43 to 46: 0.0240, 0.
 - The Observability metrics and charts use the newest 200 runs (`enrich_runs` default limit); the failure-category chart covers all runs. Irrelevant at about 45 runs, relevant in Phase 5.
 - Steps are persisted at the end of a run, so a hard process kill loses that run's steps (as it already loses its stats). Live per-worker progress in Phase 5 needs the optional `on_step` callback described in the architecture (A29 notes).
 - Queries live in `app/queries.py`, Streamlit-free, reusable by the Phase 6 service layer; the file moves to `sprout/queries.py` before Phase 7.
+
+### Step 3c findings (live batch, 2026-10-28)
+Batch: the 20 highest-`candidate_score` companies that were not pilots and not yet enriched (run ids 47 to 66, Haiku 5.5, defaults, `uv run python -m sprout.enrich <20 numbers>`). Total cost **US$0.3049**. All figures come from `run_log`, `run_log_step` and the new query functions; the 20 runs are all name-matched "artificial intelligence" shell-style companies, not the pilot set, so they are not representative of real startups.
+
+| Finding | Measured |
+|---|---|
+| Outcome of the batch | 20/20 `submitted`, 0 failures, 0 `failure_category` values |
+| Cost per run | min 0.0117, mean 0.0152, max 0.0242 USD; steps sum exactly to the run cost on all 20 |
+| Cost driver | 1 web search: mean about 0.0126 (15 runs); 2 searches: about 0.0232 (5 runs). The search is the cost, as in Phase 2 |
+| Iterations | 2 (6 runs), 3 (13 runs), 5 (1 run); mean 2.8 |
+| Repairs | 7 of 20 runs needed one repair (35%); all 7 succeeded, so they are invisible in `failure_category` |
+| Tool errors (56 steps) | 11: 7 in steps containing `submit_profile` (5 of 22 submit-only steps, 1 of 4 search+submit, 1 of 1 double-search+submit; matches the 7 repairs) and 4 of 7 `fetch_page`-only steps (blocked pages). No errors in the Companies House lookup steps |
+| Categories assigned | `Other` 12, AI models and applications 6, Enterprise software and cloud 2; the `Other` runs had only 2 to 3 sourced facts |
+| `response_text` | Empty on all 64 logged steps (the model returns no text blocks at `low` effort and with tool calls); the truncation path was never hit live |
+| Historical failure mix (all 64 enrich rows) | 53 success, 7 `invalid_output`, 3 `api_error`, 1 `refusal`. All 7 `invalid_output` and the refusal are from the 2026-10-19 prompt iteration (before the ledger fixes). Since then the only failures are the two `--max-iterations 2` 400s |
+| Cost by day (queries) | 10-19: 30 runs, 8 failures, US$0.42; 10-25: 10 runs, 1 failure, US$0.15; 10-28: 24 runs, 2 failures, US$0.34 |
+
+What the observability data says about failure causes: under current code the dominant risk is not the model but the loop's handling of mixed server and custom tool calls (the 400 in Open items 1). Everything else is a rare, transient event (one refusal in 64).
+
+**Proposed Phase 4 adjustments (for you to approve, none applied):**
+1. **Golden-set stratification.** The candidate pool's top scores are mostly shell-style names whose real category is `Other`. A golden set drawn only from famous startups would flatter category accuracy; include a deliberate share of `Other`/non-startup names (for example 6 to 8 of 30) and label them honestly, so the metric tests the "unknown is acceptable" behaviour.
+2. **Profiles-submitted floor.** Current code submitted 20/20 on the batch and 10/10 on the pilot. A floor set near the old 85% target would not catch a regression such as 2 failures in 24; consider raising it (for example to 95%) after Phase 4's first baseline run, and count `api_error` separately from model failures so an infrastructure 400 does not look like a quality regression.
+3. **Add a repair-rate metric** (runs with `stats.repairs > 0` over runs). 35% of runs needed a repair yet all count as success; a prompt change that doubles the rate would be invisible to the current gates.
+4. **Cost gate.** Observed max per company is US$0.0265 against the US$0.13 cap and the mean is US$0.0146. A cost-per-company gate in the region of US$0.03 to 0.04 would catch a doubling without false alarms; set it from the baseline run, not from this batch alone.
+5. **Judge input.** `response_text` is empty, so the Phase 4 judge and failure diagnosis cannot rely on it. Diagnosis depends on `tool_name` sequences, `tool_errors` and `stop_reason`; if text is wanted, the tool error message (not logged by decision A27) would be the thing to reconsider.
+6. **Fix or avoid the 400** (Open items 1) before the eval run, or the baseline will contain `api_error` noise whenever a low iteration cap is used (for example in the tiny-cap guardrail tests).
