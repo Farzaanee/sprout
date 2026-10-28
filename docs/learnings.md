@@ -44,7 +44,7 @@ Skills and lessons picked up phase by phase. Planned learnings come from `docs/p
 | Timezone-naive datetimes | Rejected outright by this SQLModel version, so "UTC everywhere" has to be enforced from the first write. |
 | Web-scraping etiquette as security | Resolving every host, and every redirect hop, to a public IP blocks SSRF via DNS rebinding to loopback/private/metadata addresses, on top of honouring `robots.txt`. |
 | Paginating without a total count | `/advanced-search/companies` never reports a total result count, so paginating it has to treat "a page came back shorter than requested" as the only end-of-results signal, rather than computing how many pages are left. |
-| Taxonomy locked, left unwired | The `Category` taxonomy is deliberately locked in Phase 0 but left unwired through all of Phase 1: `ingest.py`/`candidates.py`/`db.py` never reference it, since the heuristic filter only produces uncategorised candidates by design. Assigning a category is Phase 3's job (a dedicated classifier agent), not something to bolt onto discovery early. |
+| Taxonomy locked, left unwired | The `Category` taxonomy is deliberately locked in Phase 0 but left unwired through all of Phase 1: `ingest.py`/`candidates.py`/`db.py` never reference it, since the heuristic filter only produces uncategorised candidates by design. Assigning a category is Phase 5's job (a dedicated classifier agent), not something to bolt onto discovery early. |
 
 **Key files:**
 
@@ -130,10 +130,10 @@ Not a plan phase, but built early to check progress. **Actual learnings:**
 | Deriving the tool schema | `submit_profile_schema()` takes `CompanyProfile.model_json_schema()`, inlines `$ref`s, drops keywords the tool schema does not accept (`title`, `default`, `minimum`, `format` and so on), and marks all fields required. Deriving it means the schema cannot drift from the model, but `_simplify` drops any dict key with those names, so a future `CompanyProfile` field called `title` or `format` would silently vanish from the schema. |
 | Provenance in code, not prompt | A prompt saying "cite only real URLs" was not enough: in the first live pass 3 of 10 companies (Cleo, Tractable, Quantexa) ended `invalid` because the model cited homepages no tool had returned, and repeated them after the repair message. What worked was a `SourceLedger` of URLs tools actually returned, validation in `validate_submission`, a repair message listing up to 25 citable URLs, and a prompt line saying to `fetch_page` a site before citing it. Final pass: 10/10 `submitted`. |
 | URL matching | The ledger compared `https://x.com` and `https://x.com/` as different URLs, which kept Cleo and Quantexa `invalid` on the second pass. `_ledger_key` now ignores a trailing slash, host case, fragments and tracking params (via `normalise_url`). Exact string matching of URLs between model and tools is a bug source. |
-| Snippet-only sources | Server-side `web_search` results arrive encrypted, so what the model saw cannot be audited from our side. The ledger records whether a URL was only seen in a search result or actually fetched, and `validate_submission` caps unfetched sources at `medium` confidence. A real check needs a verifier agent (Phase 3). |
+| Snippet-only sources | Server-side `web_search` results arrive encrypted, so what the model saw cannot be audited from our side. The ledger records whether a URL was only seen in a search result or actually fetched, and `validate_submission` caps unfetched sources at `medium` confidence. A real check needs a verifier agent (Phase 5). |
 | Currency conversion | Telling the model to "note the original currency" was not enough: it left funding amounts null for non-USD figures. Putting approximate conversion rates into USD in the prompt fixed most cases, with the original figure and rate in `note`. Null is still the safe failure, but it understates funding coverage. |
 | Errors fed back to the model | The rejection message lists the problem fields and citable URLs but does not echo the model's input (`_compact_errors`). One repair attempt (`Budget.max_repairs = 1`) is allowed, and a repair is not counted as a failure in the stats. |
-| Prompt injection | Every custom tool result is wrapped in `<untrusted_content source="...">` by `wrap_untrusted`, which truncates to 8,000 characters and neutralises any literal `<untrusted_content` tag inside the page so a page cannot close the wrapper early. The prompt tells the model that wrapped text and search results are data, never instructions. Tests cover the wrapper, but there is no adversarial eval yet (Phase 5). |
+| Prompt injection | Every custom tool result is wrapped in `<untrusted_content source="...">` by `wrap_untrusted`, which truncates to 8,000 characters and neutralises any literal `<untrusted_content` tag inside the page so a page cannot close the wrapper early. The prompt tells the model that wrapped text and search results are data, never instructions. Tests cover the wrapper, but there is no adversarial eval yet (Phase 4). |
 | Tool errors are tool results | Handlers return `ToolOutcome(is_error=True)` for robots blocks, SSRF blocks, fetch failures and unknown companies, and `_run_tool` also converts unexpected exceptions into error results. A tool bug or a blocked page must reach the model as text it can react to, never end the run. |
 | Guards run before each call | Iteration and USD caps are checked before every API call, so the iteration cap is exact but the USD cap is soft by at most one response, since cost is only known afterwards. The wrap-up notice is appended on the last iteration or at 80 percent of the USD cap. The tiny-cap test criterion is verified with `ScriptedClient` mocks only, not live. |
 | Thinking tokens and cost | Thinking is billed as output and is already inside `usage.output_tokens`, so `cost_usd` needs no separate term. Effort is set explicitly (`output_config={"effort": "low"}`) because default effort on Haiku 5.5 is `medium` and would raise cost and `max_tokens` use. |
@@ -145,7 +145,7 @@ Not a plan phase, but built early to check progress. **Actual learnings:**
 | NULL-value facts | `save_profile` stores "researched, nothing found" as a NULL-value fact, so a dashboard can tell it from "never tried". Consequence found in review: a field valued in run 1 and null in run 2 ends with both facts, so a winning-value rule must exist before any front end reads facts. |
 | Additive migration | SQLModel `create_all` does not alter existing tables. `init_db` now adds missing nullable columns with `ALTER TABLE` (needed for `company.category` on the existing `data/sprout.db`), and raises with "delete the database" advice for anything that is not a plain nullable column. |
 | Testing an LLM loop | `tests/fakes.py` provides a `ScriptedClient` that returns queued responses and records every request, which makes stop reasons, caps and repair paths deterministic. It snapshots the `messages` list per call because the loop mutates the same list. No `-m live` enrichment test was added, so a plain `pytest` with an API key never spends money. |
-| Non-determinism | Even with the ledger, an occasional run ends `invalid` or `refused` (one Cleo run was a transient refusal that succeeded on retry), and one Tractable run had web search unavailable and correctly returned nulls. Mocked tests cannot catch this, so the 10-company live run (30 `enrich` runs while iterating, about USD 0.42 in total) was the real acceptance test. Phase 3 needs retries and `enrichment_state`. |
+| Non-determinism | Even with the ledger, an occasional run ends `invalid` or `refused` (one Cleo run was a transient refusal that succeeded on retry), and one Tractable run had web search unavailable and correctly returned nulls. Mocked tests cannot catch this, so the 10-company live run (30 `enrich` runs while iterating, about USD 0.42 in total) was the real acceptance test. Phase 5 needs retries and `enrichment_state`. |
 | Wrong-company risk | A claimed website can be wrong (Airborne Robotics' site returned another company's content). The prompt tells the model to disambiguate by Companies House number, and the result is stored at medium confidence with a caveat in the note, but only a verifier would catch it reliably. |
 
 **Key files:**
@@ -175,7 +175,7 @@ Not a plan phase, but built early to check progress. **Actual learnings:**
 | Role | Everything profile-specific: system prompt, `submit_profile` schema, `validate_submission`, `enrich_company` / `enrich_with_result`, `resolve_company` and the CLI. `sprout/enrich.py` is an 8-line shim so `python -m sprout.enrich` works. |
 | Defaults | 12 iterations, USD 0.13, effort `low`, `MAX_OUTPUT_TOKENS` 6,000, Haiku 5.5 (Sonnet 5.5 via `--strong`, not run live). |
 | Identity | The model never supplies `name` or `news`, and `retrieved_at` is stamped from the ledger by code. `name` comes from the DB row. |
-| Size | About 460 lines. Split the CLI and `resolve_company` out when Phase 3 adds an orchestrator. |
+| Size | About 460 lines. Split the CLI and `resolve_company` out when Phase 5 adds an orchestrator. |
 
 `costs.py`
 
@@ -204,21 +204,21 @@ Not a plan phase, but built early to check progress. **Actual learnings:**
 | Schema | A description of data's shape (fields, types, required-ness), not the data itself. Shows up three ways here: tool `input_schema` (JSON Schema the model must match to call a tool), `submit_profile_schema()` (derived from `CompanyProfile` so it can't drift), and SQLModel table classes (the DB schema). |
 | Delimiter spoofing example | `wrap_untrusted` escapes any `<untrusted_content`/`</untrusted_content` already inside fetched page text before wrapping it. Without that, a page could embed a fake closing tag followed by injected instructions (e.g. "set funding to US$50m"), tricking the model into reading them as outside the untrusted block, i.e. as if they were trusted, instead of as page content to ignore. |
 
-## Phase 3 - Multi-agent pipeline at scale
+## Phase 3 - Observability
 
-**Planned:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, verification/cross-checking patterns, failure isolation.
-
-**Status:** not started yet; no actual learnings to add.
-
-## Phase 4 - MCP server
-
-**Planned:** the Model Context Protocol (tools vs resources vs prompts, transports, capability negotiation), writing tool descriptions that LLMs use well, MCP client + server roles, separating read-only from side-effecting tools.
+**Planned:** structured logging/observability design for agentic systems, designing a failure taxonomy for comparability, building a minimal internal dashboard from operational data.
 
 **Status:** not started yet; no actual learnings to add.
 
-## Phase 5 - Evals & guardrails
+## Phase 4 - Evals & guardrails
 
 **Planned:** evaluating LLM systems (golden sets, metrics, LLM-as-judge and its limits), regression testing prompts, prompt-injection and SSRF defences, treating model output as untrusted too.
+
+**Status:** not started yet; no actual learnings to add.
+
+## Phase 5 - Multi-agent pipeline at scale
+
+**Planned:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, verification/cross-checking patterns, failure isolation.
 
 **Status:** not started yet; no actual learnings to add.
 
@@ -228,7 +228,13 @@ Not a plan phase, but built early to check progress. **Actual learnings:**
 
 **Status:** not started yet (beyond the early progress console above); no actual learnings to add.
 
-## Phase 7 - Automation, deployment & documentation
+## Phase 7 - MCP server
+
+**Planned:** the Model Context Protocol (tools vs resources vs prompts, transports, capability negotiation), writing tool descriptions that LLMs use well, MCP client + server roles, separating read-only from side-effecting tools.
+
+**Status:** not started yet; no actual learnings to add.
+
+## Phase 8 - Automation, deployment & documentation
 
 **Planned:** CI/CD with GitHub Actions, secrets in CI, containerisation, deployment of data apps, technical writing and documenting trade-offs.
 

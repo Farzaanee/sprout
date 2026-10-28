@@ -2,7 +2,7 @@
 
 An agent system that discovers UK AI startups, groups them by sector (AI models, fintech, enterprise software, healthtech, …) and keeps a sourced profile for each one: funding raised, stage, business model, target user and recent notable news. Results are served through a Streamlit dashboard and an MCP server, so any MCP client (Claude Desktop, Claude Code) can query the data in natural language.
 
-**Budget:** ~45 hours over ~4 weeks · **API spend cap:** ~US$26 · **Stack:** Python 3.12, Claude API (Anthropic SDK), SQLite, FastMCP, Streamlit.
+**Budget:** ~50 hours over ~4 weeks · **API spend cap:** ~US$26 · **Stack:** Python 3.12, Claude API (Anthropic SDK), SQLite, FastMCP, Streamlit.
 
 ---
 
@@ -57,12 +57,13 @@ tests/
 | 0 | Setup & definitions | 2 |
 | 1 | Data foundations | 6 |
 | 2 | First agent: single-company enrichment | 8 |
-| 3 | Evals & guardrails | 6 |
-| 4 | Multi-agent pipeline at scale | 8 |
-| 5 | Dashboard | 5 |
-| 6 | MCP server | 6 |
-| 7 | Automation, deployment & documentation | 4 |
-| | **Total** | **45** |
+| 3 | Observability | 5 |
+| 4 | Evals & guardrails | 6 |
+| 5 | Multi-agent pipeline at scale | 8 |
+| 6 | Dashboard | 5 |
+| 7 | MCP server | 6 |
+| 8 | Automation, deployment & documentation | 4 |
+| | **Total** | **50** |
 
 ---
 
@@ -131,7 +132,27 @@ tests/
 
 ---
 
-## Phase 3 - Evals & guardrails (≈6h)
+## Phase 3 - Observability (≈5h)
+**Objectives:** structured, queryable records of what each enrichment run actually did, so failures can be categorised and diagnosed before locking in eval design and before the pipeline runs concurrently.
+
+**Steps**
+1. Add structured step logging inside the agent loop: for each iteration, record which tool was called, prompt/response token counts, and a truncated copy of the model's response text. Store it as a JSON list on the `run_log` row (or a new `run_log_step` table if a single JSON blob gets unwieldy).
+2. Define a small, fixed failure taxonomy (stop reason, error type) to use as the primary grouping/filtering dimension; keep the raw error text and model response as drill-down detail only, not something charted directly.
+3. Add an observability page to the existing Streamlit progress console: failures grouped by category, cost/iteration trend across runs, and a drill-down into a single run's steps.
+4. Use what this surfaces (common failure modes, cost outliers) to inform the golden-set composition and threshold choices in the next phase.
+
+**Acceptance criteria**
+- Every enrichment run's steps are inspectable after the fact without rerunning it.
+- The dashboard groups failures by category and shows cost/error trends across runs.
+- Step logging does not change enrichment behaviour or materially slow down a run.
+
+**Risks & caveats:** Categorising *why* a run failed beyond the stop reason (e.g. what in the model's reasoning went wrong) isn't free, it needs either a fixed taxonomy decided up front or a judge call; start with the stop/error dimensions only and treat anything deeper as a stretch goal. Logging raw model text means untrusted scraped content can end up in the log too, so truncate and treat logged text as untrusted, same as elsewhere. This schema will likely need to grow in Phase 5 (multi-agent) to track per-company status across concurrent workers.
+
+**Learnings:** structured logging/observability design for agentic systems, designing a failure taxonomy for comparability, building a minimal internal dashboard from operational data.
+
+---
+
+## Phase 4 - Evals & guardrails (≈6h)
 **Objectives:** quantify quality, protect against bad inputs, and make regressions visible.
 
 **Steps**
@@ -154,7 +175,7 @@ tests/
 
 ---
 
-## Phase 4 - Multi-agent pipeline at scale (≈8h)
+## Phase 5 - Multi-agent pipeline at scale (≈8h)
 **Objectives:** split the work across specialised agents and run the whole pipeline over ~50 companies (for now).
 
 **Steps**
@@ -177,7 +198,7 @@ tests/
 
 ---
 
-## Phase 5 - Dashboard (≈5h)
+## Phase 6 - Dashboard (≈5h)
 **Objectives:** a clear interface for exploring the market.
 
 **Steps**
@@ -199,7 +220,7 @@ tests/
 
 ---
 
-## Phase 6 - MCP server (≈6h)
+## Phase 7 - MCP server (≈6h)
 **Objectives:** expose the dataset to any MCP client, and consume at least one external MCP server.
 
 **Steps**
@@ -222,7 +243,7 @@ tests/
 
 ---
 
-## Phase 7 - Automation, deployment & documentation (≈4h)
+## Phase 8 - Automation, deployment & documentation (≈4h)
 **Objectives:** make the project reproducible, self-updating and easy to understand.
 
 **Steps**
