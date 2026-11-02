@@ -1,6 +1,6 @@
 # Phase 3: Observability (design, not built)
 
-Part of the [Sprout architecture docs](README.md). Designed on 2026-10-28 (the plan added this phase after Phase 2 and before Phase 4, so the golden set and thresholds can be informed by real failure patterns). Nothing here exists in code; the implementation split is at the end of this page. The phase is three independently verifiable pieces: (a) backend (schema, `failures.py`, loop and enrich wiring), (b) UI (queries and the dashboard tab), (c) an analysis step that uses a fresh batch of logged runs to review the [Phase 4](phase-4-evals-guardrails.md) design.
+Part of the [Sprout architecture docs](README.md). Nothing here exists in code yet; this page is the design, split into three independently verifiable pieces: (a) backend (schema, `failures.py`, loop and enrich wiring), (b) UI (queries and the dashboard tab), (c) an analysis step that uses a fresh batch of logged runs to review the [Phase 4](phase-4-evals-guardrails.md) design.
 
 ```mermaid
 %%{init: {"flowchart": {"rankSpacing": 20, "nodeSpacing": 20}}}%%
@@ -35,19 +35,8 @@ flowchart TB
 ```
 
 - **Shape in one paragraph:** `loop.py` records one `StepRecord` per model response in memory and returns the list on `LoopResult`; it still imports no database code and the loop never reads the records, so behaviour cannot change. `enrich.py` persists them as `run_log_step` rows, together with the stats and a new `run_log.failure_category`, in the single commit it already makes before raising, so steps survive a failed run. The dashboard reads both tables through five new `app/queries.py` functions.
-- **Options compared:**
-
-| Decision | Option | For | Against | Verdict |
-|---|---|---|---|---|
-| Where steps live | JSON list in `run_log.stats` | No new table | Dashboard must load and parse a growing blob to show one run; cannot filter by tool or aggregate tokens in SQL; blob grows with Phase 5 workers | Rejected (plan's fallback) |
-| | New `run_log_step` child table | Drill-down is one indexed lookup; steps stay queryable; consistent with `fact` and `funding_round` being split out; additive (`create_all`) | One more table and a few more columns | Recommended (D27) |
-| How the loop emits steps | Optional `on_step` callback persisting each iteration | Survives a process crash mid-run; foundation for live per-worker progress | Loop behaviour now depends on a caller callback that can raise or block on SQLite; a mid-run DB write per iteration for no Phase 3 need; the stats row is written only at the end anyway, so a crashed run would have steps but no stats | Not now: add it in Phase 5 if live progress is needed (an additive parameter) |
-| | `LoopResult.steps` list built in memory, persisted by `enrich.py` after `run_agent` returns | No new parameter or callback; cannot change loop behaviour; steps and stats land in one commit so they are consistent; trivially testable with `ScriptedClient` | A hard process kill mid-run loses that run's steps, as it already loses its stats | Recommended (D29) |
-| | `loop.py` imports `db` and writes rows | Simplest wiring | Breaks the DB-free loop and the single-`anthropic`-import layering; the Phase 4 judge and Phase 5 agents would write rows too | Rejected |
-| Failure grouping | Value only inside `stats` JSON | No schema change | Every dashboard grouping parses JSON; no cheap filter | Rejected |
-| | Real nullable column `run_log.failure_category` | Plain `GROUP BY` and filter; works for every `kind` | One more additive column; taxonomy lives in code, not the database | Recommended (D28) |
-
-- **Ordering note:** [Phase 4](phase-4-evals-guardrails.md) was designed before this phase. Step (c) of the plan may therefore reopen parts of it (golden-set stratification, the profiles-submitted floor, the `GATES` values). Do not edit those numbers from findings without the user; record the proposal in `implementation-notes.md` and A30 (see [Plan ambiguities](risks.md#62-plan-ambiguities)).
+- Steps live in a new `run_log_step` child table rather than a JSON list in `run_log.stats`, so drill-down is one indexed lookup and the dashboard can filter and aggregate in SQL instead of parsing a growing blob (D27). `loop.py` stays DB-free: `enrich.py` persists the in-memory `LoopResult.steps` after `run_agent` returns, in the same commit as the stats (D29), rather than giving the loop a DB-writing callback or a `db` import. Failure grouping is a real nullable `run_log.failure_category` column rather than a value buried in `stats` JSON, so a plain `GROUP BY` works (D28).
+- Step (c) of this phase (a fresh logged batch) may reopen parts of the [Phase 4](phase-4-evals-guardrails.md) design (golden-set stratification, the profiles-submitted floor, the `GATES` values); any such change goes through the user rather than being edited silently (A30, see [open ambiguities](risks.md#62-open-ambiguities)).
 
 ## Design: files that change
 
@@ -137,7 +126,7 @@ Loop bookkeeping: right after `result.iterations += 1` and the usage update, bui
 
 - `response_text` is the model's `text` blocks joined with a newline, cut to **1,000 characters** with a trailing ` [truncated]` marker. Worst case about 12 KB per run, under 2 MB for 150 runs. The cap is a module constant, below `wrap_untrusted`'s 8,000 because this is a diagnostic hint, not model context.
 - The model may echo scraped page text, so the logged text is **untrusted data**. It is stored verbatim up to the cap (no sanitising that could hide an attack), never interpolated into any prompt, and, if the Phase 4 judge or a Phase 5 agent ever reads it, it goes through `wrap_untrusted`. In Streamlit it is rendered only with `st.code`, `st.text` or dataframe cells, never `st.markdown` and never `unsafe_allow_html` (Markdown would render an attacker's image URL and make the viewer's browser fetch it). The same rule covers `run_log.error` and `stats.error`.
-- The snapshot database that Phases 6 and 8 may publish (D11, A9 in the overview) will contain these strings; truncation bounds the exposure and there are no secrets in the agent's context.
+- The snapshot database that Phases 6 and 8 may publish (D11 in [decisions](decisions.md), A9 in [risks](risks.md)) will contain these strings; truncation bounds the exposure and there are no secrets in the agent's context.
 
 ## Who persists steps, and when
 
@@ -156,7 +145,7 @@ save_profile(...)
 ## Migration (additive, D15) and historical runs
 
 - `create_all` creates `run_log_step` on an existing DB; `_add_missing_columns` adds `run_log.failure_category` (nullable, plain). No Alembic, no reset. Covered by an extended `test_init_db_adds_new_columns_to_an_old_database_and_keeps_rows`.
-- `init_db` then runs an idempotent backfill: for `kind='enrich'` rows with a NULL category and a `stats.stop` other than `submitted` (or `status='error'` with no `stop`, which maps to `internal_error`), set the category from `failure_category_for`. When checked on 2026-10-28 `data/sprout.db` held 40 `enrich` rows (31 `submitted`, 7 `invalid`, 1 `refused`, 1 `error`; the brief said 30, the count has grown since). The backfill is a few hundred rows in Python and safe to run on every start.
+- `init_db` then runs an idempotent backfill: for `kind='enrich'` rows with a NULL category and a `stats.stop` other than `submitted` (or `status='error'` with no `stop`, which maps to `internal_error`), set the category from `failure_category_for`. The backfill runs over a few hundred rows in Python and is safe to run on every start.
 - Historical runs have **no steps** and are not fabricated from `stats`. The dashboard shows them in the failure grouping and the cost trend (both come from `stats` and the column), and in the drill-down shows their run-level stats with a note. Rule for the note: no step rows and `stats.iterations > 0` means "this run predates step logging (Phase 3), run-level stats only"; no step rows and `iterations == 0` means "no model response was received".
 
 ## Query layer (`app/queries.py`, Streamlit-free, tested on a seeded temp DB)
@@ -199,9 +188,9 @@ Backend and UI are independent enough to build and verify separately; the UI can
 
 | Step | Scope | Acceptance |
 |---|---|---|
-| 3a Backend (about 3 h) | `failures.py`; `db.py` (column, table, backfill, `logged_run` fallback); `loop.py` `StepRecord`, `steps`, `error_type`; `enrich.py` wiring; tests for each | `uv run pytest` and `ruff check` pass; scripted tests show `len(steps) == iterations`, summed step usage equals `result.usage`, multi-tool and server-side tool names, `tool_errors`, truncation at the cap, steps and category committed for every non-success stop, `response_text` never longer than the cap plus marker; existing loop and enrich tests pass unchanged; old-DB migration and backfill test. Live check: enrich 2 companies, `SELECT iteration, tool_name, cost_usd FROM run_log_step WHERE run_log_id = ?`, then `--max-iterations 2` on a third gives a deterministic `iteration_cap` row with its two steps |
-| 3b UI (about 1.5 h) | five `queries.py` functions; `render_observability` and the tab; tests | query tests on a seeded DB (grouping, trend, daily, ordering, tolerance of `stats == {}`); `streamlit.testing` smoke tests for the empty, populated, no-steps and failed-run states; tab list assertion updated; `st.markdown` is not used for logged text |
-| 3c Findings (about 0.5 h, plus live spend) | run a fresh batch (suggest 20 candidates with the highest `candidate_score` that are not pilot companies, about US$0.30 at the measured average), read the tab, write a findings note in `implementation-notes.md`: failure mix, cost outliers, tool-error rates, which stops need which fix | A short table of findings and a list of proposed Phase 4 adjustments (golden-set stratification, the profiles-submitted floor, gate values) for the user to approve; no Phase 4 number is changed silently |
+| 3a Backend | `failures.py`; `db.py` (column, table, backfill, `logged_run` fallback); `loop.py` `StepRecord`, `steps`, `error_type`; `enrich.py` wiring; tests for each | `uv run pytest` and `ruff check` pass; scripted tests show `len(steps) == iterations`, summed step usage equals `result.usage`, multi-tool and server-side tool names, `tool_errors`, truncation at the cap, steps and category committed for every non-success stop; a live check against `run_log_step` and a deterministic `iteration_cap` run with `--max-iterations 2` |
+| 3b UI | five `queries.py` functions; `render_observability` and the tab; tests | query tests on a seeded DB (grouping, trend, daily, ordering, tolerance of `stats == {}`); `streamlit.testing` smoke tests for the empty, populated, no-steps and failed-run states; `st.markdown` is not used for logged text |
+| 3c Findings | run a fresh batch of non-pilot candidates, read the tab, write a findings note in `implementation-notes.md`: failure mix, cost outliers, tool-error rates, which stops need which fix | A short table of findings and a list of proposed Phase 4 adjustments for the user to approve; no Phase 4 number is changed silently |
 
 ## What Phase 5 needs (hooks only, nothing built)
 

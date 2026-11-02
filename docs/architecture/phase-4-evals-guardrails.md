@@ -1,6 +1,6 @@
 # Phase 4: Evals and guardrails (design, not built)
 
-Part of the [Sprout architecture docs](README.md). Designed on 2026-10-25, before any of this code exists. Nothing in this section exists in code yet. Much of the SSRF and size-limit work is already in `sources/web.py` (public-address check on every hop, 5 MB streamed cap, 20,000-character text cap); Phase 4 adds an explicit `UrlPolicy`, a total fetch deadline, the injection suite, and the measurement harness.
+Part of the [Sprout architecture docs](README.md). Nothing in this section exists in code yet. Much of the SSRF and size-limit work is already in `sources/web.py` (public-address check on every hop, 5 MB streamed cap, 20,000-character text cap); Phase 4 adds an explicit `UrlPolicy`, a total fetch deadline, the injection suite, and the measurement harness.
 
 ```mermaid
 flowchart TB
@@ -68,7 +68,7 @@ tests/test_evals_golden.py, test_evals_metrics.py, test_evals_judge.py, test_inj
 tests/test_web.py (policy cases), tests/test_costs.py (BatchBudget)
 ```
 
-`pyproject.toml`: pytest `pythonpath = ["scripts", "."]`; ruff `src = ["src", "tests", "."]`; add `pyyaml` to the `dev` dependency group (**[AMBIGUOUS]** A24: a new dependency; the zero-dependency alternative is `golden.toml` read with stdlib `tomllib`, at the cost of departing from the plan's `golden.yaml`). `data/eval.db` is already covered by `*.db` in `.gitignore`.
+`pyproject.toml`: pytest `pythonpath = ["scripts", "."]`; ruff `src = ["src", "tests", "."]`; add `pyyaml` to the `dev` dependency group (**open, A24**: the zero-dependency alternative is `golden.toml` read with stdlib `tomllib`). `data/eval.db` is already covered by `*.db` in `.gitignore`.
 
 ## Golden set schema (`evals/golden.yaml`)
 

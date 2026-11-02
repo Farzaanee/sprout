@@ -48,8 +48,8 @@ flowchart TB
 
 - The orchestrator is deterministic scheduling code, not an LLM supervisor (D4, see [decisions](decisions.md)).
 - `HttpClient` is synchronous and not thread-safe: one client per worker, locking, or `asyncio.to_thread`.
-- **[AMBIGUOUS]** Verifier ordering: run after the enricher, only for companies with a funding or stage claim.
-- **[AMBIGUOUS], resolved by the renumbering:** "add an agent only if evals improve" needs evals first, and evals are now Phase 4, before this phase. Nothing needs pulling forward; judge each added agent by its Phase 4 eval deltas (D9).
+- **Open:** verifier ordering — run after the enricher, only for companies with a funding or stage claim.
+- Each added agent is judged by its Phase 4 eval deltas before being kept (D9); Phase 4 evals exist before this phase runs.
 
 ## Planned modules (interfaces are proposals; the [Phase 4](phase-4-evals-guardrails.md) modules are specified there)
 
