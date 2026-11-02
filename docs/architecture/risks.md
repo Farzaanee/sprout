@@ -39,7 +39,6 @@ Part of the [Sprout architecture docs](README.md). See the [overview](overview.m
 | Phase 3 findings come from a biased, pilot-heavy sample | Medium | Run a fresh batch of non-pilot companies with logging on before drawing Phase 4 conclusions |
 | Failure taxonomy too coarse to guide fixes | Low | Start at stop/error-type level; the step text and `run_log.error` carry the detail; split `invalid` only if it dominates |
 | Schema grows again in Phase 5 for per-company status | Medium | Additive columns and tables only; `enrichment_state` references `run_log.id` |
-| CI never run green | Low | Confirm on first push |
 
 ### 6.2 Open ambiguities
 

@@ -6,7 +6,7 @@ Part of the [Sprout architecture docs](README.md).
 
 | Phase | Status | Outstanding |
 |---|---|---|
-| 0 Setup and definitions | Done | CI action versions unconfirmed |
+| 0 Setup and definitions | Done | - |
 | 1 Data foundations | Done | Candidate quality review |
 | 2 Single-company enrichment | Built, pilot run reviewed by the implementer only | User review of the pilot profiles; invoice check of the search price; no live `-m live` enrichment test; `--strong` untested live; no batch-level cap; `data/sprout.db` tracked by git |
 | 3 Observability | Design only | `failures.py`, `run_log_step` and `failure_category` migration, `StepRecord` in the loop, enrich wiring, five query functions, Observability tab, a fresh logged batch and findings note for Phase 4 |
