@@ -144,6 +144,57 @@ Only a validated `submit_profile` carries facts, so on any non-`submitted` stop 
 
 **[DRIFT]** Earlier design text also promised a per-run fetch cap and "partial" facts on a cap stop. Neither exists: page fetches are bounded only by the iteration cap, and no partial profile is ever written. There is also no batch-level USD cap: the CLI enforces `--max-usd` per company and only prints the total, so a long target list can spend `n * max_usd`. A `BatchBudget` is designed for Phase 4 (see the [Phase 4 page](phase-4-evals-guardrails.md), D24) so the evals have a batch cap, and the Phase 5 orchestrator must reuse it.
 
+## Inside `loop.py`: the iteration state machine
+
+The table above as a flowchart, one pass per iteration; "next iteration" loops back to the guard check at the top.
+
+```mermaid
+%%{init: {"flowchart": {"rankSpacing": 30, "nodeSpacing": 30}}}%%
+flowchart TB
+    START(["run_agent(client, model, system,<br/>messages, tools, budget, ...)"])
+    GUARD{"Guards:<br/>iterations &gt;= max_iterations?<br/>spent &gt;= max_usd?"}
+    MAXITER["stop = max_iter"]
+    BUDGETSTOP["stop = budget"]
+    CALL["messages.create(...)<br/>one API call"]
+    APIERR["SDK APIError after retries<br/>stop = error"]
+    USAGE["usage += response.usage<br/>cost_usd = cost_usd(model, usage)"]
+    STOPR{"stop_reason?"}
+    TOOLUSE["Run each tool_use block<br/>(fetch_page, lookup_companies_house,<br/>submit_profile, ...)"]
+    TERM{"terminal tool<br/>returned a payload?"}
+    SUBMITTED["stop = submitted<br/>payload = validated profile"]
+    REPAIRCHK{"repairs &lt; max_repairs?"}
+    REPAIR["repairs += 1<br/>error fed back as tool_result"]
+    INVALID["stop = invalid"]
+    PAUSE["Append assistant content unchanged<br/>(no new user message)"]
+    NOSUB["end_turn, or tool_use with<br/>no tool_use block: no submission"]
+    REMINDED{"reminder<br/>already sent?"}
+    REMIND["Add reminder:<br/>'call submit_profile now'"]
+    NOSUBMIT["stop = no_submit"]
+    MAXTOK["stop = truncated"]
+    REFUSAL["stop = refused"]
+    NEXT(["next iteration"])
+    DONE(["return LoopResult<br/>(payload, usage, cost_usd,<br/>iterations, repairs, stop, error)"])
+
+    START --> GUARD
+    GUARD -- "iteration cap" --> MAXITER --> DONE
+    GUARD -- "USD cap" --> BUDGETSTOP --> DONE
+    GUARD -- "ok" --> CALL
+    CALL -- "after SDK retries" --> APIERR --> DONE
+    CALL --> USAGE --> STOPR
+    STOPR -- "tool_use" --> TOOLUSE --> TERM
+    TERM -- "yes" --> SUBMITTED --> DONE
+    TERM -- "no: terminal error" --> REPAIRCHK
+    REPAIRCHK -- "yes" --> REPAIR --> NEXT
+    REPAIRCHK -- "no" --> INVALID --> DONE
+    STOPR -- "pause_turn" --> PAUSE --> NEXT
+    STOPR -- "no submission" --> NOSUB --> REMINDED
+    REMINDED -- "no" --> REMIND --> NEXT
+    REMINDED -- "yes" --> NOSUBMIT --> DONE
+    STOPR -- "max_tokens" --> MAXTOK --> DONE
+    STOPR -- "refusal" --> REFUSAL --> DONE
+    NEXT --> GUARD
+```
+
 ## Other notes
 
 - Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](overview.md#44-testing) in the overview).
