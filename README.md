@@ -37,7 +37,7 @@ uv run ruff check
 | `src/sprout/` | Package: models, config, DB, ingestion, `sources/` adapters, `app/` dashboard |
 | `tests/` | Test suite |
 | `scripts/` | Developer tools, e.g. `session_usage.py` (token accounting for Claude Code sessions) |
-| `docs/` | [Project plan](docs/project-plan.md), [architecture](docs/architecture.md), [implementation notes](docs/implementation-notes.md) |
+| `docs/` | [Project plan](docs/project-plan.md), [architecture](docs/architecture/README.md), [implementation notes](docs/implementation-notes.md) |
 | `streamlit_app.py` | Dashboard entry point |
 
 Secrets live in `.env` (never committed). Scraped content is treated as untrusted data.

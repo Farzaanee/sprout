@@ -1,6 +1,6 @@
 # Human to-dos, Phase 4 (Evals & guardrails)
 
-Source: `docs/architecture.md` section 6.3 and the Phase 4 row in section 7, cross-checked against `docs/project-plan.md`. Phase 4 is design-only right now, nothing in `evals/` is built yet. (Renamed from `human-todos-phase3.md`: Phase 3 is now Observability, inserted ahead of evals.)
+Source: `docs/architecture/overview.md` section 6.3 and the Phase 4 row in section 7, cross-checked against `docs/project-plan.md`. Phase 4 is design-only right now, nothing in `evals/` is built yet. (Renamed from `human-todos-phase3.md`: Phase 3 is now Observability, inserted ahead of evals.)
 
 ## Decisions only you can make (before or during implementation)
 
@@ -12,7 +12,7 @@ Source: `docs/architecture.md` section 6.3 and the Phase 4 row in section 7, cro
 - [ ] **Confirm the eval budget and default cap**: US$1.50 default. (A23, A26)
 - [ ] **Confirm the judge calibration plan**: Sonnet 5.5 judging Haiku 5.5 output, about 12 graded triples, 80 percent agreement threshold before judge rows are trusted. (A26)
 - [ ] **Veto or accept the other design decisions** if you disagree with any: repo-root `evals/` layout (D19), separate `data/eval.db` (D20), judge calls through `run_agent` with a `submit_verdict` tool (D23), `BatchBudget` (D24), `UrlPolicy` (D25), the overall injection design (D26).
-- [ ] **Decide on retry and partial-facts behaviour for failed enrichment runs.** Today a failed run (`invalid`, `max_iter`, `budget`, `refused`, `error`, ...) persists nothing but the `run_log` row, costs money, and is never retried automatically; you have to rerun the CLI by hand. The docs note an earlier "keep partial facts" design was dropped (`docs/implementation-notes.md:198`), and currently scope retry plus an `enrichment_state` table to Phase 5 (`docs/architecture.md`, section 6.1/6.3). Decide whether Phase 4 should pull any of this forward (even a simple retry-on-rerun) or leave it fully for Phase 5, since it affects how you read the eval numbers (repeated failures vs. one-shot).
+- [ ] **Decide on retry and partial-facts behaviour for failed enrichment runs.** Today a failed run (`invalid`, `max_iter`, `budget`, `refused`, `error`, ...) persists nothing but the `run_log` row, costs money, and is never retried automatically; you have to rerun the CLI by hand. The docs note an earlier "keep partial facts" design was dropped (`docs/implementation-notes.md:198`), and currently scope retry plus an `enrichment_state` table to Phase 5 (`docs/architecture/overview.md`, section 6.1/6.3). Decide whether Phase 4 should pull any of this forward (even a simple retry-on-rerun) or leave it fully for Phase 5, since it affects how you read the eval numbers (repeated failures vs. one-shot).
 
 ## Actions that need you specifically (not just review)
 
@@ -27,7 +27,7 @@ Source: `docs/architecture.md` section 6.3 and the Phase 4 row in section 7, cro
 - [ ] **Review the 10 live pilot profiles yourself** (the existing review was done by the implementing agent, not you). (Phase 2)
 - [ ] **Check the first Anthropic/search console invoice** against the assumed US$10 per 1,000 searches price used in `costs.py` (D14). (Phase 2)
 - [ ] **Decide whether `data/sprout.db` stays tracked by git.** (Phase 2)
-- [ ] **Decide on the observability design** (Phase 3, not yet detailed): failure-taxonomy shape, `run_log.stats` extension vs. a new step-level table, whether the dashboard page extends the existing Streamlit progress console or is new. See `docs/architecture.md` 2.4.
+- [ ] **Decide on the observability design** (Phase 3, not yet detailed): failure-taxonomy shape, `run_log.stats` extension vs. a new step-level table, whether the dashboard page extends the existing Streamlit progress console or is new. See `docs/architecture/phase-3-observability.md`.
 
 ## Final acceptance check (do this last)
 
