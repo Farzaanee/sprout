@@ -6,7 +6,8 @@ This architecture is split by concern; each page below is self-contained except 
 
 ## Current state
 
-- [Overview and modules](overview.md) — goals, legend, dependency direction, and the built-module table.
+- [Overview and modules](overview.md) — goals, legend, and dependency direction.
+- [Built modules](built-modules.md) — the built-module table, with the phase each module was added in.
 - [Data model](data-model.md) — the SQLite schema, built and planned.
 - [Cross-cutting concerns](cross-cutting.md) — sourcing/provenance, agent orchestration, error handling, testing, configuration, security, cost and observability.
 - [Key design decisions](decisions.md) — the numbered decision log, D1-D31.
