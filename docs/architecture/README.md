@@ -8,7 +8,8 @@ This document used to be one file (`docs/architecture.md`). It is now split by c
 
 ## Current state
 
-- [Overview, modules, data model](overview.md) — goals, legend, dependency direction, built-module table, and the data model.
+- [Overview and modules](overview.md) — goals, legend, dependency direction, and the built-module table.
+- [Data model](data-model.md) — the SQLite schema, built and planned.
 - [Cross-cutting concerns](cross-cutting.md) — sourcing/provenance, agent orchestration, error handling, testing, configuration, security, cost and observability (4.1-4.8).
 - [Key design decisions](decisions.md) — the numbered decision log, D1-D31.
 - [Risks and open questions](risks.md) — the risk register, plan ambiguities A1-A31, and what's left to resolve by phase.
