@@ -3,7 +3,7 @@
 Status: partial (progress and test console exists). Part of the [Sprout architecture docs](README.md).
 
 ```mermaid
-flowchart LR
+flowchart TB
     ENTRY["streamlit_app.py"]
     subgraph UI["app/dashboard.py"]
         T1["Built: Progress, Companies, News, Run and test. Planned (Phase 3): Observability"]

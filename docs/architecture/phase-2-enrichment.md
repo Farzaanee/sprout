@@ -6,24 +6,28 @@ Status: done, with caveats. Part of the [Sprout architecture docs](README.md). S
 flowchart TB
     CLI["python -m sprout.enrich (shim): resolve_company maps a name or company number to a company row"]
     subgraph AGENT["agents/ (anthropic is imported only by loop.py)"]
-        ENR["enrich.py: system prompt, submit_profile schema and validation, enrich_company, enrich_with_result, CLI main, run_log stats"]
+        ENR["enrich.py:<br/>system prompt, submit_profile schema and validation,<br/>enrich_company, enrich_with_result,<br/>CLI main, run_log stats"]
         LOOP["loop.py: run_agent, stop-reason handling, iteration and USD guards, one repair"]
-        TOOLS["tools.py: build_tools, tool handlers, SourceLedger, untrusted-content wrapping"]
+        TOOLS["tools.py:<br/>build_tools, tool handlers,<br/>SourceLedger, untrusted-content wrapping"]
     end
     subgraph TOOLSET["Tools offered to the model"]
-        T1["web_search: Anthropic server-side, executed and billed by Anthropic"]
+        T1["web_search:<br/>Anthropic server-side,<br/>executed and billed by Anthropic"]
         T2["fetch_page: custom, wraps WebFetcher.fetch"]
-        T3["lookup_companies_house: custom, wraps get_company and filing_history"]
-        T4["submit_profile: custom, terminal, not strict, schema derived from CompanyProfile"]
+        T3["lookup_companies_house:<br/>custom, wraps get_company<br/>and filing_history"]
+        T4["submit_profile:<br/>custom, terminal, not strict,<br/>schema derived from CompanyProfile"]
     end
     LLM(["Anthropic API"])
     COST["costs.py: price table, Usage, cost_usd"]
-    CHECK["validate_submission: Pydantic, source URL in ledger, funding note present"]
-    DBW["db.py: save_profile (one save_fact per Sourced field, funding_rounds to its own table, company.category), add_company_by_number, logged_run kind enrich"]
+    CHECK["validate_submission:<br/>Pydantic, source URL in ledger,<br/>funding note present"]
+    DBW["db.py:<br/>save_profile (one save_fact per Sourced field,<br/>funding_rounds to its own table, company.category)<br/>add_company_by_number<br/>logged_run kind enrich"]
     SQL[("SQLite: company, fact, run_log")]
     WF["sources/web.py: WebFetcher"]
     CHC["sources/companies_house.py"]
     SRCX(["Public websites, Companies House"])
+    T1 ~~~ T2
+    T2 ~~~ T3
+    T3 ~~~ T4
+    WF ~~~ CHC
     CLI --> ENR
     ENR --> LOOP
     ENR --> TOOLS

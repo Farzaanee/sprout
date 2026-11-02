@@ -3,7 +3,7 @@
 Part of the [Sprout architecture docs](README.md).
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph CLIENTS["MCP clients"]
         CD(["Claude Desktop"])
         CC(["Claude Code"])

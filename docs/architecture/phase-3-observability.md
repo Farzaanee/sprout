@@ -3,12 +3,13 @@
 Part of the [Sprout architecture docs](README.md). Designed on 2026-10-28 (the plan added this phase after Phase 2 and before Phase 4, so the golden set and thresholds can be informed by real failure patterns). Nothing here exists in code; the implementation split is at the end of this page. The phase is three independently verifiable pieces: (a) backend (schema, `failures.py`, loop and enrich wiring), (b) UI (queries and the dashboard tab), (c) an analysis step that uses a fresh batch of logged runs to review the [Phase 4](phase-4-evals-guardrails.md) design.
 
 ```mermaid
+%%{init: {"flowchart": {"rankSpacing": 20, "nodeSpacing": 20}}}%%
 flowchart TB
-    subgraph LOOPM["agents/loop.py: DB-free, the only module importing anthropic"]
-        RUN["run_agent: one StepRecord per model response, kept on LoopResult.steps; LoopResult.error_type"]
+    subgraph LOOPM["agents/loop.py:<br/>DB-free, the only module importing anthropic"]
+        RUN["run_agent:<br/>one StepRecord per model response,<br/>kept on LoopResult.steps; LoopResult.error_type"]
     end
-    subgraph ENRM["agents/enrich.py: the only agent module touching the DB"]
-        WIRE["enrich_with_result: stats, failure_category and step rows in the one commit made before raising"]
+    subgraph ENRM["agents/enrich.py:<br/>the only agent module touching the DB"]
+        WIRE["enrich_with_result:<br/>stats, failure_category and step rows<br/>in the one commit made before raising"]
     end
     FAIL["failures.py: FailureCategory, failure_category_for (pure)"]
     LRUN[("run_log: new nullable column failure_category")]

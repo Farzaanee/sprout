@@ -3,7 +3,7 @@
 Status: done, one criterion unverified. Part of the [Sprout architecture docs](README.md).
 
 ```mermaid
-flowchart LR
+flowchart TB
     ENV[".env: API keys, SPROUT_* overrides"]
     CFG["config.py: Settings, get_settings, require_*_key"]
     MODELS["models.py: Category, Stage, Confidence, Sourced of T, FundingRound, NewsItem, CompanyProfile"]

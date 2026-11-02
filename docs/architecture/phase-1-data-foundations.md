@@ -8,12 +8,17 @@ flowchart TB
         CH(["Companies House API"])
         RSSF(["6 RSS feeds"])
         WEB(["Public websites, robots.txt"])
+        CH ~~~ RSSF
+        RSSF ~~~ WEB
     end
     subgraph SRC["sources/ adapters (synchronous)"]
-        HTTP["http.py: HttpClient with DiskCache, rate limits, retries, size cap"]
         CHC["companies_house.py"]
         RSS["rss.py"]
         WF["web.py: WebFetcher, robots, public-IP only, redirect checks"]
+        HTTP["http.py: HttpClient with DiskCache, rate limits, retries, size cap"]
+        CHC ~~~ RSS
+        RSS ~~~ WF
+        WF ~~~ HTTP
     end
     CAND["candidates.py: SIC and keyword score"]
     ING["ingest.py"]
