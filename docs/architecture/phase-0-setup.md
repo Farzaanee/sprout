@@ -21,4 +21,4 @@ flowchart TB
 
 The taxonomy, stage enum, `Sourced[T]` and `CompanyProfile` are the contract every later phase depends on.
 
-See [Status per phase](overview.md#7-status-per-phase) for outstanding items (the Claude hello call and CI action versions are unconfirmed).
+See [Status per phase](status.md) for outstanding items (the Claude hello call and CI action versions are unconfirmed).

@@ -8,7 +8,11 @@ This document used to be one file (`docs/architecture.md`). It is now split by c
 
 ## Current state
 
-- [Overview, module boundaries, cross-cutting concerns, decisions, risks, status](overview.md) — goals, legend, dependency direction, built-module table, data model, sourcing/orchestration/error-handling/testing/config/security/cost concerns, the numbered decision log (D1-D31), risks and open questions (including plan ambiguities A1-A31), and the per-phase status table.
+- [Overview, modules, data model](overview.md) — goals, legend, dependency direction, built-module table, and the data model.
+- [Cross-cutting concerns](cross-cutting.md) — sourcing/provenance, agent orchestration, error handling, testing, configuration, security, cost and observability (4.1-4.8).
+- [Key design decisions](decisions.md) — the numbered decision log, D1-D31.
+- [Risks and open questions](risks.md) — the risk register, plan ambiguities A1-A31, and what's left to resolve by phase.
+- [Status per phase](status.md) — hours, status and outstanding items for each phase.
 
 ## Diagrams and designs by phase
 

@@ -47,7 +47,7 @@ flowchart TB
 | Failure grouping | Value only inside `stats` JSON | No schema change | Every dashboard grouping parses JSON; no cheap filter | Rejected |
 | | Real nullable column `run_log.failure_category` | Plain `GROUP BY` and filter; works for every `kind` | One more additive column; taxonomy lives in code, not the database | Recommended (D28) |
 
-- **Ordering note:** [Phase 4](phase-4-evals-guardrails.md) was designed before this phase. Step (c) of the plan may therefore reopen parts of it (golden-set stratification, the profiles-submitted floor, the `GATES` values). Do not edit those numbers from findings without the user; record the proposal in `implementation-notes.md` and A30 (see [Plan ambiguities](overview.md#62-plan-ambiguities) in the overview).
+- **Ordering note:** [Phase 4](phase-4-evals-guardrails.md) was designed before this phase. Step (c) of the plan may therefore reopen parts of it (golden-set stratification, the profiles-submitted floor, the `GATES` values). Do not edit those numbers from findings without the user; record the proposal in `implementation-notes.md` and A30 (see [Plan ambiguities](risks.md#62-plan-ambiguities)).
 
 ## Design: files that change
 

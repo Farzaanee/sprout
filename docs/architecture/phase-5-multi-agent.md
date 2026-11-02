@@ -46,7 +46,7 @@ flowchart TB
     COSTS --> SQL
 ```
 
-- The orchestrator is deterministic scheduling code, not an LLM supervisor (D4, see [decisions](overview.md#5-key-design-decisions)).
+- The orchestrator is deterministic scheduling code, not an LLM supervisor (D4, see [decisions](decisions.md)).
 - `HttpClient` is synchronous and not thread-safe: one client per worker, locking, or `asyncio.to_thread`.
 - **[AMBIGUOUS]** Verifier ordering: run after the enricher, only for companies with a funding or stage claim.
 - **[AMBIGUOUS], resolved by the renumbering:** "add an agent only if evals improve" needs evals first, and evals are now Phase 4, before this phase. Nothing needs pulling forward; judge each added agent by its Phase 4 eval deltas (D9).
@@ -66,7 +66,7 @@ async def run(limit, concurrency, budget, force=False) -> RunSummary
 search_companies(...); get_company(name); latest_news(...)
 ```
 
-- Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](overview.md#44-testing) in the overview).
+- Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](cross-cutting.md#44-testing)).
 - Tool handlers return error outcomes and never raise into the loop (`run_agent` also catches any handler exception and turns it into an error result).
 - Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 7 so MCP does not import from the UI package.
 
