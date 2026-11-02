@@ -45,42 +45,42 @@ Part of the [Sprout architecture docs](README.md). See the [overview](overview.m
 
 | # | Phase | Open question | Current position |
 |---|---|---|---|
-| A1 | 2 / 7 | Search/fetch tooling differs across phases | Phase 2 resolved: server-side search only, all page reads through `WebFetcher` (D13). Still open for Phase 7: whether to replace `fetch_page` with an MCP server (see the [Phase 7 page](phase-7-mcp-server.md)) |
-| A2 | 1 / 5 | Candidate pool size and the rule for selecting which companies get enriched | Not pinned down |
-| A3 | 4 | Cost allocation across evals, repeated runs and prompt iteration | Not itemized against the total budget (see [4.8 Phase 4 eval budget](cross-cutting.md#48-phase-4-eval-budget-planned)) |
-| A4 | 5 | Per-company status has no home in the current schema | Proposed: `enrichment_state` table |
-| A5 | 5 | News has no company link, big-news score or type | Proposed: `company_news` table |
-| A6 | 6 | "Funding history" is not supported by the current model | Open |
-| A7 | 2 | `CompanyProfile.stage` and a round's `stage` in `funding_rounds` can disagree | Precedence undefined |
-| A8 | 5 | Classifier "sub-category" has no schema field | Taxonomy stays flat and frozen |
-| A9 | 6 / 8 | Snapshot delivery mechanism for read-only deployments | Undecided |
-| A10 | 6 | Dashboard is meant to be read-only but the console can spend API quota | Needs separating or removing before deploy |
-| A11 | 4 / 5 | Ordering of evals vs. the multi-agent split | Resolved: evals (Phase 4) now precede the Phase 5 split |
-| A12 | 6 | The optional Ask box duplicates MCP access | Needs a read-only guarantee and rate limit |
-| A13 | 2 / 7 | Keeping `refresh_company` out of the enrichment agent's tool set | Resolved: `ALLOWED_ENRICHMENT_TOOLS` checked at runtime and in a test (D26) |
-| A14 | 7 | `refresh_company` sync/async, cooldown and payer | Unspecified |
-| A15 | 5 | Discovery-agent output has no dedupe key when `company_number` is NULL | Open |
-| A16 | 2 | `Stage` values and funding-field units | Resolved: Series C/D/E/F are distinct values; funding fields are whole millions of USD |
-| A17 | 2 | A re-run that nulls a previously valued field leaves both facts | Proposed: the winning-value rule (see [4.1 Sourcing and provenance](cross-cutting.md#41-sourcing-and-provenance)) treats a NULL fact as lower priority than any valued one |
-| A18 | 4 | Fabricated-funding definition | Proposed (D21), not yet accepted |
-| A19 | 4 | Last-round amount rule | Proposed (D22), not yet accepted |
-| A20 | 4 | Injection-testing acceptance | Proposed: two tiers, offline + live canary (D26); needs sign-off |
-| A21 | 4 | Golden-set labelling | Needs the user to verify entries from independent sources before tuning can start |
-| A22 | 4 | URL policy: allowlist vs. deny-by-rule | Resolved: deny-by-rule in production since the agent must read arbitrary sites (D25); `allow_hosts` is for fixtures only |
-| A23 | 4 | Eval spend estimate vs. proposed caps | US$0.70/run estimate vs. a US$1.50 per-invocation cap and US$5 allocation; needs confirming |
-| A24 | 4 | Golden-set file format | Open: add `pyyaml` for YAML, or use stdlib `tomllib` with TOML |
-| A25 | 4 | Source-URL "validity" | Resolved: reports both ledger membership (free) and liveness (opt-in request) |
-| A26 | 4 | Judge model and calibration-set size | Sonnet judging Haiku, ~12 graded triples; a coarse signal until the set grows |
-| A27 | 3 | Logging tool inputs (e.g. the fetched URL) per step | Resolved: not logged; `stats.sources` already records them |
-| A28 | 3 | Failure taxonomy granularity | Resolved: stays at eight categories; `invalid_output` is not split by sub-reason |
-| A29 | 3 | Granularity of a "step" | Resolved: one model response, which can call several tools; tokens and cost are not split per tool |
-| A30 | 3 | Phase 3 findings need a fresh batch of non-pilot companies | Needed before informing Phase 4 gate values |
-| A31 | 3 / 5 | `run_log` has no company link except inside `stats.company_id` | Deferred: a nullable `run_log.company_id` lands in Phase 5 with `enrichment_state` |
+| A1 | 1 / 5 | Candidate pool size and the rule for selecting which companies get enriched | Not pinned down |
+| A2 | 2 / 7 | Search/fetch tooling differs across phases | Phase 2 resolved: server-side search only, all page reads through `WebFetcher` (D8). Still open for Phase 7: whether to replace `fetch_page` with an MCP server (see the [Phase 7 page](phase-7-mcp-server.md)) |
+| A3 | 2 | `CompanyProfile.stage` and a round's `stage` in `funding_rounds` can disagree | Precedence undefined |
+| A4 | 2 / 7 | Keeping `refresh_company` out of the enrichment agent's tool set | Resolved: `ALLOWED_ENRICHMENT_TOOLS` checked at runtime and in a test (D26) |
+| A5 | 2 | `Stage` values and funding-field units | Resolved: Series C/D/E/F are distinct values; funding fields are whole millions of USD |
+| A6 | 2 | A re-run that nulls a previously valued field leaves both facts | Proposed: the winning-value rule (see [4.1 Sourcing and provenance](cross-cutting.md#41-sourcing-and-provenance)) treats a NULL fact as lower priority than any valued one |
+| A7 | 3 | Logging tool inputs (e.g. the fetched URL) per step | Resolved: not logged; `stats.sources` already records them |
+| A8 | 3 | Failure taxonomy granularity | Resolved: stays at eight categories; `invalid_output` is not split by sub-reason |
+| A9 | 3 | Granularity of a "step" | Resolved: one model response, which can call several tools; tokens and cost are not split per tool |
+| A10 | 3 | Phase 3 findings need a fresh batch of non-pilot companies | Needed before informing Phase 4 gate values |
+| A11 | 3 / 5 | `run_log` has no company link except inside `stats.company_id` | Deferred: a nullable `run_log.company_id` lands in Phase 5 with `enrichment_state` |
+| A12 | 4 | Cost allocation across evals, repeated runs and prompt iteration | Not itemized against the total budget (see [4.8 Phase 4 eval budget](cross-cutting.md#48-phase-4-eval-budget-planned)) |
+| A13 | 4 / 5 | Ordering of evals vs. the multi-agent split | Resolved: evals (Phase 4) now precede the Phase 5 split |
+| A14 | 4 | Fabricated-funding definition | Proposed (D21), not yet accepted |
+| A15 | 4 | Last-round amount rule | Proposed (D22), not yet accepted |
+| A16 | 4 | Injection-testing acceptance | Proposed: two tiers, offline + live canary (D26); needs sign-off |
+| A17 | 4 | Golden-set labelling | Needs the user to verify entries from independent sources before tuning can start |
+| A18 | 4 | URL policy: allowlist vs. deny-by-rule | Resolved: deny-by-rule in production since the agent must read arbitrary sites (D25); `allow_hosts` is for fixtures only |
+| A19 | 4 | Eval spend estimate vs. proposed caps | US$0.70/run estimate vs. a US$1.50 per-invocation cap and US$5 allocation; needs confirming |
+| A20 | 4 | Golden-set file format | Open: add `pyyaml` for YAML, or use stdlib `tomllib` with TOML |
+| A21 | 4 | Source-URL "validity" | Resolved: reports both ledger membership (free) and liveness (opt-in request) |
+| A22 | 4 | Judge model and calibration-set size | Sonnet judging Haiku, ~12 graded triples; a coarse signal until the set grows |
+| A23 | 5 | Per-company status has no home in the current schema | Proposed: `enrichment_state` table |
+| A24 | 5 | News has no company link, big-news score or type | Proposed: `company_news` table |
+| A25 | 5 | Classifier "sub-category" has no schema field | Taxonomy stays flat and frozen |
+| A26 | 5 | Discovery-agent output has no dedupe key when `company_number` is NULL | Open |
+| A27 | 6 | "Funding history" is not supported by the current model | Open |
+| A28 | 6 / 8 | Snapshot delivery mechanism for read-only deployments | Undecided |
+| A29 | 6 | Dashboard is meant to be read-only but the console can spend API quota | Needs separating or removing before deploy |
+| A30 | 6 | The optional Ask box duplicates MCP access | Needs a read-only guarantee and rate limit |
+| A31 | 7 | `refresh_company` sync/async, cooldown and payer | Unspecified |
 
 ### 6.3 Open items by phase
-- **Phase 2:** profile review by the user, a console-invoice check of the search price, deciding whether `data/sprout.db` stays tracked by git, and the cost-split confirmation (A3).
-- **Phase 3:** approve the findings-batch spend (A30); confirm one-step-per-response (A29) and not logging tool inputs (A27).
-- **Phase 4:** label and verify the golden set (A21, critical path); approve the fabricated-funding definition (A18), last-round rule (A19) and two-tier injection acceptance (A20); choose `pyyaml` or TOML (A24); confirm the eval budget and cap (A23, A26).
-- **Before Phase 5:** schema additions (`enrichment_state`, `company_news`); a retry policy; the winning-value rule (A17); candidate pre-screen and selection; concurrency model for the sync client.
-- **Before Phase 6:** winning-value rule (A17) and the shared service layer (D10). **Before Phase 7:** define `refresh_company` (A14).
-- **Before Phases 6 and 8:** snapshot delivery (A9); data licensing and robots recheck.
+- **Phase 2:** profile review by the user, a console-invoice check of the search price, deciding whether `data/sprout.db` stays tracked by git, and the cost-split confirmation (A12).
+- **Phase 3:** approve the findings-batch spend (A10); confirm one-step-per-response (A9) and not logging tool inputs (A7).
+- **Phase 4:** label and verify the golden set (A17, critical path); approve the fabricated-funding definition (A14), last-round rule (A15) and two-tier injection acceptance (A16); choose `pyyaml` or TOML (A20); confirm the eval budget and cap (A19, A22).
+- **Before Phase 5:** schema additions (`enrichment_state`, `company_news`); a retry policy; the winning-value rule (A6); candidate pre-screen and selection; concurrency model for the sync client.
+- **Before Phase 6:** winning-value rule (A6) and the shared service layer (D29). **Before Phase 7:** define `refresh_company` (A31).
+- **Before Phases 6 and 8:** snapshot delivery (A28); data licensing and robots recheck.

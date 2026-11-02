@@ -26,4 +26,4 @@ flowchart TB
     README --> DEMO
 ```
 
-Snapshot delivery (A9 in [risks and ambiguities](risks.md)) and data licensing/robots recheck are open before this phase.
+Snapshot delivery (A28 in [risks and ambiguities](risks.md)) and data licensing/robots recheck are open before this phase.

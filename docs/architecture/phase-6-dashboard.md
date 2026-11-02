@@ -28,4 +28,4 @@ flowchart TB
     T2 -.-> LLM
 ```
 
-The Observability tab planned for Phase 3 is specified on the [Phase 3 page](phase-3-observability.md#dashboard-tab-appdashboardpy). The winning-value rule (needed before this phase reads facts) and the service-layer extraction are A17 in [risks and ambiguities](risks.md) and D10 in [decisions](decisions.md).
+The Observability tab planned for Phase 3 is specified on the [Phase 3 page](phase-3-observability.md#dashboard-tab-appdashboardpy). The winning-value rule (needed before this phase reads facts) and the service-layer extraction are A6 in [risks and ambiguities](risks.md) and D29 in [decisions](decisions.md).

@@ -68,7 +68,7 @@ tests/test_evals_golden.py, test_evals_metrics.py, test_evals_judge.py, test_inj
 tests/test_web.py (policy cases), tests/test_costs.py (BatchBudget)
 ```
 
-`pyproject.toml`: pytest `pythonpath = ["scripts", "."]`; ruff `src = ["src", "tests", "."]`; add `pyyaml` to the `dev` dependency group (**open, A24**: the zero-dependency alternative is `golden.toml` read with stdlib `tomllib`). `data/eval.db` is already covered by `*.db` in `.gitignore`.
+`pyproject.toml`: pytest `pythonpath = ["scripts", "."]`; ruff `src = ["src", "tests", "."]`; add `pyyaml` to the `dev` dependency group (**open, A20**: the zero-dependency alternative is `golden.toml` read with stdlib `tomllib`). `data/eval.db` is already covered by `*.db` in `.gitignore`.
 
 ## Golden set schema (`evals/golden.yaml`)
 
@@ -77,7 +77,7 @@ Illustrative shape only; angle-bracket values are placeholders, the real labels 
 ```yaml
 version: 1
 entries:
-  - company_number: "<8 characters>"   # identity (D8); unique; seeds the row via Companies House
+  - company_number: "<8 characters>"   # identity (D5); unique; seeds the row via Companies House
     name: "<display name>"
     category: "<exact Category value>" # validated against models.Category: a taxonomy change fails loudly
     stage: "<exact Stage value>"       # Stage of the latest known round; "Unknown" = not public
@@ -107,7 +107,7 @@ entries:
 
 ## Metrics (`evals/metrics.py`, pure functions over `Observed` and `GoldenEntry`)
 
-`read_observed(session, entry) -> Observed` reads the persisted state: `company.category`; the valued `stage` fact; the `funding_round` rows; the `total_raised_million_usd` and `valuation_million_usd` facts with `source_url` and `note`; the latest `enrich` `run_log` row for the company (`stop`, `cost_usd`, `iterations`, `sources`). In the eval DB each company has one run, so "the valued fact" is unambiguous (A17 cannot occur).
+`read_observed(session, entry) -> Observed` reads the persisted state: `company.category`; the valued `stage` fact; the `funding_round` rows; the `total_raised_million_usd` and `valuation_million_usd` facts with `source_url` and `note`; the latest `enrich` `run_log` row for the company (`stop`, `cost_usd`, `iterations`, `sources`). In the eval DB each company has one run, so "the valued fact" is unambiguous (A6 cannot occur).
 
 | Metric | Definition | Denominator | Initial gate |
 |---|---|---|---|
@@ -118,7 +118,7 @@ entries:
 | Unexpected disclosure | golden `last_round` is null but an amount was reported | submitted and golden `last_round` null | report (a human checks whether the label or the agent is wrong) |
 | Fabricated-funding rate | funding values whose cited page does not contain the figure, over all funding values present (see below) | every non-null `total_raised`, `valuation` and round amount | at most 3 percent |
 | Unverifiable funding values | sources that were snippet-only or whose text is unavailable | same | report, never hidden inside the fabricated rate |
-| Source ledger membership | every non-null cited URL is in `run_log.stats.sources` | non-null cited facts and rounds | 100 percent (regression test of D16; true by construction today) |
+| Source ledger membership | every non-null cited URL is in `run_log.stats.sources` | non-null cited facts and rounds | 100 percent (regression test of D11; true by construction today) |
 | Source liveness (`--check-urls`) | distinct cited URLs that fetch OK, are dead (404, 410, DNS failure) or are unchecked (robots, 5xx, timeout) | distinct cited URLs | dead is 0, report |
 | Free-text agreement | judge verdict counts (correct, partial, incorrect, unjudged) for `business_model` and `target_user` | entries with a reference note | report; gate only once the judge is calibrated |
 | Cost per company | mean `stats.cost_usd` over scored enrich runs (failed runs included), plus total including the judge | scored entries | report (target below US$0.07) |
@@ -215,7 +215,7 @@ class UrlPolicy:
 ```
 
 - `WebFetcher(http, ..., policy: UrlPolicy = DEFAULT_POLICY)`. `check` runs first in `_check_public_url`, so it applies to the requested URL, every redirect hop and `robots.txt`. It also rejects a URL carrying credentials (`user:pass@host`) and an empty host. The existing resolve-and-check-every-address step stays and gains `_is_public_address(addr)`: unwrap IPv4-mapped IPv6 and the NAT64 prefix `64:ff9b::/96` and test the embedded IPv4 (verified here: Python 3.12 reports `64:ff9b::7f00:1` as global, so the current `is_global` test alone lets a NAT64-encoded loopback through; mapped `::ffff:127.0.0.1`, `100.64.0.0/10`, `169.254.169.254`, `0.0.0.0` and `::1` are already refused).
-- **Why a deny-by-rule policy and not a host allowlist in production (A22):** the agent must read arbitrary company sites and press pages, so a fixed allowlist would defeat the purpose. The allowlist field exists for the second real use case, fixture-only fetchers in tests and injection runs.
+- **Why a deny-by-rule policy and not a host allowlist in production (A18):** the agent must read arbitrary company sites and press pages, so a fixed allowlist would defeat the purpose. The allowlist field exists for the second real use case, fixture-only fetchers in tests and injection runs.
 - **Timeouts and size:** the httpx timeout (20 s per phase) does not bound a slow-drip response, so `HttpClient` gains a total `max_seconds` (default 30) checked in the chunk loop of `_send`, raising `FetchError` (not retried). The 5 MB streamed cap, 20,000-character text cap and 8,000-character tool-result cap already exist and get tests: a response over the cap fails, text over the cap is cut, a slow stream hits the deadline.
 - **Required test cases** (parametrised, no network, resolver injected): `file://`, `ftp://`, `gopher://`, `javascript:`, `data:`, `http://user:pw@host/`, `http://localhost/`, `http://127.0.0.1/`, `http://[::1]/`, `http://0.0.0.0/`, `http://169.254.169.254/latest/meta-data/`, decimal, octal and hex IP forms (resolver-dependent; assert through the resolver seam), a host that resolves to a private address, a host with one public and one private record, a public host that redirects to a private one, `::ffff:127.0.0.1`, the NAT64 form, `100.64.0.1`, `http://example.com:22/`, `metadata.google.internal`, a `.internal` name, and `allow_hosts` blocking everything else.
 
@@ -230,4 +230,4 @@ class UrlPolicy:
 | `src/sprout/costs.py` | `BatchBudget` | D24 |
 | `pyproject.toml` | pytest and ruff paths; `pyyaml` in `dev` | Packaging |
 
-No database table or column changes (D15 is not triggered). The only data change is the additive `sources` list in `run_log.stats` for `enrich` rows (about 10 to 30 URLs per run); rows from before the change simply lack it, and the harness treats a missing list as "unverifiable".
+No database table or column changes (D10 is not triggered). The only data change is the additive `sources` list in `run_log.stats` for `enrich` rows (about 10 to 30 URLs per run); rows from before the change simply lack it, and the harness treats a missing list as "unverifiable".

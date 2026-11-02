@@ -35,8 +35,8 @@ flowchart TB
 ```
 
 - **Shape in one paragraph:** `loop.py` records one `StepRecord` per model response in memory and returns the list on `LoopResult`; it still imports no database code and the loop never reads the records, so behaviour cannot change. `enrich.py` persists them as `run_log_step` rows, together with the stats and a new `run_log.failure_category`, in the single commit it already makes before raising, so steps survive a failed run. The dashboard reads both tables through five new `app/queries.py` functions.
-- Steps live in a new `run_log_step` child table rather than a JSON list in `run_log.stats`, so drill-down is one indexed lookup and the dashboard can filter and aggregate in SQL instead of parsing a growing blob (D27). `loop.py` stays DB-free: `enrich.py` persists the in-memory `LoopResult.steps` after `run_agent` returns, in the same commit as the stats (D29), rather than giving the loop a DB-writing callback or a `db` import. Failure grouping is a real nullable `run_log.failure_category` column rather than a value buried in `stats` JSON, so a plain `GROUP BY` works (D28).
-- Step (c) of this phase (a fresh logged batch) may reopen parts of the [Phase 4](phase-4-evals-guardrails.md) design (golden-set stratification, the profiles-submitted floor, the `GATES` values); any such change goes through the user rather than being edited silently (A30, see [open ambiguities](risks.md#62-open-ambiguities)).
+- Steps live in a new `run_log_step` child table rather than a JSON list in `run_log.stats`, so drill-down is one indexed lookup and the dashboard can filter and aggregate in SQL instead of parsing a growing blob (D14). `loop.py` stays DB-free: `enrich.py` persists the in-memory `LoopResult.steps` after `run_agent` returns, in the same commit as the stats (D16), rather than giving the loop a DB-writing callback or a `db` import. Failure grouping is a real nullable `run_log.failure_category` column rather than a value buried in `stats` JSON, so a plain `GROUP BY` works (D15).
+- Step (c) of this phase (a fresh logged batch) may reopen parts of the [Phase 4](phase-4-evals-guardrails.md) design (golden-set stratification, the profiles-submitted floor, the `GATES` values); any such change goes through the user rather than being edited silently (A10, see [open ambiguities](risks.md#62-open-ambiguities)).
 
 ## Design: files that change
 
@@ -52,7 +52,7 @@ flowchart TB
 
 ## Failure taxonomy (`failures.py`)
 
-Eight fixed values, one per non-success outcome. The plan's "stop reason, error type" are the only two dimensions; `invalid` is deliberately not split by sub-reason (A28). A success is **NULL**, not a `'none'` value: `WHERE failure_category IS NOT NULL` is then exactly "failed runs", a `GROUP BY` never charts a fake "none" bar, and `ingest_*` runs (which have no failure concept) need no value. The cost is that a historical failed row and a success are both NULL until the backfill runs, which is why `init_db` backfills (below).
+Eight fixed values, one per non-success outcome. The plan's "stop reason, error type" are the only two dimensions; `invalid` is deliberately not split by sub-reason (A8). A success is **NULL**, not a `'none'` value: `WHERE failure_category IS NOT NULL` is then exactly "failed runs", a `GROUP BY` never charts a fake "none" bar, and `ingest_*` runs (which have no failure concept) need no value. The cost is that a historical failed row and a success are both NULL until the backfill runs, which is why `init_db` backfills (below).
 
 | `LoopResult.stop` or event | `failure_category` | Meaning and usual remedy | `stats.error_type` |
 |---|---|---|---|
@@ -76,7 +76,7 @@ class FailureCategory(StrEnum):   # values as in the table
 def failure_category_for(stop: str) -> FailureCategory | None   # "submitted" -> None; an unknown stop -> INTERNAL_ERROR (visible, not silent)
 ```
 
-The column is `str | None`, not a SQL enum (the same reasoning as `company.category`, D15 and the [data model](data-model.md): no CHECK constraint to fight `ALTER`). New categories in Phase 5 (for example a rate-limit category when the worker pool retries 429s) are code-only additions. The dashboard iterates the distinct values found, ordered by `FailureCategory` declaration order with unknown values last, so an old DB or a new value never breaks the page. **No index** on `failure_category`: `create_all` does not add indexes to an existing table, so `index=True` would exist on fresh DBs and not on migrated ones, and at a few hundred rows an index is pointless (the same call as `company.category`).
+The column is `str | None`, not a SQL enum (the same reasoning as `company.category`, D10 and the [data model](data-model.md): no CHECK constraint to fight `ALTER`). New categories in Phase 5 (for example a rate-limit category when the worker pool retries 429s) are code-only additions. The dashboard iterates the distinct values found, ordered by `FailureCategory` declaration order with unknown values last, so an old DB or a new value never breaks the page. **No index** on `failure_category`: `create_all` does not add indexes to an existing table, so `index=True` would exist on fresh DBs and not on migrated ones, and at a few hundred rows an index is pointless (the same call as `company.category`).
 
 **Error text and the model's response are drill-down only:** the full `run_log.error`, `stats.error`, and `run_log_step.response_text` are shown on the single-run view; no chart or `GROUP BY` uses them.
 
@@ -126,7 +126,7 @@ Loop bookkeeping: right after `result.iterations += 1` and the usage update, bui
 
 - `response_text` is the model's `text` blocks joined with a newline, cut to **1,000 characters** with a trailing ` [truncated]` marker. Worst case about 12 KB per run, under 2 MB for 150 runs. The cap is a module constant, below `wrap_untrusted`'s 8,000 because this is a diagnostic hint, not model context.
 - The model may echo scraped page text, so the logged text is **untrusted data**. It is stored verbatim up to the cap (no sanitising that could hide an attack), never interpolated into any prompt, and, if the Phase 4 judge or a Phase 5 agent ever reads it, it goes through `wrap_untrusted`. In Streamlit it is rendered only with `st.code`, `st.text` or dataframe cells, never `st.markdown` and never `unsafe_allow_html` (Markdown would render an attacker's image URL and make the viewer's browser fetch it). The same rule covers `run_log.error` and `stats.error`.
-- The snapshot database that Phases 6 and 8 may publish (D11 in [decisions](decisions.md), A9 in [risks](risks.md)) will contain these strings; truncation bounds the exposure and there are no secrets in the agent's context.
+- The snapshot database that Phases 6 and 8 may publish (D31 in [decisions](decisions.md), A28 in [risks](risks.md)) will contain these strings; truncation bounds the exposure and there are no secrets in the agent's context.
 
 ## Who persists steps, and when
 
@@ -142,7 +142,7 @@ save_profile(...)
 
 `logged_run` rolls back on an exception, but the stats, category and steps were already committed by `enrich_with_result` (the pattern Phase 2 introduced for stats), so a failed run keeps all three. `logged_run` itself gains one line in its `except` branch: if `run.failure_category` is still NULL, set it to `internal_error` (this covers `save_profile` raising after a `submitted` stop; for `EnrichmentFailed` the category is already committed, and the generic fallback also labels a failed `ingest_*` run, which is acceptable). Step rows are built by a private helper in `enrich.py` (it already imports the db models); `db.py` never imports `StepRecord`, so the dependency still points `agents` to `db`. A step-insert failure is a DB error and surfaces as a failed run, which is intended (a broken log should be loud); `run_agent` has finished by then, so enrichment behaviour is unaffected. Cost: one INSERT batch of at most `max_iterations` (12) small rows inside a commit that already happens.
 
-## Migration (additive, D15) and historical runs
+## Migration (additive, D10) and historical runs
 
 - `create_all` creates `run_log_step` on an existing DB; `_add_missing_columns` adds `run_log.failure_category` (nullable, plain). No Alembic, no reset. Covered by an extended `test_init_db_adds_new_columns_to_an_old_database_and_keeps_rows`.
 - `init_db` then runs an idempotent backfill: for `kind='enrich'` rows with a NULL category and a `stats.stop` other than `submitted` (or `status='error'` with no `stop`, which maps to `internal_error`), set the category from `failure_category_for`. The backfill runs over a few hundred rows in Python and is safe to run on every start.
@@ -197,4 +197,4 @@ Backend and UI are independent enough to build and verify separately; the UI can
 - Each Phase 5 agent run (`classify`, `news`, `verify`) gets its own `run_log` row with its own `kind`, so `run_log_step` is reused unchanged and needs no agent column; `failure_category` is a free-text column, so worker-level categories (rate-limit, cancelled) are code additions.
 - Steps are written once per run by that worker's own session after `run_agent` returns, so concurrent workers never interleave rows in one run. SQLite's single writer still serialises commits; the orchestrator should keep commits short (this design makes each run's step insert one small batch).
 - Live per-worker progress (for example "worker 3 is on iteration 5") is not possible with end-of-run persistence. If Phase 5 wants it, add an optional `on_step` callback to `run_agent` (additive) and persist each step as it arrives; the table already supports it.
-- Per-company status (`enrichment_state`, A4) will reference `run_log.id`; the company link stays in `stats.company_id` until then. Add a nullable `run_log.company_id` (additive) at that point rather than now (A31).
+- Per-company status (`enrichment_state`, A23) will reference `run_log.id`; the company link stays in `stats.company_id` until then. Add a nullable `run_log.company_id` (additive) at that point rather than now (A11).

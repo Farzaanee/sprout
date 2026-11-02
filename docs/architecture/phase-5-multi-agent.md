@@ -46,10 +46,10 @@ flowchart TB
     COSTS --> SQL
 ```
 
-- The orchestrator is deterministic scheduling code, not an LLM supervisor (D4, see [decisions](decisions.md)).
+- The orchestrator is deterministic scheduling code, not an LLM supervisor (D27, see [decisions](decisions.md)).
 - `HttpClient` is synchronous and not thread-safe: one client per worker, locking, or `asyncio.to_thread`.
 - **Open:** verifier ordering — run after the enricher, only for companies with a funding or stage claim.
-- Each added agent is judged by its Phase 4 eval deltas before being kept (D9); Phase 4 evals exist before this phase runs.
+- Each added agent is judged by its Phase 4 eval deltas before being kept (D28); Phase 4 evals exist before this phase runs.
 
 ## Planned modules (interfaces are proposals; the [Phase 4](phase-4-evals-guardrails.md) modules are specified there)
 
@@ -70,4 +70,4 @@ search_companies(...); get_company(name); latest_news(...)
 - Tool handlers return error outcomes and never raise into the loop (`run_agent` also catches any handler exception and turns it into an error result).
 - Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 7 so MCP does not import from the UI package.
 
-This phase reuses the generic agent loop, tool pattern and cost accounting built in [Phase 2](phase-2-enrichment.md) (D17), and must adopt the `BatchBudget` designed in [Phase 4](phase-4-evals-guardrails.md) (D24) before running 150 companies. The hooks Phase 3's step logging leaves for this phase are listed at the end of the [Phase 3 page](phase-3-observability.md#what-phase-5-needs-hooks-only-nothing-built).
+This phase reuses the generic agent loop, tool pattern and cost accounting built in [Phase 2](phase-2-enrichment.md) (D12), and must adopt the `BatchBudget` designed in [Phase 4](phase-4-evals-guardrails.md) (D24) before running 150 companies. The hooks Phase 3's step logging leaves for this phase are listed at the end of the [Phase 3 page](phase-3-observability.md#what-phase-5-needs-hooks-only-nothing-built).
