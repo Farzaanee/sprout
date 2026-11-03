@@ -45,7 +45,7 @@ flowchart TB
 | `src/sprout/failures.py` (pure) | `FailureCategory` and `failure_category_for(stop)` (below) |
 | `src/sprout/agents/loop.py` | `StepRecord`, `LOGGED_TEXT_MAX_CHARS`, `LoopResult.steps` and `LoopResult.error_type`; step bookkeeping inside `run_agent`. No new import beyond `datetime`; no new parameter |
 | `src/sprout/db.py` | `RunLog.failure_category`; `RunLogStep` table; backfill step in `init_db`; `logged_run` fallback to `internal_error` |
-| `src/sprout/agents/enrich.py` | `_stats` gains `error_type`; set `run.failure_category`; build and add `RunLogStep` rows before the existing pre-raise `session.commit()` |
+| `src/sprout/agents/enrich.py` | set `run.failure_category` and `run.error_message`; build and add `RunLogStep` rows before the existing pre-raise `session.commit()` |
 | `src/sprout/app/queries.py` | five read functions (below) |
 | `src/sprout/app/dashboard.py` | `render_observability` and the new tab |
 | Tests | `test_failures.py`, additions to `test_agent_loop.py`, `test_enrich.py`, `test_db.py`, `test_app_queries.py`, `test_dashboard.py` |
@@ -54,18 +54,18 @@ flowchart TB
 
 Eight fixed values, one per non-success outcome. The plan's "stop reason, error type" are the only two dimensions; `invalid` is deliberately not split by sub-reason (A8). A success is **NULL**, not a `'none'` value: `WHERE failure_category IS NOT NULL` is then exactly "failed runs", a `GROUP BY` never charts a fake "none" bar, and `ingest_*` runs (which have no failure concept) need no value. The cost is that a historical failed row and a success are both NULL until the backfill runs, which is why `init_db` backfills (below).
 
-| `LoopResult.stop` or event | `failure_category` | Meaning and usual remedy | `stats.error_type` |
+| `LoopResult.stop` or event | `failure_category` | Meaning and usual remedy | `run_log.error_message` |
 |---|---|---|---|
-| `submitted` | NULL | success (a repair that succeeded is still success; see `stats.repairs`) | null |
-| `invalid` | `invalid_output` | validation failed twice (invented source URL, missing funding note, schema); prompt or validator | null |
+| `submitted` | NULL | success (a repair that succeeded is still success; see `run_log.repairs`) | null |
+| `invalid` | `invalid_output` | validation failed twice (invented source URL, missing funding note, schema); prompt or validator | the validator's rejection text |
 | `max_iter` | `iteration_cap` | agent still researching at the cap; prompt, cap or tool design | null |
 | `budget` | `budget_cap` | USD cap reached; cap or effort | null |
 | `no_submit` | `no_submission` | stopped without calling `submit_profile` after one reminder; prompt | null |
 | `truncated` | `output_truncated` | response hit `max_tokens`; `MAX_OUTPUT_TOKENS` or effort | null |
 | `refused` | `refusal` | model declined (often transient) | null |
-| `error` from an `anthropic.APIError` | `api_error` | infrastructure after SDK retries (429, 5xx, timeout, 400) | exception class name, e.g. `RateLimitError` |
-| `error` from an unrecognised `stop_reason` | `api_error` | SDK or API drift the loop does not handle | `unexpected_stop_reason` |
-| an exception outside the loop (for example `save_profile` or a DB error) | `internal_error` | our bug; set by `logged_run` when the category is still NULL | exception class name (also in `run_log.error`) |
+| `error` from an `anthropic.APIError` | `api_error` | infrastructure after SDK retries (429, 5xx, timeout, 400) | `ExceptionClassName: message`, e.g. `RateLimitError: ...` |
+| `error` from an unrecognised `stop_reason` | `api_error` | SDK or API drift the loop does not handle | `unexpected stop_reason '...'` |
+| an exception outside the loop (for example `save_profile` or a DB error) | `internal_error` | our bug; set by `logged_run` when the category is still NULL | `ExceptionClassName: message`, filled in by `logged_run` only if a caller has not already set a cleaner one |
 
 ```python
 # failures.py - pure, no sprout imports
@@ -78,11 +78,11 @@ def failure_category_for(stop: str) -> FailureCategory | None   # "submitted" ->
 
 The column is `str | None`, not a SQL enum (the same reasoning as `company.category`, D10 and the [data model](../2.%20data-model.md): no CHECK constraint to fight `ALTER`). New categories in Phase 5 (for example a rate-limit category when the worker pool retries 429s) are code-only additions. The dashboard iterates the distinct values found, ordered by `FailureCategory` declaration order with unknown values last, so an old DB or a new value never breaks the page. **No index** on `failure_category`: `create_all` does not add indexes to an existing table, so `index=True` would exist on fresh DBs and not on migrated ones, and at a few hundred rows an index is pointless (the same call as `company.category`).
 
-**Error text and the model's response are drill-down only:** the full `run_log.error`, `stats.error`, and `run_log_step.response_text` are shown on the single-run view; no chart or `GROUP BY` uses them.
+**Error text and the model's response are drill-down only:** the full `run_log.error_message` and `run_log_step.response_text` are shown on the single-run view; no chart or `GROUP BY` uses them.
 
 ## `run_log_step`
 
-One row per **iteration**, meaning one `messages.create` call and the response it returned. This equals `LoopResult.iterations`; a call that raised `APIError` produces no step (the failure is on the run row: `api_error`, `error_type`).
+One row per **iteration**, meaning one `messages.create` call and the response it returned. This equals `LoopResult.iterations`; a call that raised `APIError` produces no step (the failure is on the run row: `failure_category=api_error`, `error_message`).
 
 | Column | Type | Null | Notes |
 |---|---|---|---|
@@ -125,14 +125,16 @@ Loop bookkeeping: right after `result.iterations += 1` and the usage update, bui
 ## Truncation and untrusted-content treatment
 
 - `response_text` is the model's `text` blocks joined with a newline, cut to **1,000 characters** with a trailing ` [truncated]` marker. Worst case about 12 KB per run, under 2 MB for 150 runs. The cap is a module constant, below `wrap_untrusted`'s 8,000 because this is a diagnostic hint, not model context.
-- The model may echo scraped page text, so the logged text is **untrusted data**. It is stored verbatim up to the cap (no sanitising that could hide an attack), never interpolated into any prompt, and, if the Phase 4 judge or a Phase 5 agent ever reads it, it goes through `wrap_untrusted`. In Streamlit it is rendered only with `st.code`, `st.text` or dataframe cells, never `st.markdown` and never `unsafe_allow_html` (Markdown would render an attacker's image URL and make the viewer's browser fetch it). The same rule covers `run_log.error` and `stats.error`.
+- The model may echo scraped page text, so the logged text is **untrusted data**. It is stored verbatim up to the cap (no sanitising that could hide an attack), never interpolated into any prompt, and, if the Phase 4 judge or a Phase 5 agent ever reads it, it goes through `wrap_untrusted`. In Streamlit it is rendered only with `st.code`, `st.text` or dataframe cells, never `st.markdown` and never `unsafe_allow_html` (Markdown would render an attacker's image URL and make the viewer's browser fetch it). The same rule covers `run_log.error_message`.
 - The snapshot database that Phases 6 and 8 may publish (D31 in [decisions](../6.%20decisions.md), A28 in [risks](../5.%20risks.md)) will contain these strings; truncation bounds the exposure and there are no secrets in the agent's context.
 
 ## Who persists steps, and when
 
 ```
 result = run_agent(...)                        # steps accumulate in memory
-run.stats = _stats(...)                        # + error_type
+run.stats = _stats(result)                     # thin: stop, tokens, web_searches, cost_usd
+run.company_id, run.model, run.effort, run.iterations, run.repairs = ...  # from company, deps, result
+run.max_iterations, run.max_usd, run.tool_calls, run.error_message = ...  # from budget, result
 run.failure_category = failure_category_for(result.stop)      # None on success
 session.add_all(RunLogStep rows from result.steps, run_log_id=run.id)
 session.commit()                               # the existing commit that already precedes the raise
@@ -145,7 +147,7 @@ save_profile(...)
 ## Migration (additive, D10) and historical runs
 
 - `create_all` creates `run_log_step` on an existing DB; `_add_missing_columns` adds `run_log.failure_category` (nullable, plain). No Alembic, no reset. Covered by an extended `test_init_db_adds_new_columns_to_an_old_database_and_keeps_rows`.
-- `init_db` then runs an idempotent backfill: for `kind='enrich'` rows with a NULL category and a `stats.stop` other than `submitted` (or `status='error'` with no `stop`, which maps to `internal_error`), set the category from `failure_category_for`. The backfill runs over a few hundred rows in Python and is safe to run on every start.
+- `init_db` then runs an idempotent backfill: for `kind='company_enrich'` rows with a NULL category and a `stats.stop` other than `submitted` (or `status='error'` with no `stop`, which maps to `internal_error`), set the category from `failure_category_for`. The backfill runs over a few hundred rows in Python and is safe to run on every start.
 - Historical runs have **no steps** and are not fabricated from `stats`. The dashboard shows them in the failure grouping and the cost trend (both come from `stats` and the column), and in the drill-down shows their run-level stats with a note. Rule for the note: no step rows and `stats.iterations > 0` means "this run predates step logging (Phase 3), run-level stats only"; no step rows and `iterations == 0` means "no model response was received".
 
 ## Query layer (`app/queries.py`, Streamlit-free, tested on a seeded temp DB)
@@ -154,14 +156,15 @@ save_profile(...)
 @dataclass(frozen=True)
 class EnrichRun:
     run_id: int; started_at: datetime; company_id: int | None; company_name: str | None
-    model: str | None; status: str; stop: str | None; failure_category: str | None; error_type: str | None
-    iterations: int; cost_usd: float; web_searches: int; steps_logged: int; error: str | None; stats: dict
+    model: str | None; status: str; stop: str | None; failure_category: str | None
+    iterations: int; cost_usd: float; web_searches: int; steps_logged: int
+    error_message: str | None; stats: dict
 @dataclass(frozen=True)
 class TrendPoint: run_id: int; started_at: datetime; cost_usd: float; iterations: int; cost_per_iteration: float | None; failed: bool
 @dataclass(frozen=True)
 class DayOutcome: day: date; runs: int; failures: int; cost_usd: float
 
-def enrich_runs(session, *, failure_category: str | None = None, failures_only: bool = False, limit: int = 200) -> list[EnrichRun]   # kind='enrich', newest first
+def enrich_runs(session, *, failure_category: str | None = None, failures_only: bool = False, limit: int = 200) -> list[EnrichRun]   # kind='company_enrich', newest first
 def failure_counts(session) -> dict[str, int]                 # category -> runs, failed runs only, largest first
 def cost_trend(session, *, limit: int = 200) -> list[TrendPoint]   # oldest first; cost_per_iteration None when iterations == 0
 def daily_outcomes(session) -> list[DayOutcome]               # the error trend

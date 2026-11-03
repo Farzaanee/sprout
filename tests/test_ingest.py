@@ -135,8 +135,8 @@ def test_main_logs_failed_runs(isolated_settings, monkeypatch):
     assert ingest.main(["--skip-news"]) == 1
     with Session(get_engine(isolated_settings / "out" / "sprout.db")) as s:
         run = s.exec(select(RunLog)).one()
-    assert (run.kind, run.status) == ("ingest_companies", "error")
-    assert "401" in run.error
+    assert (run.kind, run.status) == ("companies_ingest", "error")
+    assert "401" in run.error_message
 
 
 def test_date_floor_is_passed_to_companies_house(session, make_http):

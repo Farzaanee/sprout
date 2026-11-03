@@ -101,7 +101,7 @@ def render_progress() -> None:
                 "started": r.started_at,
                 "finished": r.finished_at,
                 "stats": str(r.stats),
-                "error": r.error,
+                "error": r.error_message,
             }
             for r in runs
         ),
@@ -218,7 +218,6 @@ def _run_row(run: queries.EnrichRun) -> dict[str, object]:
         "status": run.status,
         "stop": run.stop,
         "category": run.failure_category,
-        "error type": run.error_type,
         "iterations": run.iterations if has_stats else None,
         "cost (US$)": run.cost_usd if has_stats else None,
         "searches": run.web_searches if has_stats else None,
@@ -259,10 +258,9 @@ def _render_run_detail(session: Session, run: queries.EnrichRun) -> None:
         st.info("This run predates step logging (Phase 3), run-level stats only.")
     else:
         st.info("No model response was received.")
-    for label, text in (("Run error", run.error), ("Stats error", run.stats.get("error"))):
-        if isinstance(text, str) and text and (label == "Run error" or text != run.error):
-            st.caption(label)
-            st.code(text, language=None, wrap_lines=True)
+    if run.error_message:
+        st.caption("Error")
+        st.code(run.error_message, language=None, wrap_lines=True)
 
 
 def render_observability() -> None:

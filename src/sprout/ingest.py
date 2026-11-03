@@ -18,6 +18,7 @@ from sprout.config import MissingConfigError, get_settings
 from sprout.db import (
     Company,
     NewsItemRow,
+    RunKind,
     add_news_items,
     get_engine,
     init_db,
@@ -141,7 +142,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     cache=DiskCache(settings.cache_dir), limiter=PerHostRateLimiter(1, 1.0)
                 )
                 with feed_http as http:
-                    with logged_run(session, "ingest_news") as run:
+                    with logged_run(session, RunKind.NEWS_INGEST.value) as run:
                         run.stats = ingest_news(session, http)
                         run.stats["http_requests"] = http.requests_made
                         run.stats["cache_hits"] = http.cache_hits
@@ -156,7 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 key = settings.require_companies_house_key()
                 with companies_house.make_http_client(key, settings.cache_dir) as http:
-                    with logged_run(session, "ingest_companies") as run:
+                    with logged_run(session, RunKind.COMPANIES_INGEST.value) as run:
                         run.stats = ingest_companies(
                             session, CompaniesHouseClient(http), max_per_term=args.max_per_term
                         )

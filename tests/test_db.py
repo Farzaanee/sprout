@@ -10,6 +10,7 @@ from sprout.db import (
     Fact,
     FundingRoundRow,
     NewsItemRow,
+    RunKind,
     RunLog,
     RunLogStep,
     add_news_items,
@@ -100,7 +101,7 @@ def test_logged_run_records_success_and_failure(session):
     runs = session.exec(select(RunLog).order_by(RunLog.id)).all()
     assert [r.status for r in runs] == ["ok", "error"]
     assert runs[0].stats == {"n": 1}
-    assert "boom" in runs[1].error
+    assert "boom" in runs[1].error_message
     assert all(r.finished_at for r in runs)
 
 
@@ -348,7 +349,7 @@ def test_logged_run_failure_defaults_to_internal_error(session):
 
 def test_logged_run_keeps_a_category_committed_before_the_failure(session):
     with pytest.raises(RuntimeError):
-        with logged_run(session, "enrich") as run:
+        with logged_run(session, RunKind.COMPANY_ENRICH.value) as run:
             run.failure_category = "refusal"
             session.add(run)
             session.commit()
@@ -359,7 +360,7 @@ def test_logged_run_keeps_a_category_committed_before_the_failure(session):
 
 def test_logged_run_drops_an_uncommitted_category_on_failure(session):
     with pytest.raises(RuntimeError):
-        with logged_run(session, "enrich") as run:
+        with logged_run(session, RunKind.COMPANY_ENRICH.value) as run:
             run.failure_category = "refusal"  # never committed: rolled back
             raise RuntimeError("boom")
     (row,) = session.exec(select(RunLog)).all()
@@ -369,7 +370,7 @@ def test_logged_run_drops_an_uncommitted_category_on_failure(session):
 def test_run_log_step_is_unique_per_run_and_iteration(session):
     from sqlalchemy.exc import IntegrityError
 
-    with logged_run(session, "enrich") as run:
+    with logged_run(session, RunKind.COMPANY_ENRICH.value) as run:
         pass
     now = datetime.now(UTC)
     session.add(RunLogStep(run_log_id=run.id, iteration=1, created_at=now))

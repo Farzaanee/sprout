@@ -8,6 +8,7 @@ timezone-aware UTC.
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,19 @@ from sprout.sources.rss import normalise_url
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+class RunKind(StrEnum):
+    """`run_log.kind`. The column itself stays a plain string (same reasoning as `company.category`:
+    an enum would add a CHECK constraint, which complicates additive `ALTER`); this is just the
+    vocabulary our own code uses. Add members here as new agents arrive, no migration needed."""
+
+    NEWS_INGEST = "news_ingest"
+    COMPANIES_INGEST = "companies_ingest"
+    COMPANY_ENRICH = "company_enrich"
+    COMPANY_CLASSIFICATION = "company_classification"
+    COMPANY_VERIFICATION = "company_verification"
+    COMPANY_NEWS_MATCH = "company_news_match"
 
 
 class Company(SQLModel, table=True):
@@ -113,19 +127,32 @@ class CompanyNewsRow(SQLModel, table=True):
 
 
 class RunLog(SQLModel, table=True):
+    """One row per pipeline run: a whole batch for `kind in (news_ingest, companies_ingest)`, one
+    company's attempt for every other kind. `stats` stays a thin JSON catch-all, for whatever a
+    future `kind` needs that has not earned a column yet (for example Phase 4's planned `sources`
+    list); everything that is common to every run already has one."""
+
     __tablename__ = "run_log"
     __table_args__ = {"extend_existing": True}
 
     id: int | None = Field(default=None, primary_key=True)
-    kind: str
+    kind: str  # a RunKind value
     started_at: datetime = Field(default_factory=utcnow)
     finished_at: datetime | None = None
     status: str = "running"  # running | ok | error
     stats: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    error: str | None = None
     # A failures.FailureCategory value; NULL means success (or not applicable). No index: create_all
     # would not add it to an existing table.
     failure_category: str | None = None
+    error_message: str | None = None  # the clean exception text; the sole error column
+    company_id: int | None = Field(default=None, foreign_key="company.id", index=True)
+    model: str | None = None
+    effort: str | None = None
+    iterations: int | None = None
+    repairs: int | None = None
+    max_iterations: int | None = None
+    max_usd: float | None = None
+    tool_calls: dict[str, int] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
 
 class RunLogStep(SQLModel, table=True):
@@ -160,9 +187,10 @@ def get_engine(path: Path | str) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """Create missing tables, add missing nullable columns (no data loss), backfill categories."""
+    """Create missing tables, add missing nullable columns (no data loss), migrate and backfill."""
     SQLModel.metadata.create_all(engine)
     _add_missing_columns(engine)
+    _migrate_run_log(engine)
     with Session(engine) as session:
         _backfill_failure_categories(session)
 
@@ -170,7 +198,9 @@ def init_db(engine: Engine) -> None:
 def _backfill_failure_categories(session: Session) -> None:
     """Classify historical failed `enrich` runs; idempotent (only touches NULL categories)."""
     rows = session.exec(
-        select(RunLog).where(RunLog.kind == "enrich", col(RunLog.failure_category).is_(None))
+        select(RunLog).where(
+            RunLog.kind == RunKind.COMPANY_ENRICH.value, col(RunLog.failure_category).is_(None)
+        )
     ).all()
     for row in rows:
         stop = (row.stats or {}).get("stop")
@@ -184,6 +214,60 @@ def _backfill_failure_categories(session: Session) -> None:
             row.failure_category = category.value
             session.add(row)
     session.commit()
+
+
+_RUN_KIND_RENAMES = {
+    "ingest_news": RunKind.NEWS_INGEST.value,
+    "ingest_companies": RunKind.COMPANIES_INGEST.value,
+    "enrich": RunKind.COMPANY_ENRICH.value,
+}
+
+
+def _migrate_run_log(engine: Engine) -> None:
+    """One-time, idempotent cleanup of `run_log`: rename the historical `kind` values, backfill the
+    per-run columns from the old `stats` JSON, and drop the `error` column `error_message`
+    replaces. Runs as raw SQL (not the ORM) since the `error` column no longer exists on the
+    `RunLog` model by the time this executes."""
+    inspector = inspect(engine)
+    if not inspector.has_table("run_log"):
+        return
+    existing = {c["name"] for c in inspector.get_columns("run_log")}
+    with engine.begin() as conn:
+        for old, new in _RUN_KIND_RENAMES.items():
+            conn.execute(
+                text("UPDATE run_log SET kind = :new WHERE kind = :old"), {"new": new, "old": old}
+            )
+
+        conn.execute(
+            text("""
+                UPDATE run_log SET
+                    company_id = CAST(json_extract(stats, '$.company_id') AS INTEGER),
+                    model = json_extract(stats, '$.model'),
+                    effort = json_extract(stats, '$.effort'),
+                    iterations = CAST(json_extract(stats, '$.iterations') AS INTEGER),
+                    repairs = CAST(json_extract(stats, '$.repairs') AS INTEGER),
+                    max_iterations =
+                        CAST(json_extract(stats, '$.budget.max_iterations') AS INTEGER),
+                    max_usd = CAST(json_extract(stats, '$.budget.max_usd') AS REAL),
+                    tool_calls = json_extract(stats, '$.tool_calls'),
+                    error_message = json_extract(stats, '$.error')
+                WHERE kind = :kind AND company_id IS NULL
+                    AND json_extract(stats, '$.company_id') IS NOT NULL
+            """),
+            {"kind": RunKind.COMPANY_ENRICH.value},
+        )
+
+        if "error" in existing:
+            # The old `error` text is noisier than `stats.error` for enrich runs (it wraps the
+            # exception that carries `stats.error`), so only use it where nothing cleaner exists:
+            # ingest-kind failures and the rare run with no stats at all.
+            conn.execute(
+                text(
+                    "UPDATE run_log SET error_message = error "
+                    "WHERE error_message IS NULL AND error IS NOT NULL"
+                )
+            )
+            conn.execute(text("ALTER TABLE run_log DROP COLUMN error"))
 
 
 def _add_missing_columns(engine: Engine) -> None:
@@ -297,7 +381,8 @@ def logged_run(session: Session, kind: str) -> Iterator[RunLog]:
         run.status = "error"
         if run.failure_category is None:  # rollback reloads the committed value, so this is it
             run.failure_category = FailureCategory.INTERNAL_ERROR.value
-        run.error = f"{type(exc).__name__}: {exc}"[:1000]
+        if run.error_message is None:  # a caller may already have committed a clean one
+            run.error_message = f"{type(exc).__name__}: {exc}"[:1000]
         run.finished_at = utcnow()
         session.add(run)
         session.commit()

@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlmodel import Session, col, func, select
 
-from sprout.db import Company, Fact, FundingRoundRow, NewsItemRow, RunLog, RunLogStep
+from sprout.db import Company, Fact, FundingRoundRow, NewsItemRow, RunKind, RunLog, RunLogStep
 from sprout.failures import FailureCategory
 from sprout.sources.companies_house import PUBLIC_COMPANY_URL
 
@@ -33,12 +33,11 @@ class EnrichRun:
     status: str
     stop: str | None
     failure_category: str | None
-    error_type: str | None
     iterations: int
     cost_usd: float
     web_searches: int
     steps_logged: int
-    error: str | None
+    error_message: str | None
     stats: dict[str, Any]
 
 
@@ -183,7 +182,7 @@ def companies_house_url(company_number: str | None) -> str | None:
 
 
 def _enrich_query() -> Any:
-    return select(RunLog).where(RunLog.kind == "enrich")
+    return select(RunLog).where(RunLog.kind == RunKind.COMPANY_ENRICH.value)
 
 
 def _number(stats: dict[str, Any], key: str) -> float:
@@ -221,9 +220,7 @@ def enrich_runs(
             .group_by(RunLogStep.run_log_id)
         ).all()
     )
-    company_ids = {
-        run.stats["company_id"] for run in runs if isinstance(run.stats.get("company_id"), int)
-    }
+    company_ids = {run.company_id for run in runs if run.company_id is not None}
     names = dict(
         session.exec(select(Company.id, Company.name).where(col(Company.id).in_(company_ids))).all()
     )
@@ -231,18 +228,17 @@ def enrich_runs(
         EnrichRun(
             run_id=run.id,
             started_at=run.started_at,
-            company_id=run.stats.get("company_id"),
-            company_name=names.get(run.stats.get("company_id")),
-            model=run.stats.get("model"),
+            company_id=run.company_id,
+            company_name=names.get(run.company_id),
+            model=run.model,
             status=run.status,
             stop=run.stats.get("stop"),
             failure_category=run.failure_category,
-            error_type=run.stats.get("error_type"),
-            iterations=int(_number(run.stats, "iterations")),
+            iterations=run.iterations or 0,
             cost_usd=_cost_usd(run.stats),
             web_searches=int(_number(run.stats, "web_searches")),
             steps_logged=step_counts.get(run.id, 0),
-            error=run.error,
+            error_message=run.error_message,
             stats=run.stats,
         )
         for run in runs
@@ -252,7 +248,9 @@ def enrich_runs(
 def failure_counts(session: Session) -> dict[str, int]:
     rows = session.exec(
         select(RunLog.failure_category, func.count())
-        .where(RunLog.kind == "enrich", col(RunLog.failure_category).is_not(None))
+        .where(
+            RunLog.kind == RunKind.COMPANY_ENRICH.value, col(RunLog.failure_category).is_not(None)
+        )
         .group_by(RunLog.failure_category)
     ).all()
     order = {category.value: index for index, category in enumerate(FailureCategory)}
@@ -265,7 +263,7 @@ def cost_trend(session: Session, *, limit: int = 200) -> list[TrendPoint]:
     points = []
     for run in reversed(runs):
         cost = _cost_usd(run.stats)
-        iterations = int(_number(run.stats, "iterations"))
+        iterations = run.iterations or 0
         points.append(
             TrendPoint(
                 run_id=run.id,

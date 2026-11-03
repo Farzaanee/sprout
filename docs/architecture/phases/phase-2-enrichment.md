@@ -19,7 +19,7 @@ flowchart TB
     LLM(["Anthropic API"])
     COST["costs.py: price table, Usage, cost_usd"]
     CHECK["validate_submission:<br/>Pydantic, source URL in ledger,<br/>funding note present"]
-    DBW["db.py:<br/>save_profile (one save_fact per Sourced field,<br/>funding_rounds to its own table, company.category)<br/>add_company_by_number<br/>logged_run kind enrich (stats, failure_category, run_log_step rows)"]
+    DBW["db.py:<br/>save_profile (one save_fact per Sourced field,<br/>funding_rounds to its own table, company.category)<br/>add_company_by_number<br/>logged_run kind company_enrich (run-level columns, stats, failure_category, run_log_step rows)"]
     SQL[("SQLite: company, fact, funding_round, run_log, run_log_step")]
     WF["sources/web.py: WebFetcher"]
     CHC["sources/companies_house.py"]
@@ -203,7 +203,7 @@ flowchart TB
 
 - Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](../4.%20cross-cutting.md#4-testing)).
 - Tool handlers return error outcomes and never raise into the loop (`run_agent` also catches any handler exception and turns it into an error result).
-- `enrich_with_result` writes facts and the `enrich` run_log row in one session: it assigns `run.stats`, sets `run.failure_category` and adds the `run_log_step` rows, then **commits before raising** on failure, because `logged_run` rolls back on exceptions and would otherwise discard the record of what a failed run cost; on success it then calls `save_profile`. On failure `logged_run` also marks the row `status="error"` with the exception text, while stats, category and steps stay on the row. The status therefore means "run did not produce a profile", and `stats.stop` and `failure_category` say why.
+- `enrich_with_result` writes facts and the `company_enrich` run_log row in one session: it assigns `run.stats` and the run-level columns (`company_id`, `model`, `effort`, `iterations`, `repairs`, `max_iterations`, `max_usd`, `tool_calls`, `error_message`), sets `run.failure_category` and adds the `run_log_step` rows, then **commits before raising** on failure, because `logged_run` rolls back on exceptions and would otherwise discard the record of what a failed run cost; on success it then calls `save_profile`. On failure `logged_run` also marks the row `status="error"`, filling in `error_message` only if it is still null. The status therefore means "run did not produce a profile", and `stats.stop` and `failure_category` say why.
 - `agents/enrich.py` (about 510 lines: agent, schema, CLI, `resolve_company`) should be split when Phase 5 adds an orchestrator.
 - Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 7 so MCP does not import from the UI package.
 

@@ -48,7 +48,7 @@ flowchart TB
 
 - The orchestrator is deterministic scheduling code, not an LLM supervisor (D27, see [decisions](../6.%20decisions.md)).
 - `HttpClient` is synchronous and not thread-safe: one client per worker, locking, or `asyncio.to_thread`.
-- **Schema (D32, D33):** two additive changes, a nullable `run_log.company_id` (status is derived from `run_log`, no `enrichment_state` table) and a `company_news` link table. Enable WAL and a busy timeout in `get_engine` first. Details and the items cut from the earlier plan are in the [data model](../2.%20data-model.md#planned-additions-phase-5).
+- **Schema (D32, D33):** both schema items this phase needs, `run_log.company_id` and `company_news`, are already built; this phase only writes to them (status derived from `run_log`, no `enrichment_state` table) and adds the news matcher that populates `company_news`. Enable WAL and a busy timeout in `get_engine` first. Details and the items cut from the earlier plan are in the [data model](../2.%20data-model.md#per-company-status-derived-not-stored).
 - **Open:** verifier ordering — run after the enricher, only for companies with a funding or stage claim.
 - Each added agent is judged by its Phase 4 eval deltas before being kept (D28); Phase 4 evals exist before this phase runs.
 

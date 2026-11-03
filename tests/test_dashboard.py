@@ -42,20 +42,33 @@ def test_shows_counts_and_action_tab_when_enabled(monkeypatch, tmp_path):
 HOSTILE = (
     "![x](https://evil.example/p.png) <script>alert(1)</script> **bold** [l](https://evil.example)"
 )
-STATS = {"stop": "submitted", "iterations": 2, "cost_usd": 0.05, "web_searches": 1, "model": "m"}
+STATS = {"stop": "submitted", "cost_usd": 0.05, "web_searches": 1}
 
 
-def _seed(tmp_path, *, category=None, stats=STATS, steps=0, error=None, status=None):
+def _seed(
+    tmp_path,
+    *,
+    category=None,
+    stats=None,
+    steps=0,
+    error_message=None,
+    status=None,
+    iterations=2,
+    model="m",
+):
+    stats = STATS if stats is None else stats
     engine = get_engine(tmp_path / "app.db")
     init_db(engine)
     with Session(engine) as session:
         run = RunLog(
-            kind="enrich",
+            kind="company_enrich",
             started_at=datetime(2026, 10, 20, 12, tzinfo=UTC),
             status=status or ("error" if category else "ok"),
             failure_category=category,
             stats=stats,
-            error=error,
+            iterations=iterations,
+            model=model,
+            error_message=error_message,
         )
         session.add(run)
         session.commit()
@@ -90,7 +103,7 @@ def test_observability_empty_points_at_the_enrich_command(monkeypatch, tmp_path)
 
 
 def test_observability_populated_with_failed_run(monkeypatch, tmp_path):
-    _seed(tmp_path, category="invalid_output", steps=2, error="validation failed")
+    _seed(tmp_path, category="invalid_output", steps=2, error_message="validation failed")
     at = _observability(monkeypatch, tmp_path)
     assert {m.label: m.value for m in at.metric}["Failed"] == "1"
     assert {"Failures by category", "Trends", "Runs", "Run detail"} <= set(_subheaders(at))
@@ -115,28 +128,28 @@ def test_observability_run_without_steps_that_ran_is_pre_phase_3(monkeypatch, tm
 
 
 def test_observability_run_without_steps_or_response_shows_error(monkeypatch, tmp_path):
-    stats = {"stop": "error", "iterations": 0, "cost_usd": 0.0}
-    _seed(tmp_path, category="api_error", stats=stats, error="RateLimitError: slow down")
+    stats = {"stop": "error", "cost_usd": 0.0}
+    _seed(
+        tmp_path,
+        category="api_error",
+        stats=stats,
+        error_message="RateLimitError: slow down",
+        iterations=0,
+    )
     at = _observability(monkeypatch, tmp_path)
     assert any("No model response was received" in i.value for i in at.info)
     assert "RateLimitError: slow down" in [c.value for c in at.code]
 
 
 def test_observability_tolerates_run_with_empty_stats(monkeypatch, tmp_path):
-    _seed(tmp_path, stats={}, status="running")
+    _seed(tmp_path, stats={}, status="running", iterations=None, model=None)
     at = _observability(monkeypatch, tmp_path)
     assert {m.label: m.value for m in at.metric}["Runs"] == "1"
     assert any("No model response was received" in i.value for i in at.info)
 
 
 def test_observability_renders_logged_text_only_in_code(monkeypatch, tmp_path):
-    _seed(
-        tmp_path,
-        category="invalid_output",
-        steps=1,
-        error=HOSTILE,
-        stats={**STATS, "error": HOSTILE},
-    )
+    _seed(tmp_path, category="invalid_output", steps=1, error_message=HOSTILE)
     at = _observability(monkeypatch, tmp_path)
     assert HOSTILE in [c.value for c in at.code]
     rendered = " ".join(e.value for e in [*at.markdown, *at.caption, *at.info, *at.success])

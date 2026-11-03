@@ -140,14 +140,29 @@ def test_companies_house_url():
     assert queries.companies_house_url(None) is None
 
 
-def _run(session, day, *, kind="enrich", category=None, status=None, stats=None, error=None):
+def _run(
+    session,
+    day,
+    *,
+    kind="company_enrich",
+    category=None,
+    status=None,
+    stats=None,
+    company_id=None,
+    model=None,
+    iterations=None,
+    error_message=None,
+):
     run = RunLog(
         kind=kind,
         started_at=datetime(2026, 10, day, 12, tzinfo=UTC),
         status=status or ("error" if category else "ok"),
         failure_category=category,
         stats={} if stats is None else stats,
-        error=error,
+        company_id=company_id,
+        model=model,
+        iterations=iterations,
+        error_message=error_message,
     )
     session.add(run)
     session.commit()
@@ -162,15 +177,21 @@ def _step(session, run, iteration):
 @pytest.fixture
 def runs(session):
     company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
-    ok = {"company_id": company.id, "model": "m", "iterations": 4, "cost_usd": 0.08}
-    fail = {**ok, "stop": "invalid", "error_type": "ValueError", "web_searches": 2}
+    common = {"company_id": company.id, "model": "m", "iterations": 4}
+    ok_stats = {"stop": "submitted", "cost_usd": 0.08}
+    fail_stats = {"stop": "invalid", "cost_usd": 0.08, "web_searches": 2}
     return [
-        _run(session, 1, stats={**ok, "stop": "submitted"}),
-        _run(session, 1, category="invalid_output", stats=fail, error="bad"),
-        _run(session, 2, category="budget_cap", stats={**ok, "iterations": 0, "cost_usd": 0.0}),
-        _run(session, 2, category="invalid_output", stats=fail),
+        _run(session, 1, stats=ok_stats, **common),
+        _run(
+            session, 1, category="invalid_output", stats=fail_stats, error_message="bad", **common
+        ),
+        _run(
+            session, 2, category="budget_cap",
+            stats={"stop": "invalid", "cost_usd": 0.0}, **{**common, "iterations": 0},
+        ),  # fmt: skip
+        _run(session, 2, category="invalid_output", stats=fail_stats, **common),
         _run(session, 3, category="refusal", status="running"),  # crashed before stats
-        _run(session, 3, kind="ingest_ch", category="api_error", stats={"cost_usd": 9}),
+        _run(session, 3, kind="companies_ingest", category="api_error", stats={"cost_usd": 9}),
     ]
 
 
@@ -194,13 +215,9 @@ def test_enrich_runs_newest_first_with_company_and_steps(session, runs):
     assert [r.run_id for r in result] == [r.id for r in reversed(runs[:5])]  # ingest excluded
     failed = next(r for r in result if r.run_id == runs[1].id)
     assert failed.company_name == "Neural Robotics Ltd"
-    assert (failed.stop, failed.failure_category, failed.error_type) == (
-        "invalid",
-        "invalid_output",
-        "ValueError",
-    )
+    assert (failed.stop, failed.failure_category) == ("invalid", "invalid_output")
     assert (failed.iterations, failed.cost_usd, failed.web_searches) == (4, 0.08, 2)
-    assert failed.steps_logged == 2 and failed.error == "bad" and failed.model == "m"
+    assert failed.steps_logged == 2 and failed.error_message == "bad" and failed.model == "m"
     assert next(r for r in result if r.run_id == runs[0].id).steps_logged == 0
 
 

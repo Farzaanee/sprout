@@ -22,7 +22,7 @@ from sprout.agents.enrich import (
 from sprout.agents.loop import Budget
 from sprout.agents.tools import SourceLedger
 from sprout.config import Settings
-from sprout.db import Company, Fact, RunLog, RunLogStep, get_engine, init_db
+from sprout.db import Company, Fact, RunKind, RunLog, RunLogStep, get_engine, init_db
 from sprout.models import Category, Confidence
 from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.web import WebFetcher
@@ -238,7 +238,7 @@ def test_unknown_field_is_rejected():
 
 
 def runs(session):
-    return session.exec(select(RunLog).where(RunLog.kind == "enrich")).all()
+    return session.exec(select(RunLog).where(RunLog.kind == RunKind.COMPANY_ENRICH.value)).all()
 
 
 def test_happy_path_persists_facts_category_and_run_stats(session, company, deps_for):
@@ -263,13 +263,14 @@ def test_happy_path_persists_facts_category_and_run_stats(session, company, deps
     assert stored["founded"].value_json is None  # researched, nothing found
     (run,) = runs(session)
     assert run.status == "ok"
+    assert run.company_id == company.id and run.model == MODEL
     stats = run.stats
-    assert stats["stop"] == "submitted" and stats["company_number"] == "12345678"
+    assert stats["stop"] == "submitted"
     assert (stats["input_tokens"], stats["output_tokens"]) == (1200, 300)
     assert (stats["cache_write_tokens"], stats["web_searches"]) == (4000, 1)
-    assert stats["tool_calls"] == {"submit_profile": 1}
+    assert run.tool_calls == {"submit_profile": 1}
     assert stats["cost_usd"] > 0
-    assert stats["budget"] == {"max_iterations": 12, "max_usd": 0.13}
+    assert (run.max_iterations, run.max_usd) == (12, 0.13)
     first = client.requests[0]
     assert [t.get("name") for t in first["tools"]] == [
         "web_search",
@@ -297,7 +298,7 @@ def test_repair_path_accepts_the_second_submission(session, company, deps_for):
     )
     enrich_company(session, company, deps_for(client))
     (run,) = runs(session)
-    assert run.stats["repairs"] == 1 and run.stats["iterations"] == 2
+    assert run.repairs == 1 and run.iterations == 2
     feedback = client.requests[1]["messages"][-1]["content"][0]
     assert feedback["is_error"] and "invented.example" in feedback["content"]
 
@@ -315,7 +316,7 @@ def test_invalid_after_repair_writes_nothing_but_records_the_cost(session, compa
     assert company.category is None
     assert facts_of(session, company) == {}
     (run,) = runs(session)
-    assert run.status == "error" and "invalid" in run.error
+    assert run.status == "error" and "rejected" in run.error_message
     assert run.stats["stop"] == "invalid"
     assert run.stats["cost_usd"] > 0
     assert run.stats["input_tokens"] == 2000
@@ -342,7 +343,7 @@ def test_tiny_usd_cap_stops_the_loop_and_logs_the_spend(session, company, deps_f
         enrich_company(session, company, deps_for(client), budget)
     assert err.value.stop == "budget" and client.calls == 1
     (run,) = runs(session)
-    assert run.stats["stop"] == "budget" and run.stats["iterations"] == 1
+    assert run.stats["stop"] == "budget" and run.iterations == 1
     assert run.stats["input_tokens"] == 5000 and run.stats["cost_usd"] > 0
 
 
@@ -353,7 +354,7 @@ def test_tiny_iteration_cap(session, company, deps_for):
     with pytest.raises(EnrichmentFailed) as err:
         enrich_company(session, company, deps_for(client), Budget(2, Decimal("1")))
     assert err.value.stop == "max_iter" and client.calls == 2
-    assert runs(session)[0].stats["tool_calls"] == {"fetch_page": 2}
+    assert runs(session)[0].tool_calls == {"fetch_page": 2}
 
 
 def test_end_turn_without_submission_fails_cleanly(session, company, deps_for):
@@ -398,7 +399,7 @@ def test_success_persists_one_step_per_response_and_no_failure_category(session,
     enrich_company(session, company, deps_for(client))
     (run,) = runs(session)
     assert run.status == "ok" and run.failure_category is None
-    assert run.stats["error_type"] is None
+    assert run.error_message is None
     first, second = steps_of(session, run)
     assert (first.iteration, first.tool_name, first.stop_reason) == (
         1, "web_search,fetch_page", "tool_use",
@@ -465,17 +466,17 @@ def test_every_non_success_stop_commits_its_category_and_steps(
     (run,) = runs(session)
     assert run.status == "error" and run.failure_category == category
     steps = steps_of(session, run)
-    assert len(steps) == run.stats["iterations"] == iterations
+    assert len(steps) == run.iterations == iterations
     assert [s.iteration for s in steps] == list(range(1, iterations + 1))
 
 
-def test_api_error_records_the_exception_class_in_stats(session, company, deps_for):
+def test_api_error_records_the_exception_class_in_error_message(session, company, deps_for):
     client = ScriptedClient(API_ERROR)
     with pytest.raises(EnrichmentFailed):
         enrich_company(session, company, deps_for(client))
     (run,) = runs(session)
     assert run.failure_category == "api_error"
-    assert run.stats["error_type"] == "APIConnectionError"
+    assert run.error_message.startswith("APIConnectionError:")
     assert steps_of(session, run) == []  # a failed call produced no response, so no step
 
 
@@ -492,7 +493,7 @@ def test_save_profile_failure_after_submission_is_internal_error_with_steps_kept
     session.expire_all()
     (run,) = runs(session)
     assert run.status == "error" and run.failure_category == "internal_error"
-    assert "RuntimeError: disk full" in run.error
+    assert "RuntimeError: disk full" in run.error_message
     assert run.stats["stop"] == "submitted"
     (step,) = steps_of(session, run)
     assert step.tool_name == "web_search,submit_profile"

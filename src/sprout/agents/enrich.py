@@ -33,6 +33,7 @@ from sprout.agents.tools import SourceLedger, build_tools
 from sprout.config import MissingConfigError, Settings, get_settings
 from sprout.db import (
     Company,
+    RunKind,
     RunLogStep,
     add_company_by_number,
     delete_profile,
@@ -295,26 +296,18 @@ def _user_message(company: Company) -> str:
     return "\n".join(lines)
 
 
-def _stats(company: Company, deps: Deps, budget: Budget, result: LoopResult) -> dict[str, Any]:
+def _stats(result: LoopResult) -> dict[str, Any]:
+    """The thin, free-form remainder of a run's record; everything common to every run has its own
+    `run_log` column instead (company, model, budget, tool_calls, error_message, ...)."""
     usage = result.usage
     return {
-        "company_id": company.id,
-        "company_number": company.company_number,
-        "model": deps.model,
-        "effort": deps.effort,
         "stop": result.stop,
-        "iterations": result.iterations,
-        "repairs": result.repairs,
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
         "cache_read_tokens": usage.cache_read_tokens,
         "cache_write_tokens": usage.cache_write_tokens,
         "web_searches": usage.web_searches,
-        "tool_calls": result.tool_calls,
         "cost_usd": round(float(result.cost_usd), 6),
-        "budget": {"max_iterations": budget.max_iterations, "max_usd": float(budget.max_usd)},
-        "error": result.error,
-        "error_type": result.error_type,
     }
 
 
@@ -352,7 +345,7 @@ def enrich_with_result(
     ch = deps.ch if company.company_number else None
     submit, accepted = _submit_tool(company, ledger)
     tools = [*build_tools(deps.fetcher, ch, ledger), submit]
-    with logged_run(session, "enrich") as run:
+    with logged_run(session, RunKind.COMPANY_ENRICH.value) as run:
         result = run_agent(
             deps.client,
             model=deps.model,
@@ -364,7 +357,16 @@ def enrich_with_result(
             effort=deps.effort,
             on_search_urls=lambda urls: [ledger.add(u, fetched=False) for u in urls],
         )
-        run.stats = _stats(company, deps, budget, result)
+        run.stats = _stats(result)
+        run.company_id = company.id
+        run.model = deps.model
+        run.effort = deps.effort
+        run.iterations = result.iterations
+        run.repairs = result.repairs
+        run.max_iterations = budget.max_iterations
+        run.max_usd = float(budget.max_usd)
+        run.tool_calls = result.tool_calls
+        run.error_message = result.error
         failure = failure_category_for(result.stop)
         run.failure_category = failure.value if failure else None
         assert run.id is not None  # logged_run commits the row before yielding
