@@ -1,7 +1,7 @@
 """SQLite schema (SQLModel) and the small set of write helpers ingestion needs.
 
-Tables: `company`, `fact` (provenance), `funding_round`, `news_item`, `run_log`, `run_log_step`. All
-timestamps are
+Tables: `company`, `fact` (provenance), `funding_round`, `news_item`, `company_news` (schema only,
+unpopulated until a news-matching agent exists), `run_log`, `run_log_step`. All timestamps are
 timezone-aware UTC.
 """
 
@@ -96,6 +96,20 @@ class NewsItemRow(SQLModel, table=True):
     summary: str = ""
     source: str | None = None
     first_seen_at: datetime = Field(default_factory=utcnow)
+
+
+class CompanyNewsRow(SQLModel, table=True):
+    """Links a news item to a company. Schema only: nothing writes this table yet (D33); a news
+    item and a company_id are both known the moment some future matcher decides they belong
+    together, so this is additive infrastructure, not a feature."""
+
+    __tablename__ = "company_news"
+    __table_args__ = {"extend_existing": True}
+
+    company_id: int = Field(foreign_key="company.id", primary_key=True)
+    news_item_id: int = Field(foreign_key="news_item.id", primary_key=True)
+    news_kind: str | None = None  # NULL means matched but not big news
+    summary: str | None = None  # one sentence, model-written, untrusted
 
 
 class RunLog(SQLModel, table=True):
