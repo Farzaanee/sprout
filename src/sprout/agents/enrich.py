@@ -54,7 +54,7 @@ MAX_OUTPUT_TOKENS = 6_000
 MAX_LISTED_URLS = 25
 FUNDING_FIELDS = ("total_raised_million_usd", "valuation_million_usd", "funding_rounds")
 # The model supplies none of these: identity is the DB row, time is stamped from the ledger,
-# and news arrives in Phase 3.
+# and news arrives in Phase 5.
 _NOT_MODEL_OUTPUT = ("name", "news")
 _COMPANY_NUMBER = re.compile(r"^(\d{8}|[A-Za-z]{2}\d{6})$")
 

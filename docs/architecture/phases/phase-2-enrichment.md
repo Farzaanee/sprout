@@ -1,13 +1,13 @@
 # Phase 2: Single-company enrichment agent
 
-Status: built. Part of the [Sprout architecture docs](README.md).
+Status: done, with caveats (listed under [Outstanding](#outstanding)). Phase 3 later added step logging on top of this loop; where that changes a contract below it is marked. Part of the [Sprout architecture docs](../README.md).
 
 ```mermaid
 flowchart TB
     CLI["python -m sprout.enrich (shim): resolve_company maps a name or company number to a company row"]
     subgraph AGENT["agents/ (anthropic is imported only by loop.py)"]
         ENR["enrich.py:<br/>system prompt, submit_profile schema and validation,<br/>enrich_company, enrich_with_result,<br/>CLI main, run_log stats"]
-        LOOP["loop.py: run_agent, stop-reason handling, iteration and USD guards, one repair"]
+        LOOP["loop.py: run_agent, stop-reason handling, iteration and USD guards, one repair,<br/>one StepRecord per model response (Phase 3)"]
         TOOLS["tools.py:<br/>build_tools, tool handlers,<br/>SourceLedger, untrusted-content wrapping"]
     end
     subgraph TOOLSET["Tools offered to the model"]
@@ -19,8 +19,8 @@ flowchart TB
     LLM(["Anthropic API"])
     COST["costs.py: price table, Usage, cost_usd"]
     CHECK["validate_submission:<br/>Pydantic, source URL in ledger,<br/>funding note present"]
-    DBW["db.py:<br/>save_profile (one save_fact per Sourced field,<br/>funding_rounds to its own table, company.category)<br/>add_company_by_number<br/>logged_run kind enrich"]
-    SQL[("SQLite: company, fact, run_log")]
+    DBW["db.py:<br/>save_profile (one save_fact per Sourced field,<br/>funding_rounds to its own table, company.category)<br/>add_company_by_number<br/>logged_run kind enrich (stats, failure_category, run_log_step rows)"]
+    SQL[("SQLite: company, fact, funding_round, run_log, run_log_step")]
     WF["sources/web.py: WebFetcher"]
     CHC["sources/companies_house.py"]
     SRCX(["Public websites, Companies House"])
@@ -89,10 +89,16 @@ class Tool:
 @dataclass(frozen=True)
 class ToolOutcome: text: str; is_error: bool = False; payload: Any = None   # payload set => accepted submission
 @dataclass
+class StepRecord:                          # Phase 3: one per model response; tool inputs and thinking are not recorded
+    iteration: int; at: datetime; stop_reason: str | None; tool_names: tuple[str, ...]
+    tool_errors: int; usage: Usage; cost_usd: Decimal; response_text: str   # response_text capped at LOGGED_TEXT_MAX_CHARS (1,000)
+@dataclass
 class LoopResult:
     payload: Any | None; usage: Usage; cost_usd: Decimal; iterations: int; repairs: int; tool_calls: dict[str, int]
     stop: Literal["submitted","invalid","max_iter","budget","no_submit","truncated","refused","error"]
     error: str | None
+    error_type: str | None                 # Phase 3: exception class name for an API failure, else None
+    steps: list[StepRecord]                # Phase 3: len(steps) == iterations; the loop never reads it
 def run_agent(client, *, model, system, messages, tools, budget, max_tokens, effort,
               on_search_urls: Callable[[list[str]], None] | None = None) -> LoopResult
 
@@ -113,14 +119,18 @@ def main(argv) -> int        # python -m sprout.enrich NAME_OR_NUMBER...  --stro
 
 # db.py additions
 def save_profile(session, company, profile: CompanyProfile) -> None     # save_fact per Sourced field; company.category
+def save_funding_rounds(session, company_id, rounds) -> None            # replaces the company's funding_round rows
+def delete_profile(session, company) -> int                              # clears fact, funding_round and category (CLI --reset)
 def add_company_by_number(session, number: str, data: dict) -> Company   # for pilot companies absent from the 876
 ```
+
+`run_agent` has no `on_step` callback: steps accumulate on `LoopResult.steps` and `enrich_with_result` persists them afterwards. An optional `on_step` for live per-worker progress is a possible Phase 5 addition (see the [Phase 3 page](phase-3-observability.md#what-phase-5-needs-hooks-only-nothing-built)).
 
 `tools.py` does not import `Deps` from `enrich.py`; `build_tools` takes the fetcher, an optional Companies House client and the ledger directly. `SourceLedger.add` takes an optional `at` so a fetched page keeps the fetcher's `retrieved_at`. The CLI also offers `--effort`, `--show` and a Companies House name search for "did you mean" hints. `Deps.ch` is `CompaniesHouseClient | None` and is dropped for a company with no number, which also drops `lookup_companies_house` from the tool list.
 
 ## Loop contract (stop-reason handling, covered by scripted-client tests)
 
-Each iteration: check the guards, call `messages.create`, add `usage` to the running total, then act on `stop_reason`.
+Each iteration: check the guards, call `messages.create`, add `usage` to the running total, append a `StepRecord` (Phase 3), then act on `stop_reason`. A custom tool result with `is_error` increments that step's `tool_errors`, including a rejected `submit_profile`.
 
 | Condition | Action |
 |---|---|
@@ -132,9 +142,11 @@ Each iteration: check the guards, call `messages.create`, add `usage` to the run
 | SDK `APIError` after the SDK's own retries | `error`; usage so far is still returned. |
 | Guards | Checked before every call: iterations used >= `max_iterations` gives `max_iter`; spent >= `max_usd` gives `budget`. On the last allowed iteration, or once spend reaches 80 percent of the cap, the next user message adds "budget nearly used, call submit_profile now". The USD cap is soft by at most one response (cost is known only after a call); `max_tokens` bounds that overshoot, and tests assert the exact call count with a tiny cap. |
 
-Only a validated `submit_profile` carries facts, so on any non-`submitted` stop nothing is written to `fact` or `category`; the cost is still recorded. The only per-run caps are iterations, USD, search `max_uses` (3) and the tool-result character cap.
+Only a validated `submit_profile` carries facts, so on any non-`submitted` stop nothing is written to `fact` or `category`; the cost, `failure_category` (from `failures.failure_category_for(stop)`) and step rows are still recorded. The only per-run caps are iterations, USD, search `max_uses` (3) and the tool-result character cap.
 
-There is no per-run fetch cap beyond the iteration cap, and no partial profile is ever written on a cap stop. There is also no batch-level USD cap yet: the CLI enforces `--max-usd` per company and only prints the total, so a long target list can spend `n * max_usd`. A `BatchBudget` is planned for Phase 4 (see the [Phase 4 page](phase-4-evals-guardrails.md), D24) so the evals have a batch cap, and the Phase 5 orchestrator must reuse it.
+There is no per-run fetch cap beyond the iteration cap (the prompt's "at most 4 pages" is advice, not enforced), and no partial profile is ever written on a cap stop. There is also no batch-level USD cap: the CLI enforces `--max-usd` per company and only prints the total, so a long target list can spend `n * max_usd`. A `BatchBudget` is planned for Phase 4 (see the [Phase 4 page](phase-4-evals-guardrails.md), D24) so the evals have a batch cap, and the Phase 5 orchestrator must reuse it.
+
+**Known defect (Phase 3 finding, unfixed).** `--max-iterations 2` reproducibly ends `error` with a 400 on the second request: "`web_search` tool use ... was found without a corresponding `web_search_tool_result` block". Iteration 1 returned a server-side `web_search` together with a custom `lookup_companies_house` `tool_use` and no search result block, and the loop appended that content unchanged. Default-cap runs accepted the same pattern, so the trigger is not isolated (the wrap-up notice on the second request is one suspect). It is not caused by step logging. A fix needs a live reproduction (for example dropping a `server_tool_use` block that has no matching result before it goes into history, or avoiding mixed server and custom calls in one turn), so it is left for a decision. It blocks a deterministic live `iteration_cap` run and adds `api_error` noise to any low-cap test.
 
 ## Inside `loop.py`: the iteration state machine
 
@@ -149,7 +161,7 @@ flowchart TB
     BUDGETSTOP["stop = budget"]
     CALL["messages.create(...)<br/>one API call"]
     APIERR["SDK APIError after retries<br/>stop = error"]
-    USAGE["usage += response.usage<br/>cost_usd = cost_usd(model, usage)"]
+    USAGE["usage += response.usage<br/>cost_usd = cost_usd(model, usage)<br/>append StepRecord"]
     STOPR{"stop_reason?"}
     TOOLUSE["Run each tool_use block<br/>(fetch_page, lookup_companies_house,<br/>submit_profile, ...)"]
     TERM{"terminal tool<br/>returned a payload?"}
@@ -165,7 +177,7 @@ flowchart TB
     MAXTOK["stop = truncated"]
     REFUSAL["stop = refused"]
     NEXT(["next iteration"])
-    DONE(["return LoopResult<br/>(payload, usage, cost_usd,<br/>iterations, repairs, stop, error)"])
+    DONE(["return LoopResult<br/>(payload, usage, cost_usd, iterations,<br/>repairs, stop, error, error_type, steps)"])
 
     START --> GUARD
     GUARD -- "iteration cap" --> MAXITER --> DONE
@@ -189,9 +201,29 @@ flowchart TB
 
 ## Other notes
 
-- Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](cross-cutting.md#44-testing)).
+- Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](../4.%20cross-cutting.md#4-testing)).
 - Tool handlers return error outcomes and never raise into the loop (`run_agent` also catches any handler exception and turns it into an error result).
-- `enrich_with_result` writes facts and the `enrich` run_log row in one session: it assigns `run.stats` and **commits before raising** on failure, because `logged_run` rolls back on exceptions and would otherwise discard the stats that record what a failed run cost; on success it then calls `save_profile`. On failure `logged_run` also marks the row `status="error"` with the exception text, while the stats stay on the row. Note the status therefore means "run did not produce a profile", and `stats.stop` says why.
+- `enrich_with_result` writes facts and the `enrich` run_log row in one session: it assigns `run.stats`, sets `run.failure_category` and adds the `run_log_step` rows, then **commits before raising** on failure, because `logged_run` rolls back on exceptions and would otherwise discard the record of what a failed run cost; on success it then calls `save_profile`. On failure `logged_run` also marks the row `status="error"` with the exception text, while stats, category and steps stay on the row. The status therefore means "run did not produce a profile", and `stats.stop` and `failure_category` say why.
+- `agents/enrich.py` (about 510 lines: agent, schema, CLI, `resolve_company`) should be split when Phase 5 adds an orchestrator.
 - Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 7 so MCP does not import from the UI package.
+
+## Outstanding
+
+Work that is not done or not verified, as of the end of Phase 3. Nothing here blocks Phase 4.
+
+| Item | Detail |
+|---|---|
+| Mixed server and custom tool call 400 | See "Known defect" above. Needs a live reproduction and a decision before the Phase 4 baseline, or the baseline carries `api_error` noise whenever a low iteration cap is used |
+| User review of the pilot profiles | The 10-company pilot (10/10 submitted) was reviewed by the implementing agent only |
+| Search price unconfirmed | US$0.01 per search is an assumption from the `claude-api` skill; check it against the first console invoice (search is about 70 percent of a run's cost) |
+| No `-m live` enrichment test | Deliberate, so a plain `pytest` with a key never spends money. The tiny-cap criterion is verified with mocks only |
+| Never run live | `--strong` (Sonnet 5.5), forced `tool_choice` on Haiku 5.5, the over-100K-token price tier, the 512-token minimum cacheable prefix. `pause_turn` has only mock evidence |
+| No per-run fetch cap, no batch-level USD cap | `BatchBudget` (Phase 4, D24) closes the second; the first is bounded only by the iteration cap |
+| No winning-value rule | A re-run can leave both a valued and a NULL-value fact for a field, and stale facts from URLs no longer cited remain (A6). Must exist before Phase 6 reads facts. `--reset` is the manual workaround |
+| Non-USD funding amounts sometimes left null | Safe (null, not a guess) but understates funding coverage; the note carries the original figure |
+| Snippet-only claims cannot be audited | Search results arrive encrypted; the code caps them at `medium` and requires a note; the Phase 5 verifier is the real check |
+| Claimed website can be wrong | Stored at medium confidence with a caveat in the note (Airborne Robotics returned another company's content) |
+| Latent nit in `_simplify` | It drops any dict key named `title`, `default`, `minimum`, `format` and so on, including a `CompanyProfile` field with such a name inside `properties`. No current field collides |
+| Older facts under superseded field or stage names | Re-run `sprout.enrich <number> --reset` to refresh |
 
 Planned Phase 5/7 modules that build on this phase are on the [Phase 5 page](phase-5-multi-agent.md).

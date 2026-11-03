@@ -1,12 +1,12 @@
 # Phase 6: Dashboard
 
-Status: partial (progress and test console exists). Part of the [Sprout architecture docs](README.md).
+Status: partial (progress and test console and the Phase 3 Observability tab exist). Part of the [Sprout architecture docs](../README.md).
 
 ```mermaid
 flowchart TB
     ENTRY["streamlit_app.py"]
     subgraph UI["app/dashboard.py"]
-        T1["Built: Progress, Companies, News, Run and test. Planned (Phase 3): Observability"]
+        T1["Built: Progress, Companies, News, Observability (Phase 3), Run and test"]
         T2["Planned: filters, charts, company detail with sources, big-news feed, Ask box"]
     end
     Q["app/queries.py"]
@@ -28,4 +28,4 @@ flowchart TB
     T2 -.-> LLM
 ```
 
-The Observability tab planned for Phase 3 is specified on the [Phase 3 page](phase-3-observability.md#dashboard-tab-appdashboardpy). The winning-value rule (needed before this phase reads facts) and the service-layer extraction are A6 in [risks and ambiguities](risks.md) and D29 in [decisions](decisions.md).
+The Observability tab (built in Phase 3) is specified on the [Phase 3 page](phase-3-observability.md#dashboard-tab-appdashboardpy). The winning-value rule (needed before this phase reads facts) and the service-layer extraction are A6 in [risks and ambiguities](../5.%20risks.md) and D29 in [decisions](../6.%20decisions.md).

@@ -1,14 +1,14 @@
 # Phase 5: Multi-agent pipeline (planned)
 
-Part of the [Sprout architecture docs](README.md).
+Part of the [Sprout architecture docs](../README.md).
 
 ```mermaid
 flowchart TB
-    SQL[("SQLite plus enrichment_state")]
+    SQL[("SQLite plus run_log.company_id and company_news")]
     subgraph ORCH["agents/orchestrator.py"]
         SEL["Selector: new, stale, low-confidence, failed"]
         POOL["asyncio worker pool, concurrency limit, 429 handling"]
-        STAT["Per-company status, resumable, idempotent"]
+        STAT["Per-company status derived from run_log, resumable, idempotent"]
     end
     ENR["enrich.py"]
     CLS["classify.py: bulk model"]
@@ -46,8 +46,9 @@ flowchart TB
     COSTS --> SQL
 ```
 
-- The orchestrator is deterministic scheduling code, not an LLM supervisor (D27, see [decisions](decisions.md)).
+- The orchestrator is deterministic scheduling code, not an LLM supervisor (D27, see [decisions](../6.%20decisions.md)).
 - `HttpClient` is synchronous and not thread-safe: one client per worker, locking, or `asyncio.to_thread`.
+- **Schema (D32, D33):** two additive changes, a nullable `run_log.company_id` (status is derived from `run_log`, no `enrichment_state` table) and a `company_news` link table. Enable WAL and a busy timeout in `get_engine` first. Details and the items cut from the earlier plan are in the [data model](../2.%20data-model.md#planned-additions-phase-5).
 - **Open:** verifier ordering — run after the enricher, only for companies with a funding or stage claim.
 - Each added agent is judged by its Phase 4 eval deltas before being kept (D28); Phase 4 evals exist before this phase runs.
 
@@ -66,7 +67,7 @@ async def run(limit, concurrency, budget, force=False) -> RunSummary
 search_companies(...); get_company(name); latest_news(...)
 ```
 
-- Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](cross-cutting.md#44-testing)).
+- Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](../4.%20cross-cutting.md#4-testing)).
 - Tool handlers return error outcomes and never raise into the loop (`run_agent` also catches any handler exception and turns it into an error result).
 - Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 7 so MCP does not import from the UI package.
 

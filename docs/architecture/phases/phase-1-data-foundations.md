@@ -1,6 +1,6 @@
 # Phase 1: Data foundations
 
-Status: done. Part of the [Sprout architecture docs](README.md).
+Status: done. Part of the [Sprout architecture docs](../README.md).
 
 ```mermaid
 flowchart TB

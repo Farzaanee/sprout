@@ -1,6 +1,6 @@
 # Phase 4: Evals and guardrails (design, not built)
 
-Part of the [Sprout architecture docs](README.md). Nothing in this section exists in code yet. Much of the SSRF and size-limit work is already in `sources/web.py` (public-address check on every hop, 5 MB streamed cap, 20,000-character text cap); Phase 4 adds an explicit `UrlPolicy`, a total fetch deadline, the injection suite, and the measurement harness.
+Part of the [Sprout architecture docs](../README.md). Nothing in this section exists in code yet. Much of the SSRF and size-limit work is already in `sources/web.py` (public-address check on every hop, 5 MB streamed cap, 20,000-character text cap); Phase 4 adds an explicit `UrlPolicy`, a total fetch deadline, the injection suite, and the measurement harness.
 
 ```mermaid
 flowchart TB
@@ -163,7 +163,7 @@ class BatchBudget:
 
 Usage in the runner: before each company, stop if `batch.exhausted` (the rest are reported `skipped_budget` and the run is marked incomplete and not gated); otherwise `Budget(max_iterations=..., max_usd=batch.clamp(per_company_usd))`; after the call, `batch.charge(result.cost_usd)` or `exc.cost_usd` for an `EnrichmentFailed`. Judge, calibration and injection spend are charged to the same object. As with the per-company cap, the batch cap is soft by at most one response. Not thread-safe; the async orchestrator adds a lock. The `sprout.enrich` CLI gains `--max-total-usd` on the same object, closing the Phase 2 gap for CLI use.
 
-See [Phase 4 eval budget](cross-cutting.md#48-phase-4-eval-budget-planned) in the cross-cutting concerns for the estimated cost breakdown and the distinction between estimated spend, proposed allocations, and the per-invocation cap.
+See [Phase 4 eval budget](../4.%20cross-cutting.md#8-phase-4-eval-budget-planned) in the cross-cutting concerns for the estimated cost breakdown and the distinction between estimated spend, proposed allocations, and the per-invocation cap.
 
 ## Runner (`evals/run_evals.py`)
 
