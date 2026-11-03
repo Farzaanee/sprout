@@ -132,6 +132,7 @@ def test_observability_no_failed_runs_omits_category_chart(monkeypatch, tmp_path
 def test_observability_run_without_steps_that_ran_is_pre_phase_3(monkeypatch, tmp_path):
     _seed(tmp_path)
     at = _observability(monkeypatch, tmp_path)
+    at.toggle[0].set_value(False).run()
     assert any("predates step logging (Phase 3), run-level stats only" in i.value for i in at.info)
     assert not at.expander
 
@@ -153,6 +154,7 @@ def test_observability_run_without_steps_or_response_shows_error(monkeypatch, tm
 def test_observability_tolerates_run_with_empty_stats(monkeypatch, tmp_path):
     _seed(tmp_path, stats={}, status="running", iterations=None, model=None)
     at = _observability(monkeypatch, tmp_path)
+    at.toggle[0].set_value(False).run()
     assert {m.label: m.value for m in at.metric}["Runs"] == "1"
     assert any("No model response was received" in i.value for i in at.info)
 

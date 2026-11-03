@@ -383,10 +383,10 @@ def render_observability() -> None:
             alt.Chart(failure_rate)
             .mark_bar()
             .encode(
-                x=alt.X("day:T", title="day"),
+                x=alt.X("day:T", title="day", axis=alt.Axis(format="%Y-%m-%d")),
                 y=alt.Y("failure_rate:Q", title="failure rate (%)"),
                 tooltip=[
-                    alt.Tooltip("day:T", title="day"),
+                    alt.Tooltip("day:T", title="day", format="%Y-%m-%d"),
                     alt.Tooltip("failure_rate:Q", title="failure rate (%)", format=".1f"),
                     alt.Tooltip("failed_runs:Q", title="failed runs"),
                     alt.Tooltip("total_runs:Q", title="total runs"),
@@ -413,7 +413,7 @@ def render_observability() -> None:
         tool = filters[3].selectbox(
             "Tool call", [""] + queries.all_tools(session), format_func=lambda t: t or "any"
         )
-        failures_only = filters[4].toggle("Failures only")
+        failures_only = filters[4].toggle("Failures only", value=True)
         shown = queries.enrich_runs(
             session,
             failure_category=category or None,
