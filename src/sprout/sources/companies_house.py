@@ -147,6 +147,11 @@ class CompaniesHouseClient:
             {"items_per_page": items_per_page},
         )
 
+    def active_officer_count(self, number: str) -> int | None:
+        """Active officer count from `/officers`; None if the company has no listing."""
+        data = self._get_json(f"/company/{self._valid_number(number)}/officers")
+        return None if data is None else data.get("active_count")
+
     def _get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """Parsed JSON body, or None when the API answers 404."""
         response = self._http.get(self._base_url + path, params=params, max_age=self._cache_ttl)

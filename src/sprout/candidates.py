@@ -11,6 +11,12 @@ from datetime import date
 
 MIN_INCORPORATION_DATE = date(2012, 1, 1)
 
+# D34: a single-officer company is overwhelmingly a shell or trade body in the pilot sample
+# (12/12 `Other`-category companies had exactly one active officer, vs. 13/19 real companies
+# having two or more). Catches no false positives in that sample at a much better recall than
+# filtering on accounts type.
+MIN_ACTIVE_OFFICERS = 2
+
 # 2007 SIC codes: software, IT services, data processing, web portals, other info
 # services, and R&D in natural sciences/engineering.
 TECH_SIC_CODES = frozenset({"62011", "62012", "62020", "62090", "63110", "63120", "63990", "72190"})
@@ -84,3 +90,8 @@ def assess(
         return Assessment(False, 0, ())
     score = 2 * len(strong) + len(weak) + (1 if has_tech_sic else 0)
     return Assessment(True, score, tuple(strong + weak))
+
+
+def passes_prescreen(active_officers: int | None) -> bool:
+    """Shell/non-AI pre-screen (D34): reject candidates with fewer than `MIN_ACTIVE_OFFICERS`."""
+    return active_officers is not None and active_officers >= MIN_ACTIVE_OFFICERS

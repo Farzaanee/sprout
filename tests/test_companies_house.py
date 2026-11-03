@@ -121,6 +121,18 @@ def test_invalid_json_is_a_fetch_error(make_http):
         client.get_company("12345678")
 
 
+def test_active_officer_count(make_http):
+    client = CompaniesHouseClient(
+        make_http(lambda r: httpx.Response(200, json={"active_count": 2, "total_results": 3}))
+    )
+    assert client.active_officer_count("12345678") == 2
+
+
+def test_active_officer_count_missing_company_is_none(make_http):
+    client = CompaniesHouseClient(make_http(lambda r: httpx.Response(404, json={})))
+    assert client.active_officer_count("12345678") is None
+
+
 def test_api_key_is_sent_as_basic_auth(tmp_path):
     http = make_http_client("secret-key", tmp_path)
     request = http._client.build_request("GET", "https://api.company-information.service.gov.uk/")

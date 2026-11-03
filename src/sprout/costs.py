@@ -44,6 +44,11 @@ PRICES: dict[str, Price] = {
 # Messages API; check the first console invoice.
 WEB_SEARCH_USD_EACH = Decimal("0.01")
 
+# D34: observed cost of enriching one company (see docs/architecture/2. data-model.md), and the
+# smoke-test-scale budget for a single enrichment run until a real weekly batch figure is set.
+COST_PER_COMPANY_USD = Decimal("0.015")
+BUDGET_PER_RUN_USD = Decimal("0.75")
+
 
 class UnknownModelError(KeyError):
     """No price is configured for this model ID."""
@@ -83,3 +88,13 @@ def cost_usd(model: str, usage: Usage) -> Decimal:
         + usage.cache_read_tokens * price.cache_read
     ) / _MILLION
     return tokens + usage.web_searches * WEB_SEARCH_USD_EACH
+
+
+def enrichment_batch_size(
+    survivors_after_prescreen: int,
+    *,
+    budget_usd: Decimal = BUDGET_PER_RUN_USD,
+    cost_per_company_usd: Decimal = COST_PER_COMPANY_USD,
+) -> int:
+    """N (D34): how many pre-screened candidates one run can afford to enrich."""
+    return min(survivors_after_prescreen, int(budget_usd / cost_per_company_usd))

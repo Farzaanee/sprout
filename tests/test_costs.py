@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from sprout.costs import UnknownModelError, Usage, cost_usd
+from sprout.costs import UnknownModelError, Usage, cost_usd, enrichment_batch_size
 
 
 def test_haiku_cost_is_exact_decimal_arithmetic():
@@ -34,3 +34,15 @@ def test_usage_adds_every_field():
 
 def test_zero_usage_costs_nothing():
     assert cost_usd("claude-haiku-5-5", Usage()) == 0
+
+
+def test_enrichment_batch_size_is_capped_by_budget():
+    n = enrichment_batch_size(
+        101, budget_usd=Decimal("0.75"), cost_per_company_usd=Decimal("0.015")
+    )
+    assert n == 50
+
+
+def test_enrichment_batch_size_is_capped_by_survivors():
+    n = enrichment_batch_size(3, budget_usd=Decimal("0.75"), cost_per_company_usd=Decimal("0.015"))
+    assert n == 3
