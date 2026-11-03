@@ -98,7 +98,7 @@ def _subheaders(at) -> list[str]:
 def test_observability_empty_points_at_the_enrich_command(monkeypatch, tmp_path):
     at = _observability(monkeypatch, tmp_path)
     assert any("uv run python -m sprout.enrich NAME_OR_NUMBER" in i.value for i in at.info)
-    assert "Failures by category" not in _subheaders(at)
+    assert "Failures" not in _subheaders(at)
     assert "Runs" not in {m.label for m in at.metric}
 
 
@@ -106,9 +106,13 @@ def test_observability_populated_with_failed_run(monkeypatch, tmp_path):
     _seed(tmp_path, category="invalid_output", steps=2, error_message="validation failed")
     at = _observability(monkeypatch, tmp_path)
     assert {m.label: m.value for m in at.metric}["Failed"] == "1"
-    assert {"Failures by category", "Trends", "Runs", "Run detail"} <= set(_subheaders(at))
-    assert not at.success
-    assert len(at.get("vega_lite_chart")) == 3  # category, cost trend, failures per day
+    assert {"Failures", "Trends", "Runs", "Run detail"} <= set(_subheaders(at))
+    assert [s.value for s in at.success] == [
+        "No tool calls in this range",
+        "No failed runs with tool calls",
+    ]
+    # cost by kind, category, rate by kind, cost trend, failures per day (no tool calls seeded)
+    assert len(at.get("vega_lite_chart")) == 5
     assert [e.label for e in at.expander] == ["Step 1 response", "Step 2 response"]
     assert "validation failed" in [c.value for c in at.code]
 
@@ -116,8 +120,13 @@ def test_observability_populated_with_failed_run(monkeypatch, tmp_path):
 def test_observability_no_failed_runs_omits_category_chart(monkeypatch, tmp_path):
     _seed(tmp_path, steps=1)
     at = _observability(monkeypatch, tmp_path)
-    assert [s.value for s in at.success] == ["No failed runs"]
-    assert len(at.get("vega_lite_chart")) == 2  # trends only, no category chart
+    assert [s.value for s in at.success] == [
+        "No tool calls in this range",
+        "No failed runs",
+        "No failed runs with tool calls",
+    ]
+    # cost by kind, rate by kind, cost trend, failures per day; no category or tool-call chart
+    assert len(at.get("vega_lite_chart")) == 4
 
 
 def test_observability_run_without_steps_that_ran_is_pre_phase_3(monkeypatch, tmp_path):

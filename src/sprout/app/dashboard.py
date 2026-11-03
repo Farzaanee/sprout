@@ -12,6 +12,7 @@ import os
 from datetime import date
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 from sqlmodel import Session
@@ -19,7 +20,7 @@ from sqlmodel import Session
 from sprout import hello, ingest
 from sprout.app import queries
 from sprout.config import get_settings
-from sprout.db import get_engine, init_db
+from sprout.db import RunKind, get_engine, init_db
 
 DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
 STATE_ICONS = {"Done": "✅", "In progress": "🟡", "Not started": "⬜"}
@@ -214,6 +215,7 @@ def _run_row(run: queries.EnrichRun) -> dict[str, object]:
     return {
         "run": run.run_id,
         "started": run.started_at,
+        "kind": run.kind,
         "company": run.company_name,
         "status": run.status,
         "stop": run.stop,
@@ -221,6 +223,7 @@ def _run_row(run: queries.EnrichRun) -> dict[str, object]:
         "iterations": run.iterations if has_stats else None,
         "cost (US$)": run.cost_usd if has_stats else None,
         "searches": run.web_searches if has_stats else None,
+        "tools": ", ".join(run.tools) if run.tools else None,
         "steps logged": run.steps_logged,
     }
 
@@ -265,16 +268,49 @@ def _render_run_detail(session: Session, run: queries.EnrichRun) -> None:
 
 def render_observability() -> None:
     with _session() as session:
-        runs = queries.enrich_runs(session)
-        if not runs:
+        if not queries.enrich_runs(session):
             st.info(
                 "No enrichment runs yet. Run `uv run python -m sprout.enrich NAME_OR_NUMBER` "
                 "to create one."
             )
             return
-        counts = queries.failure_counts(session)
-        trend = queries.cost_trend(session)
-        days = queries.daily_outcomes(session)
+
+        date_bounds = queries.run_date_range(session)
+        start_date, end_date = date_bounds if date_bounds else (None, None)
+        if date_bounds:
+            min_date, max_date = date_bounds
+            selected = st.date_input(
+                "Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date
+            )
+            if isinstance(selected, tuple) and len(selected) == 2:
+                start_date, end_date = selected
+            elif isinstance(selected, date):
+                start_date = end_date = selected
+
+        date_kwargs = {"start": start_date, "end": end_date}
+        runs = queries.enrich_runs(session, **date_kwargs)
+        counts = queries.failure_counts(session, **date_kwargs)
+        rate_by_kind = queries.failure_rate_by_kind(session, **date_kwargs)
+        tool_failures = queries.failures_by_tool(session, **date_kwargs)
+        cost_tool = queries.cost_by_tool(session, **date_kwargs)
+        cost_kind = queries.cost_by_kind(session, **date_kwargs)
+        trend = queries.cost_trend(session, **date_kwargs)
+        days = queries.daily_outcomes(session, **date_kwargs)
+
+        if not runs:
+            st.info("No runs in this date range.")
+            return
+
+        st.subheader("Cost")
+        cost_tool_col, cost_kind_col = st.columns(2)
+        cost_tool_col.caption("Cost by tool call (US$)")
+        if cost_tool:
+            cost_tool_col.bar_chart(pd.Series(cost_tool, name="cost (US$)"))
+        else:
+            cost_tool_col.success("No tool calls in this range")
+
+        cost_kind_col.caption("Cost by kind (US$)")
+        cost_kind_col.bar_chart(pd.Series(cost_kind, name="cost (US$)"))
 
         failed = sum(r.failure_category is not None for r in runs)
         total_cost = sum(r.cost_usd for r in runs)
@@ -288,42 +324,104 @@ def render_observability() -> None:
             f"{total_cost / total_iterations:.4f}" if total_iterations else "n/a",
         )
 
-        st.subheader("Failures by category")
+        st.subheader("Failures")
+        cat_col, kind_col, tool_col = st.columns(3)
+        cat_col.caption("Failures by category")
         if counts:
-            st.bar_chart(pd.Series(counts, name="runs"))
-            st.dataframe(
-                pd.DataFrame({"category": list(counts), "runs": list(counts.values())}),
-                hide_index=True,
-                width="stretch",
-            )
+            cat_col.bar_chart(pd.Series(counts, name="runs"))
         else:
-            st.success("No failed runs")
+            cat_col.success("No failed runs")
+
+        kind_col.caption("Failure rate by kind (%)")
+        kind_col.bar_chart(pd.Series(rate_by_kind, name="failure rate (%)"))
+
+        tool_col.caption("Failures by tool call")
+        if tool_failures:
+            tool_col.bar_chart(pd.Series(tool_failures, name="failed runs"))
+        else:
+            tool_col.success("No failed runs with tool calls")
 
         st.subheader("Trends")
         left, right = st.columns(2)
         left.caption("Cost per iteration (US$), per run")
-        left.line_chart(
-            pd.DataFrame(
-                {"run": p.run_id, "cost per iteration": p.cost_per_iteration} for p in trend
-            ),
-            x="run",
-            y="cost per iteration",
+        cost_trend_df = pd.DataFrame(
+            {
+                "run": p.run_id,
+                "cost per iteration": p.cost_per_iteration,
+                "status": "failed" if p.failed else "successful",
+            }
+            for p in trend
         )
-        right.caption("Failed runs per day")
-        right.bar_chart(
-            pd.DataFrame({"day": d.day, "failures": d.failures} for d in days),
-            x="day",
-            y="failures",
+        left.altair_chart(
+            alt.Chart(cost_trend_df)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("run:O", title="run"),
+                y=alt.Y("cost per iteration:Q", title="cost per iteration (US$)"),
+                color=alt.Color(
+                    "status:N",
+                    title="status",
+                    scale=alt.Scale(
+                        domain=["successful", "failed"], range=["#1f77b4", "#d62728"]
+                    ),
+                ),
+                tooltip=["run", "cost per iteration", "status"],
+            ),
+            width="stretch",
+        )
+        right.caption("Failed runs per day (%)")
+        failure_rate = pd.DataFrame(
+            {
+                "day": d.day,
+                "failure_rate": 100 * d.failures / d.runs if d.runs else 0.0,
+                "failed_runs": d.failures,
+                "total_runs": d.runs,
+            }
+            for d in days
+        )
+        right.altair_chart(
+            alt.Chart(failure_rate)
+            .mark_bar()
+            .encode(
+                x=alt.X("day:T", title="day"),
+                y=alt.Y("failure_rate:Q", title="failure rate (%)"),
+                tooltip=[
+                    alt.Tooltip("day:T", title="day"),
+                    alt.Tooltip("failure_rate:Q", title="failure rate (%)", format=".1f"),
+                    alt.Tooltip("failed_runs:Q", title="failed runs"),
+                    alt.Tooltip("total_runs:Q", title="total runs"),
+                ],
+            ),
+            width="stretch",
         )
 
         st.subheader("Runs")
-        filters = st.columns([2, 1])
+        filters = st.columns([2, 2, 2, 2, 1])
         category = filters[0].selectbox(
             "Failure category", [""] + list(counts), format_func=lambda c: c or "any"
         )
-        failures_only = filters[1].toggle("Failures only")
+        companies = sorted(
+            {(r.company_id, r.company_name) for r in runs if r.company_id is not None},
+            key=lambda c: c[1] or "",
+        )
+        company = filters[1].selectbox(
+            "Company", [None] + companies, format_func=lambda c: "any" if c is None else c[1]
+        )
+        kind_options = [RunKind.COMPANY_ENRICH.value]
+        kind_options += [k for k in sorted(rate_by_kind) if k not in kind_options]
+        kind = filters[2].selectbox("Kind", [*kind_options, ""], format_func=lambda k: k or "any")
+        tool = filters[3].selectbox(
+            "Tool call", [""] + queries.all_tools(session), format_func=lambda t: t or "any"
+        )
+        failures_only = filters[4].toggle("Failures only")
         shown = queries.enrich_runs(
-            session, failure_category=category or None, failures_only=failures_only
+            session,
+            failure_category=category or None,
+            failures_only=failures_only,
+            company_id=company[0] if company else None,
+            kind=kind or None,
+            tool=tool or None,
+            **date_kwargs,
         )
         st.caption(f"{len(shown)} runs")
         if not shown:

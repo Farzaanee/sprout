@@ -1,4 +1,4 @@
-.PHONY: run ingest test lint hooks snapshot
+.PHONY: run ingest test lint hooks snapshot amend-push
 
 run:
 	uv run streamlit run streamlit_app.py
@@ -17,3 +17,8 @@ hooks:
 
 snapshot:
 	cp data/sprout.db data/sprout_snapshot.db
+
+fpush:
+	git add .
+	git commit --amend --no-edit
+	git push -f
