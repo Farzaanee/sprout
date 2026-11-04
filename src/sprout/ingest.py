@@ -88,7 +88,8 @@ def ingest_companies(
             if not assessment.is_candidate:
                 stats["rejected"] += 1
                 continue
-            company, created = upsert_company(session, hit, assessment)
+            active_officers = client.active_officer_count(hit.number)
+            company, created = upsert_company(session, hit, assessment, active_officers)
             assert company.id is not None
             _save_registry_facts(session, company.id, hit)
             stats["new" if created else "updated"] += 1

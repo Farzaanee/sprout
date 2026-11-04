@@ -58,6 +58,8 @@ class Company(SQLModel, table=True):
     matched_keywords: list[str] = Field(
         default_factory=list, sa_column=Column(JSON, nullable=False)
     )
+    # Active officer count at last ingest (D34 pre-screen input); None if never fetched.
+    active_officers: int | None = None
     first_seen_at: datetime = Field(default_factory=utcnow)
     last_seen_at: datetime = Field(default_factory=utcnow)
 
@@ -296,7 +298,10 @@ def _add_missing_columns(engine: Engine) -> None:
 
 
 def upsert_company(
-    session: Session, hit: CompanyHit, assessment: Assessment
+    session: Session,
+    hit: CompanyHit,
+    assessment: Assessment,
+    active_officers: int | None = None,
 ) -> tuple[Company, bool]:
     """Insert or refresh a company by Companies House number. Returns (row, created)."""
     company = session.exec(select(Company).where(Company.company_number == hit.number)).first()
@@ -311,6 +316,7 @@ def upsert_company(
     company.locality = hit.locality
     company.candidate_score = assessment.score
     company.matched_keywords = list(assessment.matched_keywords)
+    company.active_officers = active_officers
     company.last_seen_at = utcnow()
     session.flush()
     return company, created

@@ -38,7 +38,7 @@ def hit(number="12345678", name="Acme AI Ltd") -> CompanyHit:
 
 
 def test_upsert_company_dedupes_on_company_number(session):
-    first, created = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
+    first, created = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]), 3)
     again, created_again = upsert_company(session, hit(name="Acme Intelligence Ltd"), assess("x"))
     session.commit()
     assert created and not created_again
@@ -46,6 +46,12 @@ def test_upsert_company_dedupes_on_company_number(session):
     rows = session.exec(select(Company)).all()
     assert len(rows) == 1 and rows[0].name == "Acme Intelligence Ltd"
     assert rows[0].sic_codes == ["62012"]
+    assert rows[0].active_officers is None  # overwritten by the second upsert's default
+
+
+def test_upsert_company_stores_active_officers(session):
+    company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]), 2)
+    assert company.active_officers == 2
 
 
 def test_save_fact_stores_provenance_and_is_idempotent(session):

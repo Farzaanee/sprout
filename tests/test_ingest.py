@@ -56,6 +56,8 @@ def test_ingest_companies_filters_dedupes_and_records_facts(session, make_http):
     requests = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/officers"):
+            return httpx.Response(200, json={"active_count": 2})
         requests.append(request.url.params["company_name_includes"])
         return httpx.Response(200, json={"items": ITEMS})
 
@@ -64,8 +66,9 @@ def test_ingest_companies_filters_dedupes_and_records_facts(session, make_http):
     stats = ingest.ingest_companies(session, client, terms=terms, max_per_term=100)
     assert stats == {"searched": 9, "new": 2, "updated": 0, "rejected": 1}
 
-    names = sorted(session.exec(select(Company.name)).all())
-    assert names == ["ACME MACHINE LEARNING LTD", "BETA ROBOTICS LTD"]
+    companies = {c.name: c for c in session.exec(select(Company)).all()}
+    assert sorted(companies) == ["ACME MACHINE LEARNING LTD", "BETA ROBOTICS LTD"]
+    assert all(c.active_officers == 2 for c in companies.values())
     facts = {(f.field, f.value_json, f.source_url) for f in session.exec(select(Fact)).all()}
     assert (
         "hq",

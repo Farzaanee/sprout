@@ -204,7 +204,13 @@ def wrap_untrusted(source_url: str, text: str, max_chars: int = 8_000) -> str   
 # agents/enrich.py
 DEFAULT_BUDGET = Budget(max_iterations=12, max_usd=Decimal("0.13"))   # MAX_OUTPUT_TOKENS = 6_000
 @dataclass(frozen=True)
-class Deps: client; fetcher; ch; settings; model: str; effort: str = "low"
+class Deps:
+    client: MessagesClient
+    fetcher: WebFetcher
+    ch: CompaniesHouseClient | None
+    settings: Settings
+    model: str
+    effort: str = "low"
 def enrich_company(session, company, deps, budget=DEFAULT_BUDGET) -> CompanyProfile   # raises EnrichmentFailed(stop, cost)
 def enrich_with_result(session, company, deps, budget=DEFAULT_BUDGET) -> tuple[CompanyProfile, LoopResult]
 def main(argv) -> int        # python -m sprout.enrich NAME_OR_NUMBER...  --strong  --max-usd  --max-iterations  --effort  --show
