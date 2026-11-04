@@ -213,6 +213,26 @@ def test_funding_rounds_come_from_different_sources_with_ledger_time_and_downgra
     assert str(series_a.source_url) == SEEN
 
 
+def test_profile_stage_disagreeing_with_latest_round_is_rejected():
+    rounds = [
+        fact({**SEED, "announced": "2023-01-01"}, FUNDING_URL, "medium", "GBP 1.5m"),
+        fact({**SERIES_A, "announced": "2024-05-01"}, SEEN, "medium", "US$9m"),
+    ]
+    raw = submission(stage=fact("Seed"), funding_rounds=rounds)
+    with pytest.raises(SubmissionError, match="stage: top-level stage is 'Seed' but"):
+        validate_submission(raw, "ACME", ledger_with(SEEN, FUNDING_URL))
+
+
+def test_profile_stage_matching_latest_round_is_accepted():
+    rounds = [
+        fact({**SEED, "announced": "2023-01-01"}, FUNDING_URL, "medium", "GBP 1.5m"),
+        fact({**SERIES_A, "announced": "2024-05-01"}, SEEN, "medium", "US$9m"),
+    ]
+    raw = submission(stage=fact("Series A"), funding_rounds=rounds)
+    profile = validate_submission(raw, "ACME", ledger_with(SEEN, FUNDING_URL))
+    assert profile.stage.value.value == "Series A"
+
+
 def test_search_only_source_cannot_claim_high_confidence():
     ledger = ledger_with(SEEN, fetched=False)
     profile = validate_submission(submission(), "ACME", ledger)

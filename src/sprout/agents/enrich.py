@@ -43,7 +43,7 @@ from sprout.db import (
     save_profile,
 )
 from sprout.failures import failure_category_for
-from sprout.models import Category, CompanyProfile, Confidence, Sourced, Stage
+from sprout.models import Category, CompanyProfile, Confidence, FundingRound, Sourced, Stage
 from sprout.sources import companies_house, web
 from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.http import FetchError
@@ -195,6 +195,14 @@ def _sourced_fields(profile: CompanyProfile) -> dict[str, Sourced[Any]]:
     return fields
 
 
+def _latest_round_stage(rounds: list[Sourced[FundingRound]]) -> Stage | None:
+    """The stage of the most recently announced round, or None if that's not determinable."""
+    dated = [r for r in rounds if r.value is not None and r.value.announced is not None]
+    if not dated:
+        return None
+    return max(dated, key=lambda r: r.value.announced).value.stage  # type: ignore[union-attr]
+
+
 def validate_submission(
     raw: dict[str, Any], company_name: str, ledger: SourceLedger
 ) -> CompanyProfile:
@@ -240,6 +248,17 @@ def validate_submission(
                 f"{name}: a funding value needs a note quoting the source's wording and the "
                 "original figure and currency."
             )
+    latest_round_stage = _latest_round_stage(profile.funding_rounds)
+    if (
+        profile.stage.value is not None
+        and latest_round_stage is not None
+        and profile.stage.value is not latest_round_stage
+    ):
+        problems.append(
+            f"stage: top-level stage is {profile.stage.value.value!r} but the most recently "
+            f"announced funding round is {latest_round_stage.value!r}. Make them agree: fix "
+            "whichever is wrong, or the round's announced date if that's what's off."
+        )
     if problems:
         known = "\n".join(ledger.urls()[:MAX_LISTED_URLS]) or "(none yet)"
         raise SubmissionError("\n".join(problems) + f"\nURLs you may cite:\n{known}")

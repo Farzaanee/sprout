@@ -59,9 +59,81 @@ flowchart TB
 - **Models.** `claude-haiku-5-5` is the default; `claude-sonnet-5-5` via `--strong`. `tool_choice` is `auto`, with the system prompt naming `submit_profile` as the required final step. `submit_profile` is **not** `strict`, since the derived schema exceeds the API's parameter limit, so enforcement is Pydantic validation plus one repair attempt (D13). Thinking tokens count as output tokens, so they're inside the USD budget. Effort defaults to `low`, overridable with `--effort`.
 - **Prompt caching.** The system block and the top-level call both set `cache_control: ephemeral`, so each iteration re-reads the growing conversation at the cheaper read price. The tool list order is fixed because it sits at the start of the cached prefix.
 - **Prompt injection.** Every custom tool result is wrapped in `<untrusted_content source="URL">...</untrusted_content>` (delimiters inside the text neutralised, truncated at 8,000 characters), and the system prompt states that wrapped content is data, never instructions. Search snippets arrive unwrapped but are covered by the same system-prompt rule. No tool writes to the DB; that only happens in our code after validation. Open risk: a model-chosen URL in `fetch_page` could be used to leak context via a query string; an allow/deny list and injection fixtures are planned for Phase 4.
-- **Provenance, beyond Pydantic (D11, in `validate_submission`).** `retrieved_at` is stamped by our code, never the model. `source_url` must match a URL a tool actually returned (ignoring tracking params, fragments, case, trailing slash); anything else is rejected with one repair attempt that lists citable URLs. Funding facts must carry a `note` with the original figure and currency. A source seen only in a snippet, never fetched, is capped at `medium` confidence. Null values with no source always pass.
+- **Provenance, beyond Pydantic (D11, in `validate_submission`).** `retrieved_at` is stamped by our code, never the model. `source_url` must match a URL a tool actually returned (ignoring tracking params, fragments, case, trailing slash); anything else is rejected with one repair attempt that lists citable URLs. Funding facts must carry a `note` with the original figure and currency. A source seen only in a snippet, never fetched, is capped at `medium` confidence. Null values with no source always pass. `profile.stage` disagreeing with the most recently announced round's stage is rejected the same way (see [`validate_submission`](#validate_submission) and [Stage](#stage-two-independent-fields-reconciled-by-one-repair-a3)).
 - **`submit_profile` schema.** Generated from `CompanyProfile` via `submit_profile_schema()`: `$ref`s inlined, `name`/`news`/`retrieved_at` dropped, remaining fields made required, descriptive keywords (`title`, `default`, bounds, `format`) stripped, so numeric bounds are enforced by Pydantic only, not the schema.
 - **Known non-determinism.** Occasional runs end `invalid` or `refused`. The model sometimes leaves non-USD funding amounts null despite the prompt, which is safe but understates funding coverage.
+
+## `validate_submission`
+
+Turns the model's raw `submit_profile` dict into a validated `CompanyProfile`, enforcing provenance in code rather than trusting the model's claims. Collects every problem it finds (not just the first) and raises them together as one `SubmissionError`, which `_submit_tool` turns into a `tool_result` error for the loop's single repair attempt (`loop.py` `REPAIRCHK`).
+
+```mermaid
+flowchart TB
+    RAW(["raw dict from submit_profile"])
+    STRIP["Strip name/news (not model output);<br/>inject the real company name"]
+    STAMP["Stamp retrieved_at on every Sourced field:<br/>cited source_url's first-seen time in the<br/>SourceLedger, else now"]
+    PYD["CompanyProfile.model_validate<br/>(Pydantic rules, e.g. non-null value needs source_url)"]
+    PYDERR{"ValidationError?"}
+    COMPACT["_compact_errors: field path + message,<br/>first 10"]
+    PERFIELD["_sourced_fields: flatten every Sourced field<br/>+ each funding_rounds[i]; for each non-null value,<br/>look its source_url up in the ledger again"]
+    URLCHK{"source_url in ledger?"}
+    REJECTURL["problem: URL never returned by a tool"]
+    FETCHCHK{"confidence high but<br/>only ever seen in a snippet,<br/>never fetched?"}
+    DOWNGRADE["downgrade confidence<br/>HIGH -&gt; MEDIUM"]
+    NOTECHK{"funding/valuation field<br/>(total_raised_million_usd,<br/>valuation_million_usd, funding_rounds)<br/>missing a note?"}
+    REJECTNOTE["problem: needs a note with the<br/>source's original wording"]
+    CROSSCHECK{"profile.stage vs. stage of the<br/>most recently announced round<br/>(_latest_round_stage): disagree?"}
+    REJECTSTAGE["problem: top-level stage and<br/>latest round's stage disagree"]
+    PROBLEMS{"any problems collected?"}
+    REPAIR(["SubmissionError (all problems + citable URLs)"])
+    OK(["validated CompanyProfile"])
+    RAW --> STRIP --> STAMP --> PYD --> PYDERR
+    PYDERR -- "yes" --> COMPACT --> REPAIR
+    PYDERR -- "no" --> PERFIELD
+    PERFIELD --> URLCHK
+    URLCHK -- "no" --> REJECTURL --> PROBLEMS
+    URLCHK -- "yes" --> FETCHCHK
+    FETCHCHK -- "yes" --> DOWNGRADE --> NOTECHK
+    FETCHCHK -- "no" --> NOTECHK
+    NOTECHK -- "yes" --> REJECTNOTE --> PROBLEMS
+    NOTECHK -- "no" --> PROBLEMS
+    PERFIELD -. "once every field is checked" .-> CROSSCHECK
+    CROSSCHECK -- "yes" --> REJECTSTAGE --> PROBLEMS
+    CROSSCHECK -- "no, or no round date to compare" --> PROBLEMS
+    PROBLEMS -- "yes" --> REPAIR
+    PROBLEMS -- "no" --> OK
+```
+
+## Stage: two independent fields, reconciled by one repair (A3)
+
+`CompanyProfile.stage` and each `funding_rounds[i].stage` are separate properties in the same `submit_profile` schema, filled by the model in one call from the same research, then stored and shown in different places. `validate_submission` (above) is the only place that ties them together: a mismatch against the most recently announced round costs the model its one allowed repair, rather than being derived or fixed deterministically in code.
+
+```mermaid
+flowchart TB
+    RESEARCH["Research this run gathered<br/>(web_search results, fetched pages)"]
+    LLM(["submit_profile call"])
+    FIELD1["profile.stage: Sourced[Stage]<br/>model's own read of the company's current stage"]
+    FIELD2["funding_rounds[i].stage: Sourced[Stage]<br/>one per round the model found"]
+    VALIDATE{{"validate_submission<br/>(includes the stage cross-check,<br/>see diagram above)"}}
+    REPAIR["SubmissionError fed back as tool_result<br/>-&gt; one repair, model resubmits<br/>(loop.py REPAIRCHK)"]
+    SAVE1["save_fact(company_id, 'stage', ...)<br/>-&gt; fact table: generic field/value_json row"]
+    SAVE2["save_funding_rounds(...)<br/>-&gt; funding_round.stage column, one row per round"]
+    SHOW1["Dashboard Details table:<br/>a field='stage' row"]
+    SHOW2["Dashboard Funding rounds table:<br/>stage column"]
+    RESEARCH --> LLM
+    LLM --> FIELD1
+    LLM --> FIELD2
+    FIELD1 --> VALIDATE
+    FIELD2 --> VALIDATE
+    VALIDATE -- "rejected" --> REPAIR
+    REPAIR -. "model's call to fix" .-> LLM
+    VALIDATE -- "accepted" --> SAVE1
+    VALIDATE -- "accepted" --> SAVE2
+    SAVE1 --> SHOW1
+    SAVE2 --> SHOW2
+```
+
+This doesn't fix the mismatch for the model, it only refuses to accept one; the model still decides which side (or the round's `announced` date) was wrong, like every other repair in this loop. It also can't see a mismatch it has no leverage to resolve: if every round is missing `announced`, `_latest_round_stage` returns `None` and the check is skipped, so `profile.stage` is trusted as-is. A re-run can also move the two out of sync again afterwards, since `save_fact` only replaces the `stage` fact row cited by the same `source_url` while `save_funding_rounds` replaces the whole `funding_round` table wholesale for the company; the check only runs at submission time, not on read.
 
 ## Built interfaces (signatures as in the code)
 
