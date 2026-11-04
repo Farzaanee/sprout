@@ -347,6 +347,18 @@ def cost_by_tool(
     return dict(sorted(costs.items(), key=lambda item: -item[1]))
 
 
+def calls_by_tool(
+    session: Session, *, start: date | None = None, end: date | None = None
+) -> dict[str, int]:
+    query = _apply_date_range(_enrich_query(), start, end)
+    runs = session.exec(query).all()
+    calls: dict[str, int] = {}
+    for run in runs:
+        for tool, count in (run.tool_calls or {}).items():
+            calls[tool] = calls.get(tool, 0) + count
+    return calls
+
+
 def cost_by_kind(
     session: Session, *, start: date | None = None, end: date | None = None
 ) -> dict[str, float]:

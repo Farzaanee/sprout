@@ -293,6 +293,7 @@ def render_observability() -> None:
         rate_by_kind = queries.failure_rate_by_kind(session, **date_kwargs)
         tool_failures = queries.failures_by_tool(session, **date_kwargs)
         cost_tool = queries.cost_by_tool(session, **date_kwargs)
+        calls_tool = queries.calls_by_tool(session, **date_kwargs)
         cost_kind = queries.cost_by_kind(session, **date_kwargs)
         trend = queries.cost_trend(session, **date_kwargs)
         days = queries.daily_outcomes(session, **date_kwargs)
@@ -305,7 +306,30 @@ def render_observability() -> None:
         cost_tool_col, cost_kind_col = st.columns(2)
         cost_tool_col.caption("Cost by tool call (US$)")
         if cost_tool:
-            cost_tool_col.bar_chart(pd.Series(cost_tool, name="cost (US$)"))
+            cost_tool_df = pd.DataFrame(
+                {
+                    "tool": tool,
+                    "cost": cost,
+                    "calls": calls_tool.get(tool, 0),
+                    "cost_per_call": cost / calls_tool[tool] if calls_tool.get(tool) else 0.0,
+                }
+                for tool, cost in cost_tool.items()
+            )
+            cost_tool_col.altair_chart(
+                alt.Chart(cost_tool_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("tool:N", title="tool", sort="-y"),
+                    y=alt.Y("cost:Q", title="cost (US$)"),
+                    tooltip=[
+                        alt.Tooltip("tool:N", title="tool"),
+                        alt.Tooltip("cost:Q", title="cost (US$)", format=".4f"),
+                        alt.Tooltip("calls:Q", title="calls"),
+                        alt.Tooltip("cost_per_call:Q", title="cost per call (US$)", format=".4f"),
+                    ],
+                ),
+                width="stretch",
+            )
         else:
             cost_tool_col.success("No tool calls in this range")
 
