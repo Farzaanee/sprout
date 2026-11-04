@@ -135,6 +135,26 @@ flowchart TB
 
 This doesn't fix the mismatch for the model, it only refuses to accept one; the model still decides which side (or the round's `announced` date) was wrong, like every other repair in this loop. It also can't see a mismatch it has no leverage to resolve: if every round is missing `announced`, `_latest_round_stage` returns `None` and the check is skipped, so `profile.stage` is trusted as-is. A re-run can also move the two out of sync again afterwards, since `save_fact` only replaces the `stage` fact row cited by the same `source_url` while `save_funding_rounds` replaces the whole `funding_round` table wholesale for the company; the check only runs at submission time, not on read.
 
+## The winning-value rule (A6)
+
+`save_fact` is keyed on `(company_id, field, source_url)`, so a field with several sources across re-runs ends up with several `Fact` rows, and nothing marks the old ones as superseded. `db.winning_facts(facts)` picks the one a reader should treat as current, by the rule in [4.1 Sourcing and provenance](../4.%20cross-cutting.md#1-sourcing-and-provenance): a valued fact beats a NULL one, then the most recent `retrieved_at` wins, and `confidence` only breaks a tie on that timestamp.
+
+```mermaid
+flowchart TB
+    ROWS["Fact rows for one field,<br/>one per source cited across re-runs"]
+    VALUED{"has a value?"}
+    NEWEST{"newest retrieved_at<br/>among the valued rows?"}
+    CONF{"same timestamp:<br/>highest confidence?"}
+    WINNER(["winning_facts()[field]"])
+    ROWS --> VALUED
+    VALUED -- "only one row is valued" --> WINNER
+    VALUED -- "several rows are valued" --> NEWEST
+    NEWEST -- "one is strictly newest" --> WINNER
+    NEWEST -- "tie" --> CONF --> WINNER
+```
+
+It's a pure function over `Fact` rows already loaded, not a query or a write, nothing calls it yet: today's only reader (`dashboard.py`'s Details table) still lists every fact as history. It belongs wherever a feature needs "the current value of a field" rather than its full history.
+
 ## Built interfaces (signatures as in the code)
 
 ```python
@@ -194,6 +214,7 @@ def save_profile(session, company, profile: CompanyProfile) -> None     # save_f
 def save_funding_rounds(session, company_id, rounds) -> None            # replaces the company's funding_round rows
 def delete_profile(session, company) -> int                              # clears fact, funding_round and category (CLI --reset)
 def add_company_by_number(session, number: str, data: dict) -> Company   # for pilot companies absent from the 876
+def winning_facts(facts: Iterable[Fact]) -> dict[str, Fact]                # A6: one current Fact per field name
 ```
 
 `run_agent` has no `on_step` callback: steps accumulate on `LoopResult.steps` and `enrich_with_result` persists them afterwards. An optional `on_step` for live per-worker progress is a possible Phase 5 addition (see the [Phase 3 page](phase-3-observability.md#what-phase-5-needs-hooks-only-nothing-built)).

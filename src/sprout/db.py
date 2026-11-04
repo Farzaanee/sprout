@@ -339,6 +339,34 @@ def save_fact(session: Session, company_id: int, field: str, fact: Sourced[Any])
     return row
 
 
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def _beats(candidate: Fact, current: Fact) -> bool:
+    """The winning-value rule (A6): valued beats NULL, then newest retrieved_at, then confidence."""
+    candidate_valued = candidate.value_json is not None
+    current_valued = current.value_json is not None
+    if candidate_valued != current_valued:
+        return candidate_valued
+    if candidate.retrieved_at != current.retrieved_at:
+        return candidate.retrieved_at > current.retrieved_at
+    return _CONFIDENCE_RANK[candidate.confidence] > _CONFIDENCE_RANK[current.confidence]
+
+
+def winning_facts(facts: Iterable[Fact]) -> dict[str, Fact]:
+    """One `Fact` per field name, chosen by the winning-value rule.
+
+    Several `Fact` rows can exist for the same field (one per source cited across re-runs, see
+    `save_fact`); this picks the one a reader should treat as current.
+    """
+    winners: dict[str, Fact] = {}
+    for fact in facts:
+        current = winners.get(fact.field)
+        if current is None or _beats(fact, current):
+            winners[fact.field] = fact
+    return winners
+
+
 def add_news_items(session: Session, items: Iterable[NewsItem]) -> int:
     """Insert items whose URL is not stored yet (also within `items`). Returns the new count."""
     seen: set[str] = set()

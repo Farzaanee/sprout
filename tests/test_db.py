@@ -19,6 +19,7 @@ from sprout.db import (
     logged_run,
     save_fact,
     upsert_company,
+    winning_facts,
 )
 from sprout.models import Confidence, FundingRound, NewsItem, Sourced, Stage
 from sprout.sources.companies_house import CompanyHit
@@ -75,6 +76,55 @@ def test_save_fact_serialises_models_and_not_disclosed(session):
     by_field = {f.field: f for f in session.exec(select(Fact)).all()}
     assert by_field["hq"].value_json is None
     assert len(by_field) == 1 and len(session.exec(select(Fact)).all()) == 1
+
+
+def test_winning_facts_prefers_a_valued_fact_over_null(session):
+    company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
+    save_fact(session, company.id, "stage", Sourced[Stage]())  # null, no source
+    valued = Sourced[Stage](
+        value=Stage.SEED, source_url="https://old.example", confidence=Confidence.LOW
+    )
+    save_fact(session, company.id, "stage", valued)
+    session.commit()
+    rows = session.exec(select(Fact)).all()
+    assert winning_facts(rows)["stage"].value_json == '"Seed"'
+
+
+def test_winning_facts_prefers_the_most_recent_retrieved_at(session):
+    company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
+    old = Sourced[Stage](
+        value=Stage.SEED, source_url="https://old.example", confidence=Confidence.HIGH
+    )
+    new = Sourced[Stage](
+        value=Stage.SERIES_A, source_url="https://new.example", confidence=Confidence.LOW
+    )
+    save_fact(session, company.id, "stage", old)
+    save_fact(session, company.id, "stage", new)
+    session.commit()
+    rows = session.exec(select(Fact)).all()
+    assert winning_facts(rows)["stage"].value_json == '"Series A"'
+
+
+def test_winning_facts_breaks_a_same_timestamp_tie_on_confidence(session):
+    company, _ = upsert_company(session, hit(), assess("Acme AI Ltd", ["62012"]))
+    at = datetime(2024, 1, 1, tzinfo=UTC)
+    low = Sourced[Stage](
+        value=Stage.SEED,
+        source_url="https://low.example",
+        confidence=Confidence.LOW,
+        retrieved_at=at,
+    )
+    high = Sourced[Stage](
+        value=Stage.SERIES_A,
+        source_url="https://high.example",
+        confidence=Confidence.HIGH,
+        retrieved_at=at,
+    )
+    save_fact(session, company.id, "stage", low)
+    save_fact(session, company.id, "stage", high)
+    session.commit()
+    rows = session.exec(select(Fact)).all()
+    assert winning_facts(rows)["stage"].value_json == '"Series A"'
 
 
 def test_add_news_items_dedupes_by_url(session):
