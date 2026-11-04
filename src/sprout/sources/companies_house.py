@@ -46,6 +46,63 @@ def _parse_date(value: Any) -> date | None:
         return None
 
 
+@dataclass(frozen=True)
+class Officer:
+    """One entry from `/officers`. Companies House withholds the day and month of birth."""
+
+    name: str
+    role: str
+    resigned: bool
+    birth_year: int | None
+    nationality: str | None
+
+
+@dataclass(frozen=True)
+class OfficersInfo:
+    active_count: int | None
+    officers: tuple[Officer, ...]
+
+
+# Companies House's `officer_role` vocabulary, collapsed to the four categories we store.
+_ROLE_CATEGORIES = {
+    "director": "director",
+    "corporate-director": "director",
+    "nominee-director": "director",
+    "corporate-nominee-director": "director",
+    "secretary": "secretary",
+    "corporate-secretary": "secretary",
+    "nominee-secretary": "secretary",
+    "corporate-nominee-secretary": "secretary",
+    "llp-member": "llp-member",
+    "corporate-llp-member": "llp-member",
+    "llp-designated-member": "llp-member",
+    "corporate-llp-designated-member": "llp-member",
+    "member": "member",
+    "corporate-member": "member",
+}
+
+
+def officer_category(role: str) -> str | None:
+    """Collapse a Companies House `officer_role` into director, secretary, llp-member or member;
+    None for a role that fits none of those (e.g. judicial-factor, receiver-manager)."""
+    return _ROLE_CATEGORIES.get(role)
+
+
+def parse_officer(item: dict[str, Any]) -> Officer | None:
+    """Normalise an item from `/officers`; None if it lacks a name."""
+    name = item.get("name")
+    if not name:
+        return None
+    dob = item.get("date_of_birth") or {}
+    return Officer(
+        name=str(name),
+        role=str(item.get("officer_role") or ""),
+        resigned=item.get("resigned_on") is not None,
+        birth_year=dob.get("year"),
+        nationality=item.get("nationality"),
+    )
+
+
 def parse_hit(item: dict[str, Any]) -> CompanyHit | None:
     """Normalise an item from `/advanced-search` or `/search`; None if it lacks a number/name."""
     number = item.get("company_number")
@@ -147,10 +204,21 @@ class CompaniesHouseClient:
             {"items_per_page": items_per_page},
         )
 
+    def get_officers(self, number: str) -> dict[str, Any] | None:
+        return self._get_json(f"/company/{self._valid_number(number)}/officers")
+
     def active_officer_count(self, number: str) -> int | None:
         """Active officer count from `/officers`; None if the company has no listing."""
-        data = self._get_json(f"/company/{self._valid_number(number)}/officers")
+        data = self.get_officers(number)
         return None if data is None else data.get("active_count")
+
+    def officers_info(self, number: str) -> OfficersInfo:
+        """Active count and parsed officer list from a single `/officers` fetch."""
+        data = self.get_officers(number)
+        if data is None:
+            return OfficersInfo(None, ())
+        officers = (parse_officer(item) for item in data.get("items") or ())
+        return OfficersInfo(data.get("active_count"), tuple(o for o in officers if o is not None))
 
     def _get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """Parsed JSON body, or None when the API answers 404."""

@@ -5,9 +5,33 @@ import pytest
 from sqlmodel import Session, func, select
 
 from sprout import config, ingest
-from sprout.db import Company, Fact, NewsItemRow, RunLog, get_engine, init_db
+from sprout.db import Company, Fact, NewsItemRow, OfficerRow, RunLog, get_engine, init_db
 from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.rss import Feed
+
+OFFICERS = {
+    "active_count": 2,
+    "items": [
+        {
+            "name": "SMITH, Jane",
+            "officer_role": "director",
+            "date_of_birth": {"month": 5, "year": 1988},
+            "nationality": "British",
+        },
+        {  # resigned: dropped
+            "name": "DOE, John",
+            "officer_role": "director",
+            "resigned_on": "2022-01-01",
+            "date_of_birth": {"month": 1, "year": 1980},
+            "nationality": "British",
+        },
+        {"name": "ROBERTS, Pat", "officer_role": "secretary"},
+        {  # outside the four stored categories: dropped
+            "name": "LEE, Sam",
+            "officer_role": "judicial-factor",
+        },
+    ],
+}
 
 ITEMS = [
     {
@@ -57,7 +81,7 @@ def test_ingest_companies_filters_dedupes_and_records_facts(session, make_http):
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/officers"):
-            return httpx.Response(200, json={"active_count": 2})
+            return httpx.Response(200, json=OFFICERS)
         requests.append(request.url.params["company_name_includes"])
         return httpx.Response(200, json={"items": ITEMS})
 
@@ -77,6 +101,20 @@ def test_ingest_companies_filters_dedupes_and_records_facts(session, make_http):
     ) in facts
     assert any(f[0] == "founded" and f[1] == "2019" for f in facts)
 
+    acme_id = companies["ACME MACHINE LEARNING LTD"].id
+    officers = {
+        o.name: o
+        for o in session.exec(select(OfficerRow).where(OfficerRow.company_id == acme_id)).all()
+    }
+    # resigned director and the judicial-factor (no matching category) are both dropped
+    assert set(officers) == {"SMITH, Jane", "ROBERTS, Pat"}
+    jane = officers["SMITH, Jane"]
+    assert (jane.role, jane.birth_year, jane.nationality) == ("director", 1988, "British")
+    assert jane.source_url == (
+        "https://find-and-update.company-information.service.gov.uk/company/00000001"
+    )
+    assert officers["ROBERTS, Pat"].role == "secretary"
+
     # A second run changes nothing and makes no HTTP calls: every response is cached.
     before = len(requests)
     again = ingest.ingest_companies(session, client, terms=terms, max_per_term=100)
@@ -84,6 +122,7 @@ def test_ingest_companies_filters_dedupes_and_records_facts(session, make_http):
     assert len(requests) == before
     assert session.exec(select(func.count()).select_from(Company)).one() == 2
     assert session.exec(select(func.count()).select_from(Fact)).one() == len(facts)
+    assert session.exec(select(func.count()).select_from(OfficerRow)).one() == 4  # two per company
 
 
 def test_backfill_active_officers_only_touches_companies_missing_it(session, make_http):

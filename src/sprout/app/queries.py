@@ -122,6 +122,18 @@ def recent_runs(session: Session, limit: int = 20) -> list[RunLog]:
     return list(session.exec(select(RunLog).order_by(col(RunLog.id).desc()).limit(limit)).all())
 
 
+def latest_companies_ingest_run(session: Session) -> RunLog | None:
+    """Most recent `companies_ingest` run that actually searched Companies House (as opposed to
+    an `--backfill-officers` run logged under the same kind, whose stats have no `searched`)."""
+    runs = session.exec(
+        select(RunLog)
+        .where(RunLog.kind == RunKind.COMPANIES_INGEST.value)
+        .order_by(col(RunLog.id).desc())
+        .limit(20)
+    ).all()
+    return next((run for run in runs if "searched" in run.stats), None)
+
+
 def keyword_counts(session: Session) -> dict[str, int]:
     counts: dict[str, int] = {}
     for keywords in session.exec(select(Company.matched_keywords)).all():

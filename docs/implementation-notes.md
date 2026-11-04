@@ -29,7 +29,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 3. **Git**: `uv init` ran `git init` on branch `main`; there are no commits yet (nothing was committed). `.gitignore` is in place, so `git add .` will not pick up `.env`.
 
 ### Decisions locked in
-- **Taxonomy (17, frozen):** AI models and applications, Fintech and payments, Enterprise software and cloud, Cybersecurity, Biotech and pharma, Healthtech and digital health, Electric vehicles and batteries, Climate, energy and cleantech, Semiconductors and AI hardware, Robotics and automation, Defense, aerospace and space, E-commerce and retail tech, Consumer social, media and gaming, Logistics and supply chain, Deep tech and quantum, Consultancy and services, Other. Changing it later invalidates classifications and the golden set. Tests assert the exact 17 labels and contain `Other`.
+- **Taxonomy (19, frozen):** Vision, Voice, Language, Fintech and payments, Enterprise software and cloud, Cybersecurity, Biotech and pharma, Healthtech and digital health, Electric vehicles and batteries, Climate, energy and cleantech, Semiconductors and AI hardware, Robotics and automation, Defense, aerospace and space, E-commerce and retail tech, Consumer social, media and gaming, Logistics and supply chain, Deep tech and quantum, Consultancy and services, Other. Changing it later invalidates classifications and the golden set. Tests assert the exact 19 labels and contain `Other`.
 - **Stage enum:** Pre-seed, Seed, Series A, Series B, Series C, Series D, Series E, Series F, Growth, Unknown.
 - **`Sourced[T]`** = `value`, `source_url`, `retrieved_at`, `confidence` (low/medium/high), plus an optional `note` (added for Phase 2's "funding in USD with original currency noted", e.g. `"US$12m converted"`).
   - `value=None` means "not disclosed" and is always valid.
@@ -230,10 +230,8 @@ Found while analysing the findings batch: the 40 oldest `enrich` rows (ids 3 to 
 
 Live spend for the check: four calls, about US$0.0376 (runs 43 to 46: 0.0240, 0.0132, 0.0002, 0.0002).
 
-### Open items (need you)
+### Closed items
 1. **Fixed: loop bug with `--max-iterations 2`.** A turn could mix a server-side `web_search` with a custom tool_use and stop (for the custom call) before the search paired with its result block; the orphaned `server_tool_use` then sat unpaired in history and the next request got a 400 ("`web_search` tool use ... was found without a corresponding `web_search_tool_result` block"). `run_agent` now drops any `server_tool_use` block with no matching `*_tool_result` in the same turn before appending it to history ([src/sprout/agents/loop.py](src/sprout/agents/loop.py), `_without_orphaned_server_tool_use`). Covered by `test_orphaned_server_tool_use_is_dropped_before_the_next_request` in `tests/test_agent_loop.py`.
-2. `docs/architecture.md` shows as modified in the working tree (it reflows the `StepRecord` code block in 3.6; the cause, probably a formatter or hook, was not identified). It was left uncommitted and untouched by the implementers; a `git checkout` to discard it was blocked by the permission system, so decide whether to commit or discard it.
-3. The Phase 4 proposals under "Step 3c findings" need your decision. No Phase 4 number has been changed.
 
 ### Decisions locked in
 - **A27/A28/A29 kept as designed:** no tool-input or URL logging; `invalid_output` is not split into sub-reasons; one step row per model response, not per tool call (tool names comma-joined in `tool_name`).

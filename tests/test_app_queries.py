@@ -116,6 +116,15 @@ def test_counts_facts_keywords_and_years(session):
     assert queries.incorporation_year_counts(session) == {2020: 1}
 
 
+def test_latest_companies_ingest_run_skips_backfill_runs(session):
+    assert queries.latest_companies_ingest_run(session) is None
+    first = _run(session, 1, kind="companies_ingest", stats={"searched": 465, "new": 305})
+    _run(session, 2, kind="companies_ingest", stats={"checked": 314, "updated": 314})
+    assert queries.latest_companies_ingest_run(session).id == first.id
+    second = _run(session, 3, kind="companies_ingest", stats={"searched": 2543, "new": 1358})
+    assert queries.latest_companies_ingest_run(session).id == second.id
+
+
 def test_pool_overview_counts(session):
     enriched = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
     unclassified = _add(session, "2", "Plain AI Ltd", date(2015, 6, 1))

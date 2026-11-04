@@ -24,6 +24,7 @@ from sprout.db import (
     init_db,
     logged_run,
     save_fact,
+    save_officers,
     upsert_company,
 )
 from sprout.models import Confidence, Sourced
@@ -88,10 +89,12 @@ def ingest_companies(
             if not assessment.is_candidate:
                 stats["rejected"] += 1
                 continue
-            active_officers = client.active_officer_count(hit.number)
-            company, created = upsert_company(session, hit, assessment, active_officers)
+            officers_info = client.officers_info(hit.number)
+            company, created = upsert_company(session, hit, assessment, officers_info.active_count)
             assert company.id is not None
             _save_registry_facts(session, company.id, hit)
+            active = [o for o in officers_info.officers if not o.resigned]
+            save_officers(session, company.id, active, source_url=hit.url)
             stats["new" if created else "updated"] += 1
         session.commit()
     return stats

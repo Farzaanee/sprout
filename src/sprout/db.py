@@ -1,8 +1,8 @@
 """SQLite schema (SQLModel) and the small set of write helpers ingestion needs.
 
-Tables: `company`, `fact` (provenance), `funding_round`, `news_item`, `company_news` (schema only,
-unpopulated until a news-matching agent exists), `run_log`, `run_log_step`. All timestamps are
-timezone-aware UTC.
+Tables: `company`, `fact` (provenance), `funding_round`, `officer`, `news_item`, `company_news`
+(schema only, unpopulated until a news-matching agent exists), `run_log`, `run_log_step`. All
+timestamps are timezone-aware UTC.
 """
 
 from collections.abc import Iterable, Iterator
@@ -18,8 +18,8 @@ from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from sprout.candidates import Assessment, assess
 from sprout.failures import FailureCategory, failure_category_for
-from sprout.models import CompanyProfile, FundingRound, NewsItem, Sourced
-from sprout.sources.companies_house import CompanyHit, parse_hit
+from sprout.models import CompanyProfile, Confidence, FundingRound, NewsItem, Sourced
+from sprout.sources.companies_house import CompanyHit, Officer, officer_category, parse_hit
 from sprout.sources.rss import normalise_url
 
 
@@ -95,6 +95,26 @@ class FundingRoundRow(SQLModel, table=True):
     amount_million_usd: int | None = None
     announced: date | None = None
     investors: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    source_url: str | None = None
+    retrieved_at: datetime
+    confidence: str
+    note: str | None = None
+
+
+class OfficerRow(SQLModel, table=True):
+    """One active company officer, with its own provenance. `role` is one of the four categories
+    `officer_category` collapses Companies House's `officer_role` vocabulary into: director,
+    secretary, llp-member, member."""
+
+    __tablename__ = "officer"
+    __table_args__ = {"extend_existing": True}
+
+    id: int | None = Field(default=None, primary_key=True)
+    company_id: int = Field(foreign_key="company.id", index=True)
+    name: str
+    role: str
+    birth_year: int | None = None
+    nationality: str | None = None
     source_url: str | None = None
     retrieved_at: datetime
     confidence: str
@@ -465,6 +485,43 @@ def save_funding_rounds(
                 retrieved_at=item.retrieved_at,
                 confidence=item.confidence.value,
                 note=item.note,
+            )
+        )
+    session.flush()
+
+
+def _delete_officers(session: Session, company_id: int) -> int:
+    rows = session.exec(select(OfficerRow).where(OfficerRow.company_id == company_id))
+    count = 0
+    for row in rows:
+        session.delete(row)
+        count += 1
+    return count
+
+
+def save_officers(
+    session: Session, company_id: int, officers: Iterable[Officer], *, source_url: str
+) -> None:
+    """Replace a company's officers wholesale, all cited from one `source_url` (the officers
+    list): a re-run returns the current full list, so keeping stale rows would leave resigned
+    officers behind. An officer whose role maps to none of the four categories is skipped.
+    """
+    _delete_officers(session, company_id)
+    now = utcnow()
+    for officer in officers:
+        role = officer_category(officer.role)
+        if role is None:
+            continue
+        session.add(
+            OfficerRow(
+                company_id=company_id,
+                name=officer.name,
+                role=role,
+                birth_year=officer.birth_year,
+                nationality=officer.nationality,
+                source_url=source_url,
+                retrieved_at=now,
+                confidence=Confidence.MEDIUM.value,
             )
         )
     session.flush()

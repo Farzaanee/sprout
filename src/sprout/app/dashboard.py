@@ -162,6 +162,7 @@ def render_progress() -> None:
 def render_companies() -> None:
     with _session() as session:
         total = queries.count_rows(session)["companies"]
+        last_ingest = queries.latest_companies_ingest_run(session)
         enriched = queries.enriched_company_count(session)
         category_counts = queries.category_counts(session)
         stage_counts = queries.stage_counts(session)
@@ -177,6 +178,12 @@ def render_companies() -> None:
         "name/SIC-code keyword and pass the shell-company pre-screen.\n Enrichment is run "
         "manually, per company, so only a hand-picked subset is enriched so far."
     )
+    if last_ingest is not None:
+        st.caption(
+            f"Last ingest run (#{last_ingest.id}, {last_ingest.started_at:%Y-%m-%d %H:%M}): "
+            f"searched {last_ingest.stats['searched']:,} companies, "
+            f"{total:,} candidate companies in the pool."
+        )
     cols = st.columns([1, 1, 1, 1, 1])
     cols[0].metric("Candidate companies", total)
     cols[1].metric("Enriched (classified)", enriched)

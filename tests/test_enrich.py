@@ -42,7 +42,7 @@ def submission(**overrides):
         "website": fact("https://acme.example"),
         "hq": fact("London, UK"),
         "founded": NOT_DISCLOSED,
-        "category": "AI models and applications",
+        "category": "Vision",
         "stage": NOT_DISCLOSED,
         "total_raised_million_usd": NOT_DISCLOSED,
         "valuation_million_usd": NOT_DISCLOSED,
@@ -130,7 +130,7 @@ def test_valid_submission_gets_name_and_ledger_time_stamped():
     profile = validate_submission(submission(), "ACME AI LTD", ledger)
     assert profile.name == "ACME AI LTD" and profile.hq.value == "London, UK"
     assert profile.hq.retrieved_at == ledger.get(SEEN).first_seen_at
-    assert profile.founded.value is None and profile.category is Category.AI_MODELS_AND_APPLICATIONS
+    assert profile.founded.value is None and profile.category is Category.AI_APPS_VISION
 
 
 def test_model_supplied_retrieved_at_and_news_are_ignored():
@@ -277,7 +277,7 @@ def test_happy_path_persists_facts_category_and_run_stats(session, company, deps
 
     assert profile.hq.value == "London, UK"
     session.refresh(company)
-    assert company.category == "AI models and applications"
+    assert company.category == "Vision"
     stored = facts_of(session, company)
     assert stored["hq"].value_json == '"London, UK"' and stored["hq"].source_url == SEEN
     assert stored["founded"].value_json is None  # researched, nothing found
@@ -598,7 +598,7 @@ def test_cli_enriches_and_prints_a_summary(cli_env, monkeypatch, capsys):
     monkeypatch.setattr(enrich_mod, "make_client", lambda key: client)
     assert enrich_cli.main(["12345678", "--max-usd", "0.05", "--max-iterations", "4"]) == 0
     out = capsys.readouterr().out
-    assert "ok   ACME AI LTD" in out and "category='AI models and applications'" in out
+    assert "ok   ACME AI LTD" in out and "category='Vision'" in out
     assert "sourced_facts=3" in out and "cost=USD" in out
     assert "total cost USD" in out
 
