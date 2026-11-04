@@ -23,7 +23,7 @@ The taxonomy, stage enum, `Sourced[T]` and `CompanyProfile` are the contract eve
 
 | Name | What it is | Why it matters |
 |---|---|---|
-| `Category` (taxonomy) | Fixed 16-value enum (15 sectors plus `Other`), frozen in Phase 0 | Every profile's grouping; changing it after classifications or the golden set exist invalidates both, so it stays small and stable |
+| `Category` (taxonomy) | Fixed 17-value enum (16 sectors plus `Other`), frozen in Phase 0 | Every profile's grouping; changing it after classifications or the golden set exist invalidates both, so it stays small and stable |
 | `Stage` | Enum: Pre-seed through Series F, Growth, Unknown | Funding stage for the company and for each `FundingRound`; `Unknown` is a valid, sourced-or-not value |
 | `Sourced[T]` | Generic wrapper: `value`, `source_url`, `retrieved_at`, `confidence`, optional `note` | Carries provenance for every fact. `value=None` means "not disclosed" and is always valid; a non-null value without `source_url` fails validation, enforcing "provenance over completeness" in code, not just in prompts |
 | `Confidence` | Enum: `low`, `medium`, `high` | The `confidence` field on every `Sourced[T]`; defaults to `low`. A source seen only in a search snippet and never fetched is capped at `medium` (see [Phase 2](phase-2-enrichment.md)) |
@@ -31,18 +31,19 @@ The taxonomy, stage enum, `Sourced[T]` and `CompanyProfile` are the contract eve
 
 All four reject unknown fields (`extra="forbid"`), so malformed model output fails validation instead of being silently accepted.
 
-### `Category` values (16, frozen)
+### `Category` values (17, frozen)
 
 | # | Category | | # | Category |
 |---|---|---|---|---|
-| 1 | AI models and applications | | 9 | Semiconductors and AI hardware |
-| 2 | Fintech and payments | | 10 | Robotics and automation |
-| 3 | Enterprise software and cloud | | 11 | Defense, aerospace and space |
-| 4 | Cybersecurity | | 12 | E-commerce and retail tech |
-| 5 | Biotech and pharma | | 13 | Consumer social, media and gaming |
-| 6 | Healthtech and digital health | | 14 | Logistics and supply chain |
-| 7 | Electric vehicles and batteries | | 15 | Deep tech and quantum |
-| 8 | Climate, energy and cleantech | | 16 | Other |
+| 1 | AI models and applications | | 10 | Robotics and automation |
+| 2 | Fintech and payments | | 11 | Defense, aerospace and space |
+| 3 | Enterprise software and cloud | | 12 | E-commerce and retail tech |
+| 4 | Cybersecurity | | 13 | Consumer social, media and gaming |
+| 5 | Biotech and pharma | | 14 | Logistics and supply chain |
+| 6 | Healthtech and digital health | | 15 | Deep tech and quantum |
+| 7 | Electric vehicles and batteries | | 16 | Consultancy and services |
+| 8 | Climate, energy and cleantech | | 17 | Other |
+| 9 | Semiconductors and AI hardware | | | |
 
 ### `CompanyProfile` fields
 

@@ -11,7 +11,7 @@ from collections.abc import Iterable, Sequence
 from datetime import date
 from typing import Any
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, func, select
 
 from sprout.candidates import DISCOVERY_TERMS, MIN_INCORPORATION_DATE, assess
 from sprout.config import MissingConfigError, get_settings
@@ -97,6 +97,19 @@ def ingest_companies(
     return stats
 
 
+def backfill_active_officers(session: Session, client: CompaniesHouseClient) -> dict[str, int]:
+    """Fetch `active_officer_count` for companies that don't have one yet (e.g. ingested before
+    the D34 pre-screen existed), so `passes_prescreen` can be applied to them."""
+    stats = {"checked": 0, "updated": 0}
+    companies = session.exec(select(Company).where(col(Company.active_officers).is_(None))).all()
+    for company in companies:
+        stats["checked"] += 1
+        company.active_officers = client.active_officer_count(company.company_number)
+        stats["updated"] += 1
+        session.commit()
+    return stats
+
+
 def ingest_news(
     session: Session, http: HttpClient, feeds: Sequence[Feed] = FEEDS
 ) -> dict[str, Any]:
@@ -121,6 +134,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--skip-companies", action="store_true")
     parser.add_argument("--skip-news", action="store_true")
     parser.add_argument(
+        "--backfill-officers",
+        action="store_true",
+        help="only fetch active_officers for existing companies that don't have one yet",
+    )
+    parser.add_argument(
         "--max-per-term",
         type=int,
         default=DEFAULT_MAX_PER_TERM,
@@ -137,6 +155,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     exit_code = 0
 
     with Session(engine) as session:
+        if args.backfill_officers:
+            try:
+                key = settings.require_companies_house_key()
+                with companies_house.make_http_client(key, settings.cache_dir) as http:
+                    with logged_run(session, RunKind.COMPANIES_INGEST.value) as run:
+                        run.stats = backfill_active_officers(session, CompaniesHouseClient(http))
+                        run.stats["http_requests"] = http.requests_made
+                        run.stats["cache_hits"] = http.cache_hits
+                    print(f"officers backfill: {run.stats}")
+            except (MissingConfigError, FetchError) as exc:
+                print(f"officers backfill failed: {exc}", file=sys.stderr)
+                exit_code = 1
+            return exit_code
+
         if not args.skip_news:
             try:
                 feed_http = HttpClient(

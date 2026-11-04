@@ -27,6 +27,7 @@ class Category(StrEnum):
     CONSUMER_SOCIAL_MEDIA_AND_GAMING = "Consumer social, media and gaming"
     LOGISTICS_AND_SUPPLY_CHAIN = "Logistics and supply chain"
     DEEP_TECH_AND_QUANTUM = "Deep tech and quantum"
+    CONSULTANCY_AND_SERVICES = "Consultancy and services"
     OTHER = "Other"
 
 

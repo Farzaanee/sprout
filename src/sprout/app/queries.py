@@ -1,5 +1,6 @@
 """Read-only data access for the Streamlit app, kept free of Streamlit so it can be tested."""
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
@@ -7,7 +8,16 @@ from typing import Any
 
 from sqlmodel import Session, col, func, select
 
-from sprout.db import Company, Fact, FundingRoundRow, NewsItemRow, RunKind, RunLog, RunLogStep
+from sprout.db import (
+    Company,
+    Fact,
+    FundingRoundRow,
+    NewsItemRow,
+    RunKind,
+    RunLog,
+    RunLogStep,
+    winning_facts,
+)
 from sprout.failures import FailureCategory
 from sprout.sources.companies_house import PUBLIC_COMPANY_URL
 
@@ -126,6 +136,115 @@ def incorporation_year_counts(session: Session) -> dict[int, int]:
         if incorporated is not None:
             counts[incorporated.year] = counts.get(incorporated.year, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def enriched_company_count(session: Session) -> int:
+    """Companies with a classification, i.e. a submitted enrichment profile."""
+    return session.exec(
+        select(func.count()).select_from(Company).where(col(Company.category).is_not(None))
+    ).one()
+
+
+def category_counts(session: Session) -> dict[str, int]:
+    """Classified candidates only; a company with no category yet is left out."""
+    counts: dict[str, int] = {}
+    for category in session.exec(select(Company.category)).all():
+        if category is None:
+            continue
+        counts[category] = counts.get(category, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
+def _winning_values(session: Session, field: str) -> dict[int, Any]:
+    """Parsed `value_json` per company that has a row for this fact field (None where the agent
+    researched the field and found nothing), picking the row that wins when several sources were
+    cited for the same field across runs (see `winning_facts`)."""
+    by_company: dict[int, list[Fact]] = {}
+    for fact in session.exec(select(Fact).where(Fact.field == field)).all():
+        by_company.setdefault(fact.company_id, []).append(fact)
+    values: dict[int, Any] = {}
+    for company_id, facts in by_company.items():
+        winner = winning_facts(facts)[field]
+        values[company_id] = None if winner.value_json is None else json.loads(winner.value_json)
+    return values
+
+
+def stage_counts(session: Session) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in _winning_values(session, "stage").values():
+        key = value if value is not None else "Not found"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
+def founded_year_counts(session: Session) -> dict[int, int]:
+    """Enriched companies only. `ingest` pre-populates every candidate's "founded" fact from its
+    Companies House incorporation date, so a plain `_winning_values` scan would include
+    unenriched companies too; restrict to companies with a category, i.e. a submitted profile."""
+    enriched_ids = set(
+        session.exec(select(Company.id).where(col(Company.category).is_not(None))).all()
+    )
+    counts: dict[int, int] = {}
+    for company_id, value in _winning_values(session, "founded").items():
+        if value is None or company_id not in enriched_ids:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+_VALUATION_BINS = [
+    (0, 10, "<$10m"),
+    (10, 50, "$10-50m"),
+    (50, 100, "$50-100m"),
+    (100, 500, "$100-500m"),
+    (500, 1000, "$500m-1bn"),
+    (1000, float("inf"), ">$1bn"),
+]
+
+
+def valuation_bin_counts(session: Session) -> dict[str, int]:
+    counts = {label: 0 for *_, label in _VALUATION_BINS}
+    counts["Not found"] = 0
+    for value in _winning_values(session, "valuation_million_usd").values():
+        if value is None:
+            counts["Not found"] += 1
+            continue
+        for low, high, label in _VALUATION_BINS:
+            if low <= value < high:
+                counts[label] += 1
+                break
+    return counts
+
+
+def officer_count_distribution(session: Session) -> dict[str, int]:
+    """Active officer count across the whole candidate pool, binned (see D34 in `candidates.py`
+    for why this count matters: fewer than 2 is overwhelmingly a shell or trade body)."""
+    counts: dict[str, int] = {}
+    for active_officers in session.exec(select(Company.active_officers)).all():
+        if active_officers is None:
+            key = "Unknown"
+        elif active_officers >= 6:
+            key = "6+"
+        else:
+            key = str(active_officers)
+        counts[key] = counts.get(key, 0) + 1
+    order = ["0", "1", "2", "3", "4", "5", "6+", "Unknown"]
+    return {key: counts[key] for key in order if key in counts}
+
+
+def locality_counts(session: Session, top_n: int = 12) -> dict[str, int]:
+    """Top localities among enriched companies, grouping the long tail into "Other"."""
+    counts: dict[str, int] = {}
+    query = select(Company.locality).where(col(Company.category).is_not(None))
+    for locality in session.exec(query).all():
+        key = locality or "Unknown"
+        counts[key] = counts.get(key, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: -item[1])
+    top = dict(ranked[:top_n])
+    other = sum(count for _, count in ranked[top_n:])
+    if other:
+        top["Other"] = other
+    return top
 
 
 def search_companies(

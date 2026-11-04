@@ -86,6 +86,22 @@ def test_ingest_companies_filters_dedupes_and_records_facts(session, make_http):
     assert session.exec(select(func.count()).select_from(Fact)).one() == len(facts)
 
 
+def test_backfill_active_officers_only_touches_companies_missing_it(session, make_http):
+    session.add(Company(company_number="00000001", name="A", active_officers=None))
+    session.add(Company(company_number="00000002", name="B", active_officers=5))
+    session.commit()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"active_count": 3})
+
+    client = CompaniesHouseClient(make_http(handler))
+    stats = ingest.backfill_active_officers(session, client)
+    assert stats == {"checked": 1, "updated": 1}
+
+    companies = {c.company_number: c.active_officers for c in session.exec(select(Company)).all()}
+    assert companies == {"00000001": 3, "00000002": 5}
+
+
 def test_ingest_news_dedupes_and_tolerates_a_broken_feed(session, make_http):
     calls = []
 

@@ -11,6 +11,7 @@ import io
 import os
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import altair as alt
 import pandas as pd
@@ -24,6 +25,49 @@ from sprout.db import RunKind, get_engine, init_db
 
 DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
 STATE_ICONS = {"Done": "✅", "In progress": "🟡", "Not started": "⬜"}
+
+
+def _bar_chart(
+    counts: dict[Any, float],
+    *,
+    category_title: str,
+    value_title: str,
+    percent_of: float | None = None,
+    horizontal: bool = False,
+    full_labels: bool = False,
+    height: int | None = None,
+) -> alt.Chart:
+    """A static bar chart: unlike `st.bar_chart`, this never calls Altair's `.interactive()`, so
+    the mouse wheel does not pan or zoom it. `percent_of` adds a "% of total" tooltip field;
+    `horizontal` puts the category on the y-axis (for long labels); `full_labels` never truncates
+    the category axis labels (Vega-Lite's default limit is 180px); `height` fixes the plot height
+    in pixels, so two horizontal charts with a different row count still end at the same y
+    position instead of each sizing itself to its own row count."""
+    rows = []
+    for key, value in counts.items():
+        row = {category_title: key, value_title: value}
+        if percent_of:
+            row["percent"] = 100 * value / percent_of
+        rows.append(row)
+    tooltip = [alt.Tooltip(category_title), alt.Tooltip(value_title)]
+    if percent_of:
+        tooltip.append(alt.Tooltip("percent:Q", title="% of enriched companies", format=".1f"))
+    columns = [category_title, value_title] + (["percent"] if percent_of else [])
+    axis = alt.Axis(labelLimit=0) if full_labels else alt.Axis()
+    chart = alt.Chart(pd.DataFrame(rows, columns=columns)).mark_bar()
+    if height is not None:
+        chart = chart.properties(height=height)
+    if horizontal:
+        return chart.encode(
+            y=alt.Y(f"{category_title}:N", sort="-x", title=None, axis=axis),
+            x=alt.X(f"{value_title}:Q", title=value_title),
+            tooltip=tooltip,
+        )
+    return chart.encode(
+        x=alt.X(f"{category_title}:N", sort=None, title=None, axis=axis),
+        y=alt.Y(f"{value_title}:Q", title=value_title),
+        tooltip=tooltip,
+    )
 
 
 def actions_enabled() -> bool:
@@ -88,9 +132,13 @@ def render_progress() -> None:
 
     left, right = st.columns(2)
     left.caption("Candidates by matched keyword")
-    left.bar_chart(pd.Series(keywords, name="companies"))
+    left.altair_chart(
+        _bar_chart(keywords, category_title="keyword", value_title="companies"), width="stretch"
+    )
     right.caption("Candidates by incorporation year")
-    right.bar_chart(pd.Series(years, name="companies"))
+    right.altair_chart(
+        _bar_chart(years, category_title="year", value_title="companies"), width="stretch"
+    )
 
     st.subheader("Recent runs")
     st.dataframe(
@@ -112,6 +160,162 @@ def render_progress() -> None:
 
 
 def render_companies() -> None:
+    with _session() as session:
+        total = queries.count_rows(session)["companies"]
+        enriched = queries.enriched_company_count(session)
+        category_counts = queries.category_counts(session)
+        stage_counts = queries.stage_counts(session)
+        valuation_counts = queries.valuation_bin_counts(session)
+        pool_founded_counts = queries.incorporation_year_counts(session)
+        enriched_founded_counts = queries.founded_year_counts(session)
+        locality_counts = queries.locality_counts(session)
+        officer_counts = queries.officer_count_distribution(session)
+
+    st.subheader("Pool overview")
+    st.caption(
+        "Candidate companies are UK Companies House entities that match an AI "
+        "name/SIC-code keyword and pass the shell-company pre-screen.\n Enrichment is run "
+        "manually, per company, so only a hand-picked subset is enriched so far."
+    )
+    cols = st.columns([1, 1, 1, 1, 1])
+    cols[0].metric("Candidate companies", total)
+    cols[1].metric("Enriched (classified)", enriched)
+    cols[2].metric("Enrichment rate", f"{100 * enriched / total:.1f}%" if total else "n/a")
+    if total:
+        pie_df = pd.DataFrame(
+            [
+                {"status": "Enriched", "companies": enriched},
+                {"status": "Not yet enriched", "companies": total - enriched},
+            ]
+        )
+        pie_df["percent"] = 100 * pie_df["companies"] / total
+        pie = (
+            alt.Chart(pie_df)
+            .mark_arc(outerRadius=60)
+            .encode(
+                theta=alt.Theta("companies:Q"),
+                color=alt.Color(
+                    "status:N",
+                    title=None,
+                    scale=alt.Scale(
+                        domain=["Enriched", "Not yet enriched"], range=["#4C78A8", "#B3B3B3"]
+                    ),
+                ),
+                tooltip=[
+                    alt.Tooltip("status:N"),
+                    alt.Tooltip("companies:Q"),
+                    alt.Tooltip("percent:Q", title="% of candidates", format=".1f"),
+                ],
+            )
+            .properties(height=150)
+        )
+        cols[3].caption("Enriched vs. not yet enriched")
+        cols[3].altair_chart(pie, width="stretch")
+
+        officer_total = sum(officer_counts.values())
+        officer_df = pd.DataFrame(
+            {
+                "officers": key,
+                "companies": value,
+                "percent": 100 * value / officer_total if officer_total else 0.0,
+            }
+            for key, value in officer_counts.items()
+        )
+        officer_pie = (
+            alt.Chart(officer_df)
+            .mark_arc(outerRadius=60)
+            .encode(
+                theta=alt.Theta("companies:Q"),
+                color=alt.Color("officers:N", title=None, sort=list(officer_counts)),
+                tooltip=[
+                    alt.Tooltip("officers:N", title="officers"),
+                    alt.Tooltip("companies:Q"),
+                    alt.Tooltip("percent:Q", title="% of pool", format=".1f"),
+                ],
+            )
+            .properties(height=150)
+        )
+        cols[4].caption("Active officer count (pool)")
+        cols[4].altair_chart(officer_pie, width="stretch")
+
+    if total:
+        left, right = st.columns(2)
+        # Same pixel height for both horizontal charts, sized to the taller one's row count, so
+        # their x-axes end at the same vertical position instead of each fitting its own rows.
+        row_count = max(len(category_counts), len(locality_counts), 1)
+        shared_height = row_count * 28
+        left.caption("Category distribution (classified candidates only, hover for % of enriched)")
+        left.altair_chart(
+            _bar_chart(
+                category_counts,
+                category_title="category",
+                value_title="companies",
+                percent_of=enriched,
+                horizontal=True,
+                full_labels=True,
+                height=shared_height,
+            ),
+            width="stretch",
+        )
+        right.caption(
+            "HQ locality distribution (top 12, enriched companies, hover for % of enriched)"
+        )
+        right.altair_chart(
+            _bar_chart(
+                locality_counts,
+                category_title="locality",
+                value_title="companies",
+                percent_of=enriched,
+                horizontal=True,
+                full_labels=True,
+                height=shared_height,
+            ),
+            width="stretch",
+        )
+
+        left, right = st.columns(2)
+        left.caption("Founded year (Companies House incorporation year, all candidates)")
+        left.altair_chart(
+            _bar_chart(pool_founded_counts, category_title="year", value_title="companies"),
+            width="stretch",
+        )
+        right.caption("Founded year (enriched companies only, hover for % of enriched)")
+        right.altair_chart(
+            _bar_chart(
+                enriched_founded_counts,
+                category_title="year",
+                value_title="companies",
+                percent_of=enriched,
+            ),
+            width="stretch",
+        )
+
+    if enriched:
+        left, right = st.columns(2)
+        left.caption("Stage distribution (enriched companies, hover for % of enriched)")
+        left.altair_chart(
+            _bar_chart(
+                stage_counts, category_title="stage", value_title="companies", percent_of=enriched
+            ),
+            width="stretch",
+        )
+        right.caption(
+            "Valuation distribution, US$ million (enriched companies, hover for % of enriched)"
+        )
+        right.altair_chart(
+            _bar_chart(
+                valuation_counts,
+                category_title="valuation",
+                value_title="companies",
+                percent_of=enriched,
+            ),
+            width="stretch",
+        )
+    else:
+        st.info("No company has been enriched yet, so stage and valuation have nothing to show.")
+
+    st.divider()
+
     with _session() as session:
         top = st.columns([3, 1, 2, 2])
         text = top[0].text_input("Name contains")
@@ -302,8 +506,42 @@ def render_observability() -> None:
             st.info("No runs in this date range.")
             return
 
+        failed = sum(r.failure_category is not None for r in runs)
+        total_cost = sum(r.cost_usd for r in runs)
+        total_iterations = sum(r.iterations for r in runs)
+        cols = st.columns(4)
+        cols[0].metric("Runs", len(runs))
+        cols[1].metric("Failed", failed)
+        cols[2].metric("Total cost (US$)", f"{total_cost:.2f}")
+        cols[3].metric(
+            "Mean cost per iteration (US$)",
+            f"{total_cost / total_iterations:.4f}" if total_iterations else "n/a",
+        )
+
         st.subheader("Cost")
-        cost_tool_col, cost_kind_col = st.columns(2)
+        cost_day_col, cost_kind_col, cost_tool_col = st.columns(3)
+        cost_day_col.caption("Cost per day (US$)")
+        cost_day_df = pd.DataFrame({"day": d.day, "cost": d.cost_usd} for d in days)
+        cost_day_col.altair_chart(
+            alt.Chart(cost_day_df)
+            .mark_bar()
+            .encode(
+                x=alt.X("day:T", title="day", axis=alt.Axis(format="%Y-%m-%d")),
+                y=alt.Y("cost:Q", title="cost (US$)"),
+                tooltip=[
+                    alt.Tooltip("day:T", title="day", format="%Y-%m-%d"),
+                    alt.Tooltip("cost:Q", title="cost (US$)", format=".4f"),
+                ],
+            ),
+            width="stretch",
+        )
+
+        cost_kind_col.caption("Cost by kind (US$)")
+        cost_kind_col.altair_chart(
+            _bar_chart(cost_kind, category_title="kind", value_title="cost (US$)"),
+            width="stretch",
+        )
+
         cost_tool_col.caption("Cost by tool call (US$)")
         if cost_tool:
             cost_tool_df = pd.DataFrame(
@@ -333,35 +571,29 @@ def render_observability() -> None:
         else:
             cost_tool_col.success("No tool calls in this range")
 
-        cost_kind_col.caption("Cost by kind (US$)")
-        cost_kind_col.bar_chart(pd.Series(cost_kind, name="cost (US$)"))
-
-        failed = sum(r.failure_category is not None for r in runs)
-        total_cost = sum(r.cost_usd for r in runs)
-        total_iterations = sum(r.iterations for r in runs)
-        cols = st.columns(4)
-        cols[0].metric("Runs", len(runs))
-        cols[1].metric("Failed", failed)
-        cols[2].metric("Total cost (US$)", f"{total_cost:.2f}")
-        cols[3].metric(
-            "Mean cost per iteration (US$)",
-            f"{total_cost / total_iterations:.4f}" if total_iterations else "n/a",
-        )
-
         st.subheader("Failures")
         cat_col, kind_col, tool_col = st.columns(3)
         cat_col.caption("Failures by category")
         if counts:
-            cat_col.bar_chart(pd.Series(counts, name="runs"))
+            cat_col.altair_chart(
+                _bar_chart(counts, category_title="category", value_title="runs"),
+                width="stretch",
+            )
         else:
             cat_col.success("No failed runs")
 
         kind_col.caption("Failure rate by kind (%)")
-        kind_col.bar_chart(pd.Series(rate_by_kind, name="failure rate (%)"))
+        kind_col.altair_chart(
+            _bar_chart(rate_by_kind, category_title="kind", value_title="failure rate (%)"),
+            width="stretch",
+        )
 
         tool_col.caption("Failures by tool call")
         if tool_failures:
-            tool_col.bar_chart(pd.Series(tool_failures, name="failed runs"))
+            tool_col.altair_chart(
+                _bar_chart(tool_failures, category_title="tool", value_title="failed runs"),
+                width="stretch",
+            )
         else:
             tool_col.success("No failed runs with tool calls")
 

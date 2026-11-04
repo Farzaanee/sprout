@@ -111,8 +111,9 @@ def test_observability_populated_with_failed_run(monkeypatch, tmp_path):
         "No tool calls in this range",
         "No failed runs with tool calls",
     ]
-    # cost by kind, category, rate by kind, cost trend, failures per day (no tool calls seeded)
-    assert len(at.get("vega_lite_chart")) == 5
+    # cost per day, cost by kind, category, rate by kind, cost trend, failures per day (no tool
+    # calls seeded)
+    assert len(at.get("vega_lite_chart")) == 6
     assert [e.label for e in at.expander] == ["Step 1 response", "Step 2 response"]
     assert "validation failed" in [c.value for c in at.code]
 
@@ -125,8 +126,9 @@ def test_observability_no_failed_runs_omits_category_chart(monkeypatch, tmp_path
         "No failed runs",
         "No failed runs with tool calls",
     ]
-    # cost by kind, rate by kind, cost trend, failures per day; no category or tool-call chart
-    assert len(at.get("vega_lite_chart")) == 4
+    # cost per day, cost by kind, rate by kind, cost trend, failures per day; no category or
+    # tool-call chart
+    assert len(at.get("vega_lite_chart")) == 5
 
 
 def test_observability_run_without_steps_that_ran_is_pre_phase_3(monkeypatch, tmp_path):

@@ -116,6 +116,87 @@ def test_counts_facts_keywords_and_years(session):
     assert queries.incorporation_year_counts(session) == {2020: 1}
 
 
+def test_pool_overview_counts(session):
+    enriched = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    unclassified = _add(session, "2", "Plain AI Ltd", date(2015, 6, 1))
+    no_data = _add(session, "3", "Mystery Startup Ltd", date(2021, 1, 1))
+    enriched.category = "Robotics and automation"
+    no_data.category = "Other"
+    session.add(enriched)
+    session.add(no_data)
+    save_fact(
+        session,
+        enriched.id,
+        "stage",
+        Sourced[str](value="Seed", source_url="https://example.com", confidence=Confidence.HIGH),
+    )
+    save_fact(
+        session,
+        enriched.id,
+        "valuation_million_usd",
+        Sourced[int](value=120, source_url="https://example.com", confidence=Confidence.HIGH),
+    )
+    save_fact(
+        session,
+        enriched.id,
+        "founded",
+        Sourced[int](value=2019, source_url="https://example.com", confidence=Confidence.HIGH),
+    )
+    # researched but nothing found, as opposed to never researched
+    save_fact(
+        session,
+        no_data.id,
+        "stage",
+        Sourced[str](value=None, source_url="https://example.com", confidence=Confidence.HIGH),
+    )
+    save_fact(
+        session,
+        no_data.id,
+        "valuation_million_usd",
+        Sourced[int](value=None, source_url="https://example.com", confidence=Confidence.HIGH),
+    )
+    # unclassified company still has a registry-sourced "founded" fact from ingestion, but it
+    # must not count as "enriched"
+    save_fact(
+        session,
+        unclassified.id,
+        "founded",
+        Sourced[int](value=2015, source_url="https://example.com", confidence=Confidence.MEDIUM),
+    )
+    session.commit()
+
+    assert queries.enriched_company_count(session) == 2
+    assert queries.category_counts(session) == {
+        "Robotics and automation": 1,
+        "Other": 1,
+    }
+    assert queries.stage_counts(session) == {"Seed": 1, "Not found": 1}
+    valuations = queries.valuation_bin_counts(session)
+    assert valuations["$100-500m"] == 1
+    assert valuations["Not found"] == 1
+    assert queries.founded_year_counts(session) == {2019: 1}  # unclassified company excluded
+    assert queries.locality_counts(session) == {"London": 2}  # unclassified company excluded
+
+
+def test_winning_values_prefers_valued_then_newest_then_confidence(session):
+    company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    save_fact(
+        session,
+        company.id,
+        "stage",
+        Sourced[str](value=None, source_url="https://a.example", confidence=Confidence.LOW),
+    )
+    save_fact(
+        session,
+        company.id,
+        "stage",
+        Sourced[str](value="Series A", source_url="https://b.example", confidence=Confidence.LOW),
+    )
+    session.commit()
+
+    assert queries.stage_counts(session) == {"Series A": 1}
+
+
 def test_search_news_matches_title_or_summary_newest_first(session):
     add_news_items(
         session,
