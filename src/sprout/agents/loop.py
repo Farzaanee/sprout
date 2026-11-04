@@ -162,6 +162,25 @@ def _run_tool(tool: Tool | None, name: str, tool_input: dict[str, Any]) -> ToolO
         return ToolOutcome(f"{name} failed: {type(exc).__name__}: {exc}", is_error=True)
 
 
+def _without_orphaned_server_tool_use(content: list[Any]) -> list[Any]:
+    """Drop a server_tool_use block (e.g. web_search) with no paired *_tool_result in this turn.
+
+    The API pairs a server tool_use with its result within the same response; if the model also
+    emits a custom tool_use and stops before that pairing lands, the orphan would sit unpaired in
+    history and the next request gets rejected with a 400.
+    """
+    result_ids = {
+        getattr(b, "tool_use_id", None)
+        for b in content
+        if str(getattr(b, "type", None)).endswith("_tool_result")
+    }
+    return [
+        b
+        for b in content
+        if not (getattr(b, "type", None) == "server_tool_use" and b.id not in result_ids)
+    ]
+
+
 def _tool_result(block_id: str, outcome: ToolOutcome) -> dict[str, Any]:
     result: dict[str, Any] = {
         "type": "tool_result",
@@ -234,7 +253,8 @@ def run_agent(
         step = _step_of(model, result.iterations, response, content)
         result.steps.append(step)
         if content:
-            history.append({"role": "assistant", "content": content})
+            kept = _without_orphaned_server_tool_use(content)
+            history.append({"role": "assistant", "content": kept})
         if on_search_urls is not None:
             urls = _search_urls(content)
             if urls:

@@ -7,6 +7,7 @@ import pytest
 
 from fakes import (
     ScriptedClient,
+    orphaned_search_turn,
     pause_turn,
     response,
     server_search_turn,
@@ -156,6 +157,19 @@ def test_pause_turn_resends_history_without_a_new_user_message():
     assert [m["role"] for m in second] == ["user", "assistant"]
     assert second[-1]["content"][1].type == "web_search_tool_result"  # blocks kept unchanged
     assert seen == ["https://a.example/x", "https://b.example/y"]
+
+
+def test_orphaned_server_tool_use_is_dropped_before_the_next_request():
+    """A turn mixing a server search with a custom tool_use can stop before the search pairs with
+    its result block. Keeping that orphan in history causes the next request to 400."""
+    client = ScriptedClient(
+        orphaned_search_turn(("echo", {"q": "a"})), tool_use_turn(("submit", {}))
+    )
+    result = run(client, [search_tool(), echo_tool(), submit_tool()])
+    assert result.stop == "submitted"
+    sent_history = client.requests[1]["messages"]
+    assistant_turn = sent_history[-2]["content"]
+    assert all(getattr(b, "type", None) != "server_tool_use" for b in assistant_turn)
 
 
 def test_end_turn_without_submission_gets_one_reminder_then_stops():

@@ -59,6 +59,16 @@ def pause_turn(urls: list[str] | None = None, **u: int) -> SimpleNamespace:
     return response(search_blocks(urls or []), "pause_turn", **u)
 
 
+def orphaned_search_turn(*then: tuple[str, dict[str, Any]], **u: int) -> SimpleNamespace:
+    """A turn with a server-side search call but no result: the model stopped for a custom tool
+    before the search round-tripped."""
+    blocks = [
+        SimpleNamespace(type="server_tool_use", id="srv_1", name="web_search", input={"query": "q"})
+    ]
+    blocks += [tool_use_block(n, i, id=f"tu_{k}") for k, (n, i) in enumerate(then, 1)]
+    return response(blocks, "tool_use", **u)
+
+
 class _Messages:
     def __init__(self, owner: "ScriptedClient") -> None:
         self._owner = owner
