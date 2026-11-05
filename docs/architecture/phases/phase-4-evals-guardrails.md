@@ -5,7 +5,7 @@ Part of the [Sprout architecture docs](../README.md). Nothing in this section ex
 ```mermaid
 flowchart TB
     subgraph LABELS["Hand-made truth, user-verified"]
-        GOLD[("evals/golden.yaml: 30 entries, each with label date and sources")]
+        GOLD[("evals/golden.yaml: 30 entries, each with label date, verified flag and per-fact sources")]
         CAL[("evals/judge_calibration.yaml: about 12 graded pairs")]
     end
     RUN["evals/run_evals.py: CLI, BatchBudget cap, gate exit code"]
@@ -72,7 +72,7 @@ tests/test_web.py (policy cases), tests/test_costs.py (BatchBudget)
 
 ## Golden set schema (`evals/golden.yaml`)
 
-Illustrative shape only; angle-bracket values are placeholders, the real labels are the user's (see the labelling split below).
+Illustrative shape only; angle-bracket values are placeholders, the real labels are the user's (see the labelling split below). One field per CSV column the labeller actually fills in, each with its own `*_sources` list (no single bundled source list): this is what lets the report point at exactly which page backs which fact, and what lets a labeller paste straight from a spreadsheet without reshaping it.
 
 ```yaml
 version: 1
@@ -80,29 +80,53 @@ entries:
   - company_number: "<8 characters>"   # identity (D5); unique; seeds the row via Companies House
     name: "<display name>"
     category: "<exact Category value>" # validated against models.Category: a taxonomy change fails loudly
+
+    one_liner: "<one sentence>"        # optional, reference only; not scored
+    one_liner_sources: ["<url>", ...]
+
+    status: "<exact BusinessStatus value>"  # optional, reference only; not scored today (distinct from
+    status_sources: ["<url>", ...]          # company.status, the Companies House legal status)
+
     stage: "<exact Stage value>"       # Stage of the latest known round; "Unknown" = not public
+    stage_sources: ["<url>", ...]      # may differ from last_round.sources: the stage label and the
+                                        # round amount sometimes come from different pages
+
     last_round:                        # null = no round is public
       stage: "<Stage value>"
       amount_million_usd: <int>        # whole USD millions, the labeller's own conversion
       announced: <YYYY-MM-DD or null>
       note: "<original figure and currency>"
-    business_model_note: "<one or two sentences, reference for the judge>"   # optional
-    target_user_note: "<one or two sentences>"                                # optional
+      sources: ["<url>", ...]
+
+    total_raised:                      # optional, reference only; not scored unless metrics.py is
+      amount_million_usd: <int or null>  # extended to read it
+      note: "<original figure and currency>"
+      sources: ["<url>", ...]
+
+    valuation:                         # optional, reference only; not scored unless metrics.py is
+      amount_million_usd: <int or null>  # extended to read it
+      note: "<original figure and currency>"
+      sources: ["<url>", ...]
+
+    business_model: "<one or two sentences, reference for the judge>"   # optional
+    business_model_sources: ["<url>", ...]
+    target_user: "<one or two sentences>"                                # optional
+    target_user_sources: ["<url>", ...]
+
     split: dev                         # dev | holdout
     label:
       date: <YYYY-MM-DD>               # when the label was made
-      sources: ["<url>", ...]          # at least one when stage is not Unknown or last_round is set
       verified: false                  # true only after the user checked the sources
 ```
 
-`golden.py`: `GoldenEntry`, `LastRound`, `GoldenLabel` (Pydantic, `extra="forbid"`), `load_golden(path=GOLDEN_PATH, *, verified_only=True) -> list[GoldenEntry]`, raising `GoldenError` that names the entry. Validation rules: unique `company_number`; `category` and `stage` must parse to the enums; sources required as above; a `last_round.amount_million_usd` must be a non-negative int. Only `verified: true` entries are scored; the report states "scored n of m".
+`golden.py`: `GoldenEntry`, `LastRound`, `MoneyFact` (for `total_raised` and `valuation`), `GoldenLabel` (Pydantic, `extra="forbid"`), `load_golden(path=GOLDEN_PATH, *, verified_only=True) -> list[GoldenEntry]`, raising `GoldenError` that names the entry. Validation rules: unique `company_number`; `category`, `stage`, `last_round.stage` and `status` (when set) must parse to their enums; any non-null fact (`last_round`, `total_raised`, `valuation`, `business_model`, `target_user`, `one_liner`, `status`, `stage` once it is not `Unknown`) must carry at least one URL in its own `*_sources` list; a `last_round`/`total_raised`/`valuation` `amount_million_usd` must be a non-negative int when set. Only `verified: true` entries are scored; the report states "scored n of m". `one_liner`, `status`, `total_raised` and `valuation` are carried through for the labeller's own reference and for the judge/a human reviewing misses; nothing in the metrics table below scores them yet.
 
 ## Labelling split (proposal, the user owns the truth)
 
 | Who | Does | Notes |
 |---|---|---|
-| Implementer (a one-off research session, not the enrichment agent) | Proposes the 20 companies beyond the 10 pilot companies and drafts all 30 entries with `verified: false`: category, stage, `last_round`, the two notes, source URLs and today's date | Drafts come from independent sources (company site, press release, Companies House), never from the Sprout pipeline's own output or the dev DB facts, otherwise the eval is circular. Stratify: at least 8 categories; at least 8 companies with a public Series A or later amount; at least 6 with no public funding; at least 3 with same-name confusion risk; at least 2 with non-USD rounds; a mix of well known and obscure; 6 to 8 entries whose honest category is `Other` or that are not genuine AI startups (shell companies, holding companies, name collisions with the candidate pool's top-scoring but miscategorised results), labelled `Other` rather than forced into a startup category, so category accuracy also tests that the agent says `Other` instead of guessing. Do not invent a figure to fill a gap: leave `last_round: null` and say why in `note` |
-| User | Opens each source, corrects the entry, sets `verified: true` and `label.date` | About 3 minutes per entry, roughly 1.5 hours in all, on the critical path: tuning cannot start until at least 20 are verified. The user decides taxonomy judgement calls; an entry the user is unsure about stays `verified: false` |
+| Implementer (a one-off research session, not the enrichment agent) | Proposes the 20 companies beyond the 10 pilot companies and drafts all 30 entries with `verified: false`: category, one-liner, status, stage, `last_round`, total raised, valuation, the two notes, a `*_sources` list per fact, and today's `label.date` | Drafts come from independent sources (company site, press release, Companies House), never from the Sprout pipeline's own output or the dev DB facts, otherwise the eval is circular. Stratify: at least 8 categories; at least 8 companies with a public Series A or later amount; at least 6 with no public funding; at least 3 with same-name confusion risk; at least 2 with non-USD rounds; a mix of well known and obscure; 6 to 8 entries whose honest category is `Other` or that are not genuine AI startups (shell companies, holding companies, name collisions with the candidate pool's top-scoring but miscategorised results), labelled `Other` rather than forced into a startup category, so category accuracy also tests that the agent says `Other` instead of guessing. Do not invent a figure to fill a gap: leave `last_round`/`total_raised`/`valuation` null and say why in `note` |
+| User | Opens each source, corrects the entry, sets `verified: true` and confirms `label.date` | About 3 minutes per entry, roughly 1.5 hours in all, on the critical path: tuning cannot start until at least 20 are verified. The user decides taxonomy judgement calls; an entry the user is unsure about stays `verified: false` |
 | Both | Tag 10 entries `holdout` (not used for prompt iteration), the rest `dev`; the 10 pilot companies are `dev` because the prompt was already tuned on them | `--split holdout` reports the held-out set separately, which is the only honest overfitting check at n=30 |
 
 ## Metrics (`evals/metrics.py`, pure functions over `Observed` and `GoldenEntry`)

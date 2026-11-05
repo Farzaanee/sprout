@@ -35,11 +35,11 @@ All four reject unknown fields (`extra="forbid"`), so malformed model output fai
 
 | # | Category | | # | Category |
 |---|---|---|---|---|
-| 1 | AI apps vision | | 11 | Semiconductors and AI hardware |
-| 2 | AI apps voice | | 12 | Robotics and automation |
-| 3 | AI apps text | | 13 | Defense, aerospace and space |
-| 4 | Fintech and payments | | 14 | E-commerce and retail tech |
-| 5 | Enterprise software and cloud | | 15 | Consumer social, media and gaming |
+| 1 | Fintech and payments | | 11 | Semiconductors and AI hardware |
+| 2 | Enterprise software and cloud | | 12 | Robotics and automation |
+| 3 | Data, AI infrastructure and developer tools | | 13 | Defense, aerospace and space |
+| 4 | Sales, marketing and customer experience software | | 14 | E-commerce and retail tech |
+| 5 | HR and people software | | 15 | Consumer social, media and gaming |
 | 6 | Cybersecurity | | 16 | Logistics and supply chain |
 | 7 | Biotech and pharma | | 17 | Deep tech and quantum |
 | 8 | Healthtech and digital health | | 18 | Consultancy and services |

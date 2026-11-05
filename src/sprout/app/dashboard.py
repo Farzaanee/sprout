@@ -677,7 +677,13 @@ def render_observability() -> None:
         cat_col.caption("Failures by category")
         if counts:
             cat_col.altair_chart(
-                _bar_chart(counts, category_title="category", value_title="runs"),
+                _bar_chart(
+                    counts,
+                    category_title="category",
+                    value_title="runs",
+                    height=300,
+                    label_angle=0,
+                ),
                 width="stretch",
             )
         else:
@@ -685,14 +691,26 @@ def render_observability() -> None:
 
         kind_col.caption("Failure rate by kind (%)")
         kind_col.altair_chart(
-            _bar_chart(rate_by_kind, category_title="kind", value_title="failure rate (%)"),
+            _bar_chart(
+                rate_by_kind,
+                category_title="kind",
+                value_title="failure rate (%)",
+                height=300,
+                label_angle=0,
+            ),
             width="stretch",
         )
 
         tool_col.caption("Failures by tool call")
         if tool_failures:
             tool_col.altair_chart(
-                _bar_chart(tool_failures, category_title="tool", value_title="failed runs"),
+                _bar_chart(
+                    tool_failures,
+                    category_title="tool",
+                    value_title="failed runs",
+                    height=300,
+                    label_angle=0,
+                ),
                 width="stretch",
             )
         else:

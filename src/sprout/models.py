@@ -12,11 +12,11 @@ from pydantic import AnyHttpUrl, AwareDatetime, BaseModel, ConfigDict, Field, mo
 
 
 class Category(StrEnum):
-    AI_APPS_VISION = "AI apps vision"
-    AI_APPS_VOICE = "AI apps voice"
-    AI_APPS_LANGUAGE = "AI apps text"
     FINTECH_AND_PAYMENTS = "Fintech and payments"
     ENTERPRISE_SOFTWARE_AND_CLOUD = "Enterprise software and cloud"
+    DATA_AI_INFRASTRUCTURE_AND_DEV_TOOLS = "Data, AI infrastructure and developer tools"
+    SALES_MARKETING_AND_CX_SOFTWARE = "Sales, marketing and customer experience software"
+    HR_AND_PEOPLE_SOFTWARE = "HR and people software"
     CYBERSECURITY = "Cybersecurity"
     BIOTECH_AND_PHARMA = "Biotech and pharma"
     HEALTHTECH_AND_DIGITAL_HEALTH = "Healthtech and digital health"

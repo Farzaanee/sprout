@@ -20,11 +20,11 @@ SRC = "https://example.com/funding-announcement"
 def test_taxonomy_matches_fixed_categories():
     assert len(Category) == 19
     assert [category.value for category in Category] == [
-        "AI apps vision",
-        "AI apps voice",
-        "AI apps text",
         "Fintech and payments",
         "Enterprise software and cloud",
+        "Data, AI infrastructure and developer tools",
+        "Sales, marketing and customer experience software",
+        "HR and people software",
         "Cybersecurity",
         "Biotech and pharma",
         "Healthtech and digital health",
