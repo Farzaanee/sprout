@@ -135,7 +135,8 @@ entries:
 
 | Metric | Definition | Denominator | Initial gate |
 |---|---|---|---|
-| Profiles submitted | latest enrich run has `stop == "submitted"` | scored entries | report (a floor of 90 percent is suggested after the baseline) |
+| Profiles submitted | latest enrich run has `stop == "submitted"` | scored entries excluding `failure_category == "api_error"` | report (a floor of 90 percent is suggested after the baseline) |
+| Infrastructure error rate | latest enrich run has `failure_category == "api_error"` | scored entries | report separately; excluded from the profiles-submitted floor so an infrastructure 400 does not count as a quality regression |
 | Category accuracy | `company.category == golden.category`, exact string; `golden.category` may be a list of acceptable categories for a genuinely dual-fit company, matching if `company.category` is in it | submitted | at least 85 percent |
 | Stage accuracy | stage fact equals `golden.stage`; golden `Unknown` matches a null stage | submitted | report until the baseline |
 | Funding exact and within 10 percent | observed last round vs `golden.last_round.amount_million_usd`; exact is equality, within 10 percent is `abs(obs - gold) <= 0.10 * gold` (absorbs FX-rate differences; a null observed amount is a miss) | submitted and golden `last_round` set | report until the baseline |
