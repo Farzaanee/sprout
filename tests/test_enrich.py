@@ -44,6 +44,7 @@ def submission(**overrides):
         "founded": NOT_DISCLOSED,
         "category": "AI apps vision",
         "stage": NOT_DISCLOSED,
+        "business_status": NOT_DISCLOSED,
         "total_raised_million_usd": NOT_DISCLOSED,
         "valuation_million_usd": NOT_DISCLOSED,
         "funding_rounds": [],
@@ -111,7 +112,7 @@ def facts_of(session, company):
 def test_submit_schema_is_derived_from_the_model_without_code_stamped_fields():
     schema = submit_profile_schema()
     assert set(schema["properties"]) == {
-        "website", "hq", "founded", "category", "stage",
+        "website", "hq", "founded", "category", "stage", "business_status",
         "total_raised_million_usd", "valuation_million_usd", "funding_rounds", "business_model",
         "target_user", "one_liner",
     }  # fmt: skip

@@ -189,6 +189,14 @@ def stage_counts(session: Session) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: -item[1]))
 
 
+def business_status_counts(session: Session) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in _winning_values(session, "business_status").values():
+        key = value if value is not None else "Not found"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
 def founded_year_counts(session: Session) -> dict[int, int]:
     """Enriched companies only. `ingest` pre-populates every candidate's "founded" fact from its
     Companies House incorporation date, so a plain `_winning_values` scan would include

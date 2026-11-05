@@ -43,7 +43,15 @@ from sprout.db import (
     save_profile,
 )
 from sprout.failures import failure_category_for
-from sprout.models import Category, CompanyProfile, Confidence, FundingRound, Sourced, Stage
+from sprout.models import (
+    BusinessStatus,
+    Category,
+    CompanyProfile,
+    Confidence,
+    FundingRound,
+    Sourced,
+    Stage,
+)
 from sprout.sources import companies_house, web
 from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.http import FetchError
@@ -74,11 +82,24 @@ running low on turns or budget, submit what you have.
 What to submit
 - category: exactly one of: {"; ".join(c.value for c in Category)}. Judge by what the company \
 does, not by its name. Use "Other" if nothing fits.
-- website, hq (city and country, e.g. "London, UK"), founded (year), stage, \
+- website, hq (city and country, e.g. "London, UK"), founded (year), stage, business_status, \
 total_raised_million_usd, valuation_million_usd, funding_rounds, business_model, target_user, \
 one_liner (a factual description of at most 25 words).
 - stage is one of: {", ".join(s.value for s in Stage if s is not Stage.UNKNOWN)}. Use a null \
 value rather than "Unknown".
+- business_status is exactly one of: {"; ".join(s.value for s in BusinessStatus)}. Base it on \
+what you find, not on the Companies House legal status alone (a dissolved/liquidated company is \
+"Closed"; "active" at Companies House can still be any other value, so keep researching):
+  - Active: trading normally, no sign of acquisition, closure or dormancy.
+  - Stagnant or distressed: still registered but no recent activity (no news, funding, hiring or \
+a working site in a long time).
+  - Public: listed on a stock exchange.
+  - Acquired or merged: bought by, or merged into, another company.
+  - Subsidiary: operates as part of a parent company's group, not through a recent acquisition.
+  - Closed: dissolved, liquidated, in administration, or otherwise ceased trading.
+  - Dormant (shell): Companies House marks it dormant, or it has no real operations.
+  - Unclear: you found genuinely conflicting or insufficient signals after researching. Use this \
+rather than guessing; cite whatever page you checked, at low confidence.
 
 Rules for every field
 - Unknown is acceptable and expected. If you cannot support a field from a source, give it a \

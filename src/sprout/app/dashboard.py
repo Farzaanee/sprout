@@ -52,9 +52,19 @@ def _bar_chart(
     tooltip = [alt.Tooltip(category_title), alt.Tooltip(value_title)]
     if percent_of:
         tooltip.append(alt.Tooltip("percent:Q", title="% of enriched companies", format=".1f"))
-    columns = [category_title, value_title] + (["percent"] if percent_of else [])
     axis = alt.Axis(labelLimit=0) if full_labels else alt.Axis()
-    chart = alt.Chart(pd.DataFrame(rows, columns=columns)).mark_bar()
+    if rows:
+        columns = [category_title, value_title] + (["percent"] if percent_of else [])
+        df = pd.DataFrame(rows, columns=columns)
+    else:
+        # An empty object-dtype column infers as pandas dtype "empty", which Altair doesn't
+        # recognise and warns about; give explicit dtypes so an empty chart renders quietly.
+        df = pd.DataFrame(
+            {category_title: pd.Series(dtype="str"), value_title: pd.Series(dtype="float")}
+        )
+        if percent_of:
+            df["percent"] = pd.Series(dtype="float")
+    chart = alt.Chart(df).mark_bar()
     if height is not None:
         chart = chart.properties(height=height)
     if horizontal:
@@ -166,6 +176,7 @@ def render_companies() -> None:
         enriched = queries.enriched_company_count(session)
         category_counts = queries.category_counts(session)
         stage_counts = queries.stage_counts(session)
+        business_status_counts = queries.business_status_counts(session)
         valuation_counts = queries.valuation_bin_counts(session)
         pool_founded_counts = queries.incorporation_year_counts(session)
         enriched_founded_counts = queries.founded_year_counts(session)
@@ -313,6 +324,18 @@ def render_companies() -> None:
             _bar_chart(
                 valuation_counts,
                 category_title="valuation",
+                value_title="companies",
+                percent_of=enriched,
+            ),
+            width="stretch",
+        )
+
+        left, right = st.columns(2)
+        left.caption("Business status (enriched companies, hover for % of enriched)")
+        left.altair_chart(
+            _bar_chart(
+                business_status_counts,
+                category_title="business status",
                 value_title="companies",
                 percent_of=enriched,
             ),

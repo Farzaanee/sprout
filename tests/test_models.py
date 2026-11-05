@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from sprout.models import (
+    BusinessStatus,
     Category,
     CompanyProfile,
     Confidence,
@@ -21,7 +22,7 @@ def test_taxonomy_matches_fixed_categories():
     assert [category.value for category in Category] == [
         "AI apps vision",
         "AI apps voice",
-        "AI apps language",
+        "AI apps text",
         "Fintech and payments",
         "Enterprise software and cloud",
         "Cybersecurity",
@@ -40,6 +41,19 @@ def test_taxonomy_matches_fixed_categories():
         "Other",
     ]
     assert Category.OTHER in Category
+
+
+def test_business_status_has_the_fixed_options():
+    assert [status.value for status in BusinessStatus] == [
+        "Active",
+        "Stagnant or distressed",
+        "Public",
+        "Acquired or merged",
+        "Subsidiary",
+        "Closed",
+        "Dormant (shell)",
+        "Unclear",
+    ]
 
 
 def test_category_and_stage_reject_unknown_labels():
@@ -89,6 +103,7 @@ def test_empty_profile_defaults_to_not_disclosed():
     p = CompanyProfile(name="Acme AI")
     assert p.category is Category.OTHER
     assert p.stage.value is None
+    assert p.business_status.value is None
     assert p.total_raised_million_usd.value is None
     assert p.valuation_million_usd.value is None
     assert p.news == []

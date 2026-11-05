@@ -183,8 +183,8 @@ def test_save_profile_flattens_sourced_fields_and_sets_category(session):
 
     rows = {f.field: f for f in session.exec(select(Fact))}
     assert set(rows) == {
-        "website", "hq", "founded", "stage", "total_raised_million_usd", "valuation_million_usd",
-        "business_model", "target_user", "one_liner",
+        "website", "hq", "founded", "stage", "business_status", "total_raised_million_usd",
+        "valuation_million_usd", "business_model", "target_user", "one_liner",
     }  # fmt: skip
     assert rows["hq"].value_json == '"London"' and rows["hq"].source_url == "https://example.com/a"
     assert rows["website"].value_json is None and rows["website"].source_url is None
@@ -261,7 +261,7 @@ def test_delete_profile_clears_facts_and_category(session):
     deleted = delete_profile(session, company)
     session.commit()
 
-    assert deleted == 9  # every single-valued Sourced field (rounds live in funding_round)
+    assert deleted == 10  # every single-valued Sourced field (rounds live in funding_round)
     assert session.exec(select(Fact).where(Fact.company_id == company.id)).all() == []
     assert session.exec(select(FundingRoundRow)).all() == []
     session.refresh(company)

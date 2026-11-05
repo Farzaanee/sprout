@@ -14,7 +14,7 @@ from pydantic import AnyHttpUrl, AwareDatetime, BaseModel, ConfigDict, Field, mo
 class Category(StrEnum):
     AI_APPS_VISION = "AI apps vision"
     AI_APPS_VOICE = "AI apps voice"
-    AI_APPS_LANGUAGE = "AI apps language"
+    AI_APPS_LANGUAGE = "AI apps text"
     FINTECH_AND_PAYMENTS = "Fintech and payments"
     ENTERPRISE_SOFTWARE_AND_CLOUD = "Enterprise software and cloud"
     CYBERSECURITY = "Cybersecurity"
@@ -44,6 +44,20 @@ class Stage(StrEnum):
     SERIES_F = "Series F"
     GROWTH = "Growth"
     UNKNOWN = "Unknown"
+
+
+class BusinessStatus(StrEnum):
+    """Company's current business state, judged from research (distinct from `company.status`,
+    the Companies House legal status given to the enrichment agent as input)."""
+
+    ACTIVE = "Active"
+    STAGNANT_OR_DISTRESSED = "Stagnant or distressed"
+    PUBLIC = "Public"
+    ACQUIRED_OR_MERGED = "Acquired or merged"
+    SUBSIDIARY = "Subsidiary"
+    CLOSED = "Closed"
+    DORMANT_SHELL = "Dormant (shell)"
+    UNCLEAR = "Unclear"
 
 
 class Confidence(StrEnum):
@@ -102,6 +116,7 @@ class CompanyProfile(_Strict):
     # A classification (model judgement against the fixed taxonomy), not a sourced fact.
     category: Category = Category.OTHER
     stage: Sourced[Stage] = Field(default_factory=Sourced[Stage])
+    business_status: Sourced[BusinessStatus] = Field(default_factory=Sourced[BusinessStatus])
     total_raised_million_usd: Sourced[Annotated[int, Field(ge=0)]] = Field(
         default_factory=Sourced[Annotated[int, Field(ge=0)]]
     )

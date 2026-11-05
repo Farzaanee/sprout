@@ -298,6 +298,30 @@ flowchart TB
     NEXT --> GUARD
 ```
 
+## Business status
+
+`CompanyProfile.business_status` is a `Sourced[BusinessStatus]` field, filled by the model like
+`stage` (not a plain classification like `category`): a non-null value needs a `source_url` and
+is stored as a `fact` row (`field="business_status"`), through the same generic loop as every
+other `Sourced` field in `save_profile`. It is distinct from `company.status`, the Companies
+House legal status given to the model as input context; `company.status="active"` says only that
+the legal entity still exists, not that the business is operating, independent, or still private.
+
+| Option | Meaning |
+|---|---|
+| Active | Trading normally, no sign of acquisition, closure or dormancy |
+| Stagnant or distressed | Still registered but no recent activity (no news, funding, hiring, or a working site in a long time) |
+| Public | Listed on a stock exchange |
+| Acquired or merged | Bought by, or merged into, another company |
+| Subsidiary | Operates as part of a parent company's group, not through a recent acquisition |
+| Closed | Dissolved, liquidated, in administration, or otherwise ceased trading |
+| Dormant (shell) | Companies House marks it dormant, or it has no real operations |
+| Unclear | Genuinely conflicting or insufficient signals after researching; cite whatever was checked, at low confidence |
+
+`app/queries.py:business_status_counts` picks the winning fact per company (same rule as
+`stage_counts`, A6) and the dashboard's companies page charts the distribution next to stage and
+valuation.
+
 ## Other notes
 
 - Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](../4.%20cross-cutting.md#4-testing)).

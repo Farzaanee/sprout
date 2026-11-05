@@ -37,7 +37,7 @@ All four reject unknown fields (`extra="forbid"`), so malformed model output fai
 |---|---|---|---|---|
 | 1 | AI apps vision | | 11 | Semiconductors and AI hardware |
 | 2 | AI apps voice | | 12 | Robotics and automation |
-| 3 | AI apps language | | 13 | Defense, aerospace and space |
+| 3 | AI apps text | | 13 | Defense, aerospace and space |
 | 4 | Fintech and payments | | 14 | E-commerce and retail tech |
 | 5 | Enterprise software and cloud | | 15 | Consumer social, media and gaming |
 | 6 | Cybersecurity | | 16 | Logistics and supply chain |

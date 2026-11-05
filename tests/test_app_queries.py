@@ -206,6 +206,28 @@ def test_winning_values_prefers_valued_then_newest_then_confidence(session):
     assert queries.stage_counts(session) == {"Series A": 1}
 
 
+def test_business_status_counts_uses_the_winning_fact_per_company(session):
+    acquired = _add(session, "1", "Acquired Robotics Ltd", date(2019, 1, 1))
+    unclear = _add(session, "2", "Unclear Robotics Ltd", date(2020, 1, 1))
+    save_fact(
+        session,
+        acquired.id,
+        "business_status",
+        Sourced[str](
+            value="Acquired or merged", source_url="https://a.example", confidence=Confidence.HIGH
+        ),
+    )
+    save_fact(
+        session,
+        unclear.id,
+        "business_status",
+        Sourced[str](value=None, source_url="https://b.example", confidence=Confidence.LOW),
+    )
+    session.commit()
+
+    assert queries.business_status_counts(session) == {"Acquired or merged": 1, "Not found": 1}
+
+
 def test_search_news_matches_title_or_summary_newest_first(session):
     add_news_items(
         session,
