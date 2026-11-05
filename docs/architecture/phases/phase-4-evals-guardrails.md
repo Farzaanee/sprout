@@ -131,7 +131,7 @@ entries:
 
 ## Metrics (`evals/metrics.py`, pure functions over `Observed` and `GoldenEntry`)
 
-`read_observed(session, entry) -> Observed` reads the persisted state: `company.category`; the valued `stage` fact; the `funding_round` rows; the `total_raised_million_usd` and `valuation_million_usd` facts with `source_url` and `note`; the latest `enrich` `run_log` row for the company (`stop`, `cost_usd`, `iterations`, `sources`). In the eval DB each company has one run, so "the valued fact" is unambiguous (A6 cannot occur).
+`read_observed(session, entry) -> Observed` reads the persisted state: `company.category`; the valued `stage`, `business_status` and `one_liner` facts; the `funding_round` rows; the `total_raised_million_usd` and `valuation_million_usd` facts with `source_url` and `note`; the latest `enrich` `run_log` row for the company (`stop`, `cost_usd`, `iterations`, `sources`). In the eval DB each company has one run, so "the valued fact" is unambiguous (A6 cannot occur). `business_status` and `one_liner` were missing from this list in an earlier draft of this doc even though both are `Sourced` fields on `Company` (`models.py`); added so they are available to a human reviewing misses and to a future metric, not because anything in the table below scores them yet.
 
 | Metric | Definition | Denominator | Initial gate |
 |---|---|---|---|
