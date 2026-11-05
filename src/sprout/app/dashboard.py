@@ -182,6 +182,8 @@ def render_companies() -> None:
         enriched_founded_counts = queries.founded_year_counts(session)
         locality_counts = queries.locality_counts(session)
         officer_counts = queries.officer_count_distribution(session)
+        officer_age_counts = queries.officer_age_distribution(session)
+        officer_nationality_counts = queries.officer_nationality_counts(session)
 
     st.subheader("Pool overview")
     st.caption(
@@ -308,6 +310,25 @@ def render_companies() -> None:
             width="stretch",
         )
 
+        left, right = st.columns(2)
+        left.caption("Officer age distribution (all candidates, from Companies House birth year)")
+        left.altair_chart(
+            _bar_chart(officer_age_counts, category_title="age", value_title="officers"),
+            width="stretch",
+        )
+        n = len(officer_nationality_counts)
+        right.caption(f"Officer nationality (top {n}, all candidates)")
+        right.altair_chart(
+            _bar_chart(
+                officer_nationality_counts,
+                category_title="nationality",
+                value_title="officers",
+                horizontal=True,
+                full_labels=True,
+            ),
+            width="stretch",
+        )
+
     if enriched:
         left, right = st.columns(2)
         left.caption("Stage distribution (enriched companies, hover for % of enriched)")
@@ -347,7 +368,7 @@ def render_companies() -> None:
     st.divider()
 
     with _session() as session:
-        top = st.columns([3, 1, 2, 2])
+        top = st.columns([3, 1, 2, 2, 2])
         text = top[0].text_input("Name contains")
         min_score = top[1].number_input("Min score", min_value=0, max_value=10, value=0)
         keyword = top[2].selectbox(
@@ -356,12 +377,18 @@ def render_companies() -> None:
             format_func=lambda k: k or "any",
         )
         year = top[3].number_input("Incorporated from", 2012, date.today().year, 2012)
+        status = top[4].selectbox(
+            "Business status",
+            [""] + queries.status_options(session),
+            format_func=lambda s: s or "any",
+        )
         rows = queries.search_companies(
             session,
             text=text,
             min_score=int(min_score),
             keyword=keyword or None,
             incorporated_from=date(int(year), 1, 1),
+            status=status or None,
         )
         st.caption(f"{len(rows)} companies (max 500 shown). Candidates, not verified startups.")
         st.dataframe(
@@ -422,6 +449,31 @@ def render_companies() -> None:
                         "source": r.source_url,
                     }
                     for r in rounds
+                ),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "source": st.column_config.LinkColumn("source", display_text="open")
+                },
+            )
+
+        officers = queries.company_officers(session, chosen.id)
+        st.caption("Officers")
+        if not officers:
+            st.caption("No officers found.")
+        else:
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "name": o.name,
+                        "role": o.role,
+                        "birth year": o.birth_year,
+                        "nationality": o.nationality,
+                        "confidence": o.confidence,
+                        "note": o.note,
+                        "source": o.source_url,
+                    }
+                    for o in officers
                 ),
                 hide_index=True,
                 width="stretch",

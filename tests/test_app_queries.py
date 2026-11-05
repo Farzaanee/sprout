@@ -6,6 +6,7 @@ from sqlmodel import Session
 from sprout.app import queries
 from sprout.candidates import assess
 from sprout.db import (
+    OfficerRow,
     RunLog,
     RunLogStep,
     add_news_items,
@@ -13,6 +14,7 @@ from sprout.db import (
     init_db,
     save_fact,
     upsert_company,
+    utcnow,
 )
 from sprout.models import Confidence, NewsItem, Sourced
 from sprout.sources.companies_house import CompanyHit
@@ -75,8 +77,8 @@ def session(tmp_path):
         yield s
 
 
-def _add(session, number, name, incorporated, sic=("62012",)):
-    hit = CompanyHit(number, name, "active", incorporated, sic, "London")
+def _add(session, number, name, incorporated, sic=("62012",), status="active"):
+    hit = CompanyHit(number, name, status, incorporated, sic, "London")
     company, _ = upsert_company(session, hit, assess(name, sic, incorporated=incorporated))
     session.commit()
     return company
@@ -99,6 +101,68 @@ def test_search_companies_filters_and_orders_by_score(session):
         "Neural Robotics Ltd"
     ]
     assert queries.search_companies(session, min_score=99) == []
+
+
+def test_search_companies_filters_by_status(session):
+    _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1), status="active")
+    _add(session, "2", "Old Robotics Ltd", date(2015, 1, 1), status="dissolved")
+
+    assert queries.status_options(session) == ["active", "dissolved"]
+    assert [c.name for c in queries.search_companies(session, status="dissolved")] == [
+        "Old Robotics Ltd"
+    ]
+
+
+def _add_officer(session, company_id, name, role, birth_year=None, nationality=None):
+    session.add(
+        OfficerRow(
+            company_id=company_id,
+            name=name,
+            role=role,
+            birth_year=birth_year,
+            nationality=nationality,
+            source_url="https://example.com",
+            retrieved_at=utcnow(),
+            confidence=Confidence.MEDIUM.value,
+        )
+    )
+    session.commit()
+
+
+def test_officer_age_distribution_bins_by_birth_year(session):
+    company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    this_year = date.today().year
+    _add_officer(session, company.id, "SMITH, Jane", "director", birth_year=this_year - 25)
+    _add_officer(session, company.id, "DOE, John", "secretary", birth_year=this_year - 65)
+    _add_officer(session, company.id, "LEE, Sam", "member")  # no birth year
+
+    assert queries.officer_age_distribution(session) == {"<30": 1, "60+": 1, "Unknown": 1}
+
+
+def test_officer_nationality_counts_groups_the_long_tail(session):
+    company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    _add_officer(session, company.id, "A", "director", nationality="British")
+    _add_officer(session, company.id, "B", "director", nationality="British")
+    _add_officer(session, company.id, "C", "director", nationality="French")
+    _add_officer(session, company.id, "D", "director")  # no nationality
+
+    assert queries.officer_nationality_counts(session, top_n=1) == {
+        "British": 2,
+        "Other": 2,  # French and Unknown pushed into the tail
+    }
+
+
+def test_company_officers_orders_by_role_then_name(session):
+    company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    _add_officer(session, company.id, "DOE, John", "director")
+    _add_officer(session, company.id, "SMITH, Jane", "director")
+    _add_officer(session, company.id, "ROBERTS, Pat", "secretary")
+
+    assert [o.name for o in queries.company_officers(session, company.id)] == [
+        "DOE, John",
+        "SMITH, Jane",
+        "ROBERTS, Pat",
+    ]
 
 
 def test_counts_facts_keywords_and_years(session):

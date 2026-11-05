@@ -13,6 +13,7 @@ from sprout.db import (
     Fact,
     FundingRoundRow,
     NewsItemRow,
+    OfficerRow,
     RunKind,
     RunLog,
     RunLogStep,
@@ -252,6 +253,47 @@ def officer_count_distribution(session: Session) -> dict[str, int]:
     return {key: counts[key] for key in order if key in counts}
 
 
+def status_options(session: Session) -> list[str]:
+    """Distinct Companies House legal statuses (e.g. "active", "dissolved") across the pool."""
+    statuses = session.exec(
+        select(Company.status).where(col(Company.status).is_not(None)).distinct()
+    ).all()
+    return sorted(statuses)
+
+
+_AGE_BINS = [(0, 30, "<30"), (30, 40, "30-39"), (40, 50, "40-49"), (50, 60, "50-59")]
+
+
+def officer_age_distribution(session: Session) -> dict[str, int]:
+    """Officer age (from `birth_year`), binned; `60+` and `Unknown` (no birth year) close the
+    list, matching the ordering convention in `officer_count_distribution`."""
+    this_year = date.today().year
+    counts: dict[str, int] = {}
+    for birth_year in session.exec(select(OfficerRow.birth_year)).all():
+        if birth_year is None:
+            key = "Unknown"
+        else:
+            age = this_year - birth_year
+            key = next((label for low, high, label in _AGE_BINS if low <= age < high), "60+")
+        counts[key] = counts.get(key, 0) + 1
+    order = [label for *_, label in _AGE_BINS] + ["60+", "Unknown"]
+    return {key: counts[key] for key in order if key in counts}
+
+
+def officer_nationality_counts(session: Session, top_n: int = 10) -> dict[str, int]:
+    """Top officer nationalities, grouping the long tail into "Other" (missing is "Unknown")."""
+    counts: dict[str, int] = {}
+    for nationality in session.exec(select(OfficerRow.nationality)).all():
+        key = nationality or "Unknown"
+        counts[key] = counts.get(key, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: -item[1])
+    top = dict(ranked[:top_n])
+    other = sum(count for _, count in ranked[top_n:])
+    if other:
+        top["Other"] = other
+    return top
+
+
 def locality_counts(session: Session, top_n: int = 12) -> dict[str, int]:
     """Top localities among enriched companies, grouping the long tail into "Other"."""
     counts: dict[str, int] = {}
@@ -274,6 +316,7 @@ def search_companies(
     min_score: int = 0,
     keyword: str | None = None,
     incorporated_from: date | None = None,
+    status: str | None = None,
     limit: int = 500,
 ) -> list[Company]:
     query = select(Company).where(Company.candidate_score >= min_score)
@@ -281,6 +324,8 @@ def search_companies(
         query = query.where(col(Company.name).icontains(text.strip(), autoescape=True))
     if incorporated_from is not None:
         query = query.where(col(Company.incorporated) >= incorporated_from)
+    if status:
+        query = query.where(Company.status == status)
     query = query.order_by(col(Company.candidate_score).desc(), col(Company.name))
     rows = session.exec(query).all()
     if keyword:
@@ -302,6 +347,16 @@ def company_funding_rounds(session: Session, company_id: int) -> list[FundingRou
             select(FundingRoundRow)
             .where(FundingRoundRow.company_id == company_id)
             .order_by(col(FundingRoundRow.announced).desc())
+        ).all()
+    )
+
+
+def company_officers(session: Session, company_id: int) -> list[OfficerRow]:
+    return list(
+        session.exec(
+            select(OfficerRow)
+            .where(OfficerRow.company_id == company_id)
+            .order_by(col(OfficerRow.role), col(OfficerRow.name))
         ).all()
     )
 
