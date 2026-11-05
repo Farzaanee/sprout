@@ -18,7 +18,7 @@ SRC = "https://example.com/funding-announcement"
 
 
 def test_taxonomy_matches_fixed_categories():
-    assert len(Category) == 19
+    assert len(Category) == 20
     assert [category.value for category in Category] == [
         "Fintech and payments",
         "Enterprise software and cloud",
@@ -38,6 +38,7 @@ def test_taxonomy_matches_fixed_categories():
         "Logistics and supply chain",
         "Deep tech and quantum",
         "Consultancy and services",
+        "Legal tech and compliance",
         "Other",
     ]
     assert Category.OTHER in Category

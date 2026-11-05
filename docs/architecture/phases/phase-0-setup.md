@@ -31,7 +31,7 @@ The taxonomy, stage enum, `Sourced[T]` and `CompanyProfile` are the contract eve
 
 All four reject unknown fields (`extra="forbid"`), so malformed model output fails validation instead of being silently accepted.
 
-### `Category` values (19, frozen)
+### `Category` values (20, frozen)
 
 | # | Category | | # | Category |
 |---|---|---|---|---|
@@ -43,8 +43,8 @@ All four reject unknown fields (`extra="forbid"`), so malformed model output fai
 | 6 | Cybersecurity | | 16 | Logistics and supply chain |
 | 7 | Biotech and pharma | | 17 | Deep tech and quantum |
 | 8 | Healthtech and digital health | | 18 | Consultancy and services |
-| 9 | Electric vehicles and batteries | | 19 | Other |
-| 10 | Climate, energy and cleantech | | | |
+| 9 | Electric vehicles and batteries | | 19 | Legal tech and compliance |
+| 10 | Climate, energy and cleantech | | 20 | Other |
 
 ### `CompanyProfile` fields
 

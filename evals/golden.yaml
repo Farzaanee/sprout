@@ -16,7 +16,10 @@ version: 1
 entries:
   - company_number: "10933652"
     name: Synthesia
-    category: Sales, marketing and customer experience software
+    category:
+      - Sales, marketing and customer experience software
+      - HR and people software
+    # Dual-fit: marketing videos, but also used for training videos (HR/people software).
     one_liner: AI video platform that turns text into presenter-led videos for training and marketing.
     one_liner_sources:
       - https://seedtable.com/companies/synthesia/funding-rounds/series-d-2025-01
@@ -49,7 +52,7 @@ entries:
     target_user: Enterprise teams making training and marketing video.
     target_user_sources:
       - https://seedtable.com/companies/synthesia/funding-rounds/series-d-2025-01
-    split: holdout
+    split: dev
     label:
       date: 2026-11-05
       verified: true
@@ -96,7 +99,7 @@ entries:
 
   - company_number: "09315523"
     name: Tractable
-    category: AI apps vision
+    category: Fintech and payments
     one_liner: Computer vision AI that assesses vehicle and property damage for insurance claims.
     one_liner_sources:
       - https://venturebeat.com/ai/tractable-raises-25-million-for-computer-vision-that-accelerates-insurance-claims
@@ -213,7 +216,12 @@ entries:
 
   - company_number: "10045407"
     name: Quantexa
-    category: Data, AI infrastructure and developer tools
+    category:
+      - Data, AI infrastructure and developer tools
+      - Fintech and payments
+      - Legal tech and compliance
+    # Multi-fit: decision-intelligence/data linking platform, heavily used for banks' financial
+    # crime work (fintech) and compliance investigations (legal tech and compliance).
     one_liner: "Decision intelligence software that links data to spot fraud, risk and opportunity in banks and governments."
     one_liner_sources:
       - https://pulse2.com/quantexa-175-million-series-f-raised-at-2-6-billion-valuation-for-decision-intelligence-solutions/amp/
@@ -253,7 +261,12 @@ entries:
 
   - company_number: "09307701"
     name: Peak AI
-    category: Enterprise software and cloud
+    category:
+      - Enterprise software and cloud
+      - E-commerce and retail tech
+      - Logistics and supply chain
+    # Multi-fit: decision intelligence for retailers and manufacturers spans retail, supply chain
+    # and general enterprise software.
     one_liner: "Decision intelligence software that helps retailers and manufacturers optimise pricing, demand and supply chains."
     one_liner_sources:
       - https://techcrunch.com/2025/03/13/uipath-is-looking-for-a-path-to-growth-in-agentic-ai-with-its-peak-ai-acquisition
@@ -282,14 +295,18 @@ entries:
     target_user: "Retail, manufacturing and supply chain firms (pricing and inventory decisions)."
     target_user_sources:
       - https://techcrunch.com/2025/03/13/uipath-is-looking-for-a-path-to-growth-in-agentic-ai-with-its-peak-ai-acquisition
-    split: holdout
+    split: dev
     label:
       date: 2026-11-05
       verified: true
 
   - company_number: "07474948"
     name: Matillion
-    category: Enterprise software and cloud
+    category:
+      - Enterprise software and cloud
+      - Data, AI infrastructure and developer tools
+    # Dual-fit: a cloud data integration/ETL platform for data warehouses, defensible as either
+    # enterprise software or AI infra/developer tooling. Either is scored as a match.
     one_liner: Cloud data integration platform that moves and transforms data in warehouses like Snowflake.
     one_liner_sources:
       - https://prnewswire.com/news-releases/matillion-raises-35-million-in-series-c-round-to-further-advance-its-leadership-in-data-transformation-in-the-cloud-300860010.html
@@ -322,7 +339,7 @@ entries:
     target_user: Data teams at enterprises using cloud data warehouses.
     target_user_sources:
       - https://prnewswire.com/news-releases/matillion-raises-35-million-in-series-c-round-to-further-advance-its-leadership-in-data-transformation-in-the-cloud-300860010.html
-    split: dev
+    split: holdout
     label:
       date: 2026-11-05
       verified: true
@@ -558,7 +575,7 @@ entries:
     target_user: "Pharma and life science companies, hospitals and governments."
     target_user_sources:
       - https://www.clay.com/dossier/huma-funding
-    split: dev
+    split: holdout
     label:
       date: 2026-11-05
       verified: true
@@ -567,7 +584,11 @@ entries:
 
   - company_number: "10163800"
     name: Satellite Vu
-    category: "Defense, aerospace and space"
+    category:
+      - "Defense, aerospace and space"
+      - Climate, energy and cleantech
+    # Dual-fit: thermal infrared imagery serves both defence/security and climate/energy
+    # monitoring use cases.
     one_liner: Plans a constellation of satellites that capture thermal infrared imagery of buildings and infrastructure.
     one_liner_sources:
       - https://parsers.vc/news/260223-satvu-secures-30m-for-thermal-intelligence/
@@ -638,7 +659,7 @@ entries:
     target_user: AI developers and operators buying accelerator chips.
     target_user_sources:
       - https://funding.tech.eu/companies/9BFCF4DF-B5B9-4102-AE4D-EA02156AB6CB
-    split: holdout
+    split: dev
     label:
       date: 2026-11-05
       verified: true
@@ -767,7 +788,12 @@ entries:
 
   - company_number: "08813912"
     name: Ocado Technology
-    category: Robotics and automation
+    category:
+      - Robotics and automation
+      - E-commerce and retail tech
+      - Logistics and supply chain
+    # Multi-fit: robotic warehouse technology for online grocery spans robotics, retail and
+    # supply chain.
     one_liner: "Ocado Group's technology arm, building robotic warehouse and online grocery platforms for retailers."
     one_liner_sources:
       - https://www.wealthmanagement.com/wealth-management-industry-trends/ocado-seeks-704-million-from-share-placing-to-fund-expansion
@@ -841,7 +867,11 @@ entries:
 
   - company_number: "08873131"
     name: Faculty
-    category: Consultancy and services
+    category:
+      - Consultancy and services
+      - Enterprise software and cloud
+    # Dual-fit: builds custom AI systems for clients (consultancy) and also sells its own
+    # Frontier decision intelligence software (enterprise software).
     one_liner: "AI consultancy and software firm helping organisations build and deploy AI, now part of Accenture."
     one_liner_sources:
       - https://www.marcamoney.com/accenture-to-acquire-uk-based-ai-firm-faculty/
@@ -874,7 +904,7 @@ entries:
     target_user: "Enterprises and public sector bodies adopting AI (Frontier decision intelligence)."
     target_user_sources:
       - https://www.marcamoney.com/accenture-to-acquire-uk-based-ai-firm-faculty/
-    split: holdout
+    split: dev
     label:
       date: 2026-11-05
       verified: true
@@ -884,7 +914,11 @@ entries:
 
   - company_number: "09742902"
     name: Adarga
-    category: AI apps text
+    category: 
+      - "Enterprise software and cloud"
+      - "Defense, aerospace and space"
+    # Dual-fit: text-analysis AI, but its customers are defence, national security and
+    # intelligence.
     one_liner: AI software that analyses large volumes of text for defence and security intelligence.
     one_liner_sources:
       - https://www.businesswire.com/news/home/20230518005092/en
@@ -1020,7 +1054,7 @@ entries:
     target_user: UK-based AI professionals and researchers (UK-China collaboration).
     target_user_sources:
       - https://londontechweek.com/exhibitor-list/china-britain-artificial-intelligence-association
-    split: dev
+    split: holdout
     label:
       date: 2026-11-05
       verified: true

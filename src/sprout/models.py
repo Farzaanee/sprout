@@ -30,6 +30,7 @@ class Category(StrEnum):
     LOGISTICS_AND_SUPPLY_CHAIN = "Logistics and supply chain"
     DEEP_TECH_AND_QUANTUM = "Deep tech and quantum"
     CONSULTANCY_AND_SERVICES = "Consultancy and services"
+    LEGAL_TECH_AND_COMPLIANCE = "Legal tech and compliance"
     OTHER = "Other"
 
 
