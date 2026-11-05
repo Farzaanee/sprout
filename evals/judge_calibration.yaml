@@ -1,0 +1,77 @@
+version: 1
+# About 12 hand-graded (reference, candidate, verdict) triples for calibrating evals/judge.py.
+# Drafted by the implementer from evals/golden.yaml references (never from pipeline output).
+# verdict is a placeholder guess (correct | partial | incorrect): the user confirms or corrects
+# each one before --calibrate is trusted.
+pairs:
+  - company: Synthesia
+    field: business_model
+    reference: "Subscription SaaS with credit-based usage: Basic free (500 credits/mo), Starter $19/mo, Pro $89/mo, custom-priced Enterprise via sales demo."
+    candidate: "Synthesia runs a tiered subscription model: a free credit-based plan, paid Starter and Pro tiers, and custom Enterprise pricing sold via sales."
+    verdict: correct
+
+  - company: Synthesia
+    field: business_model
+    reference: "Subscription SaaS with credit-based usage: Basic free (500 credits/mo), Starter $19/mo, Pro $89/mo, custom-priced Enterprise via sales demo."
+    candidate: "Freemium SaaS, credits-based."
+    verdict: correct  # terse-but-right
+
+  - company: PolyAI
+    field: target_user
+    reference: "Enterprise customer service and contact centre teams."
+    candidate: "PolyAI mainly serves retail and e-commerce companies, helping them build AI-driven product recommendation engines for online shoppers."
+    verdict: incorrect  # fluent-but-wrong: confident, detailed, and off-target
+
+  - company: Tractable
+    field: target_user
+    reference: "Insurers (e.g. Ageas, Covea, Tokio Marine, Talanx-Warta) assessing vehicle and property damage."
+    candidate: "Large insurance companies."
+    verdict: partial  # right category, drops what they use it for
+
+  - company: Speechmatics
+    field: business_model
+    reference: "Usage-based prepaid credits metered per second (STT) or per 1,000 characters (TTS); $100 free credit; Enterprise adds on-prem/hybrid/on-device via sales."
+    candidate: "Speechmatics charges a flat annual enterprise licence fee, with no usage-based or metered pricing component."
+    verdict: incorrect  # contradicts the metered/usage-based structure
+
+  - company: Cleo AI
+    field: business_model
+    reference: "Monthly subscriptions (Plus $5.99, Pro $8.99, Builder $14.99) plus express fees of $3.99-$14.99 on same-day cash advances; advances available without a subscription."
+    candidate: "Tiered monthly subscriptions, plus separate express fees for same-day cash advances that don't require a subscription."
+    verdict: correct
+
+  - company: Quantexa
+    field: target_user
+    reference: "Public and private sector organisations (decision intelligence, e.g. financial crime)."
+    candidate: "Public and private sector organisations."
+    verdict: correct  # terse-but-right
+
+  - company: Peak AI
+    field: business_model
+    reference: "Subscription cloud AI platform in three editions (Essentials, Business, Enterprise) scaling by data feeds, workflows, API calls and apps; prices not published, sold via demo."
+    candidate: "Subscription SaaS platform for retail businesses, sold via demo."
+    verdict: partial  # drops the tiered editions and the manufacturing/supply-chain reach
+
+  - company: Matillion
+    field: business_model
+    reference: "Consumption-based credits paid for completed pipeline-task hours, bought in fixed annual packages across Developer, Teams and Scale plans."
+    candidate: "Matillion charges a flat monthly SaaS fee regardless of usage, with no consumption-based component."
+    verdict: incorrect  # fluent-but-wrong: directly contradicts the consumption-based pricing
+
+  - company: Darktrace
+    field: target_user
+    reference: "Enterprise security teams."
+    candidate: "Enterprise cybersecurity and security operations teams."
+    verdict: correct
+
+  - company: BenevolentAI
+    field: business_model
+    reference: "Collaboration revenue: the AstraZeneca deal generated about GBP 32M since 2019, with milestone and tiered-royalty eligibility; Merck KGaA collaboration expected to bring development milestone revenue."
+    candidate: "BenevolentAI sells a subscription drug-discovery software product directly to hospitals and biopharma companies."
+    verdict: incorrect  # contradicts the milestone/royalty pharma-collaboration model
+
+  - company: Riverlane
+    field: target_user
+    reference: "Quantum computer makers and governments."
+    candidate: "Quantum computer makers."
+    verdict: partial  # core audience right, drops governments
