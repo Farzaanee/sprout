@@ -1,0 +1,1148 @@
+version: 1
+# 32 entries: 24 genuine AI startups plus 8 deliberately chosen Other/non-startup names
+# (shell companies, dormant companies, membership associations, name-collision risks) drawn
+# from the candidate pool's top-scoring but miscategorised results.
+#
+# One field per source-sheet column, each with its own *_sources list (no bundled source list):
+#   - one_liner / one_liner_sources            reference only, not scored
+#   - status / status_sources                  reference only, not scored today (BusinessStatus)
+#   - stage_sources                            backs the top-level `stage`
+#   - last_round (incl. its own sources)       scored (funding metrics)
+#   - total_raised / valuation (incl. sources) reference only, not scored unless metrics.py is
+#                                               extended to read them
+#   - business_model / business_model_sources  reference for the judge
+#   - target_user / target_user_sources        reference for the judge
+# This matches the schema in phase-4-evals-guardrails.md; golden.py does not exist yet.
+entries:
+  - company_number: "10933652"
+    name: Synthesia
+    category: Sales, marketing and customer experience software
+    one_liner: AI video platform that turns text into presenter-led videos for training and marketing.
+    one_liner_sources:
+      - https://seedtable.com/companies/synthesia/funding-rounds/series-d-2025-01
+    status: Active
+    status_sources:
+      - https://multiples.vc/private-comps/synthesia
+    stage: Series E
+    stage_sources:
+      - https://multiples.vc/private-comps/synthesia
+    last_round:
+      stage: Series E
+      amount_million_usd: 200
+      announced: null  # seedtable URL slug suggests Jan 2025 but source text does not confirm an exact date
+      note: "$200M Series E per multiples.vc; exact announcement date not confirmed in source text."
+      sources:
+        - https://multiples.vc/private-comps/synthesia
+    total_raised:
+      amount_million_usd: 537
+      note: "~$537M"
+      sources:
+        - https://multiples.vc/private-comps/synthesia
+    valuation:
+      amount_million_usd: 4000
+      note: "$4B (Jan 2026, post-money)"
+      sources:
+        - https://multiples.vc/private-comps/synthesia
+    business_model: "Subscription SaaS with credit-based usage: Basic free (500 credits/mo), Starter $19/mo, Pro $89/mo, custom-priced Enterprise via sales demo."
+    business_model_sources:
+      - https://www.synthesia.io/pricing
+    target_user: Enterprise teams making training and marketing video.
+    target_user_sources:
+      - https://seedtable.com/companies/synthesia/funding-rounds/series-d-2025-01
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "11048129"
+    name: PolyAI
+    category: Sales, marketing and customer experience software
+    one_liner: Builds voice AI assistants that handle customer service calls for enterprises.
+    one_liner_sources:
+      - https://poly.ai/blog/polyai-raises-86m-to-transform-how-enterprises-talk-to-their-customers
+    status: Active
+    status_sources:
+      - https://poly.ai/blog/polyai-raises-86m-to-transform-how-enterprises-talk-to-their-customers
+    stage: Series D
+    stage_sources:
+      - https://poly.ai/blog/polyai-raises-86m-to-transform-how-enterprises-talk-to-their-customers
+    last_round:
+      stage: Series D
+      amount_million_usd: 86
+      announced: null
+      note: "$86M Series D per PolyAI's own announcement; exact date not stated in source text."
+      sources:
+        - https://poly.ai/blog/polyai-raises-86m-to-transform-how-enterprises-talk-to-their-customers
+    total_raised:
+      amount_million_usd: 200
+      note: "Over $200M"
+      sources:
+        - https://poly.ai/blog/polyai-raises-86m-to-transform-how-enterprises-talk-to-their-customers
+    valuation:
+      amount_million_usd: 750
+      note: "$750M (Dec 2025, reported)"
+      sources:
+        - https://siliconangle.com/?p=725194
+    business_model: "Billed per minute of voice-agent use; the Platform API is 2 cents per connected minute plus text tokens; larger deployments by custom quote."
+    business_model_sources:
+      - https://poly.ai/pricing
+    target_user: Enterprise customer service and contact centre teams.
+    target_user_sources:
+      - https://poly.ai/blog/polyai-raises-86m-to-transform-how-enterprises-talk-to-their-customers
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "09315523"
+    name: Tractable
+    category: AI apps vision
+    one_liner: Computer vision AI that assesses vehicle and property damage for insurance claims.
+    one_liner_sources:
+      - https://venturebeat.com/ai/tractable-raises-25-million-for-computer-vision-that-accelerates-insurance-claims
+    status: Active
+    status_sources:
+      - https://siliconangle.com/?p=623817
+    stage: Series E
+    stage_sources:
+      - https://siliconangle.com/?p=623817
+    last_round:
+      stage: Series E
+      amount_million_usd: 65
+      announced: null
+      note: "$65M Series E per SiliconANGLE; the prior $1B valuation was set at the Series D in Jun 2021 and has not been publicly updated since."
+      sources:
+        - https://siliconangle.com/?p=623817
+        - https://collisionweek.com/2021/06/18/tractable-raises-60-million/
+    total_raised:
+      amount_million_usd: 185
+      note: "$184.9M"
+      sources:
+        - https://siliconangle.com/?p=623817
+    valuation:
+      amount_million_usd: 1000
+      note: "$1B (Series D, Jun 2021); not disclosed since"
+      sources:
+        - https://collisionweek.com/2021/06/18/tractable-raises-60-million/
+    business_model: "Enterprise licensing: per-claim or annual licence fees, volume-based and negotiated; prices not published."
+    business_model_sources:
+      - https://digitalbydefault.ai/blog/tractable-ai-claims-review-2026
+    target_user: "Insurers (e.g. Ageas, Covea, Tokio Marine, Talanx-Warta) assessing vehicle and property damage."
+    target_user_sources:
+      - https://venturebeat.com/ai/tractable-raises-25-million-for-computer-vision-that-accelerates-insurance-claims
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "07037524"
+    name: Speechmatics
+    category: Data, AI infrastructure and developer tools
+    one_liner: Speech recognition and voice AI APIs that transcribe and understand many languages and accents.
+    one_liner_sources:
+      - https://www.speechmatics.com
+    status: Active
+    status_sources:
+      - https://voicebot.ai/?p=26118
+    stage: Series B
+    stage_sources:
+      - https://voicebot.ai/?p=26118
+    last_round:
+      stage: Series B
+      amount_million_usd: 62
+      announced: null
+      note: "$62M Series B per Voicebot.ai; no valuation disclosed."
+      sources:
+        - https://voicebot.ai/?p=26118
+    total_raised:
+      amount_million_usd: 70
+      note: "~$70M"
+      sources:
+        - https://www.startuphub.ai/startups/speechmatics
+    valuation: null  # not public, no source given
+    business_model: "Usage-based prepaid credits metered per second (STT) or per 1,000 characters (TTS); $100 free credit; Enterprise adds on-prem/hybrid/on-device via sales."
+    business_model_sources:
+      - https://www.speechmatics.com/pricing
+    target_user: "Healthcare, voice agents, legal transcription, contact centres, media/captioning, speech analytics, meeting assistants and EdTech."
+    target_user_sources:
+      - https://www.speechmatics.com
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "09864205"
+    name: Cleo AI
+    category: Fintech and payments
+    one_liner: "Consumer AI money app offering budgeting, chat-based coaching and cash advances."
+    one_liner_sources:
+      - https://www.finextra.com/newsarticle/40500/cleo-raises-80m-for-money-management-bot
+    status: Active
+    status_sources:
+      - https://www.finextra.com/newsarticle/40500/cleo-raises-80m-for-money-management-bot
+    stage: Series C
+    stage_sources:
+      - https://www.finextra.com/newsarticle/40500/cleo-raises-80m-for-money-management-bot
+    last_round:
+      stage: Series C
+      amount_million_usd: 80
+      announced: 2022-06-01
+      note: "$80M Series C announced Jun 2022 per Finextra; day of month not stated."
+      sources:
+        - https://www.finextra.com/newsarticle/40500/cleo-raises-80m-for-money-management-bot
+    total_raised:
+      amount_million_usd: 137
+      note: "~$137M"
+      sources:
+        - https://www.zoominfo.com/financial/cleo/412960705
+    valuation:
+      amount_million_usd: 500
+      note: "$500M (Jun 2022)"
+      sources:
+        - https://www.finextra.com/newsarticle/40500/cleo-raises-80m-for-money-management-bot
+    business_model: "Monthly subscriptions (Plus $5.99, Pro $8.99, Builder $14.99) plus express fees of $3.99-$14.99 on same-day cash advances; advances available without a subscription."
+    business_model_sources:
+      - https://web.meetcleo.com/pricing
+    target_user: Consumers (AI personal finance app).
+    target_user_sources:
+      - https://www.finextra.com/newsarticle/40500/cleo-raises-80m-for-money-management-bot
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "10045407"
+    name: Quantexa
+    category: Data, AI infrastructure and developer tools
+    one_liner: "Decision intelligence software that links data to spot fraud, risk and opportunity in banks and governments."
+    one_liner_sources:
+      - https://pulse2.com/quantexa-175-million-series-f-raised-at-2-6-billion-valuation-for-decision-intelligence-solutions/amp/
+    status: Active
+    status_sources:
+      - https://www.fintechfutures.com/venture-capital-funding/quantexa-lands-175m-series-f-round-valuation-rises-to-2-6bn
+    stage: Series F
+    stage_sources:
+      - https://www.fintechfutures.com/venture-capital-funding/quantexa-lands-175m-series-f-round-valuation-rises-to-2-6bn
+    last_round:
+      stage: Series F
+      amount_million_usd: 175
+      announced: 2025-03-01
+      note: "$175M Series F; valuation $2.6B set Mar 2025 per FinTech Futures."
+      sources:
+        - https://www.fintechfutures.com/venture-capital-funding/quantexa-lands-175m-series-f-round-valuation-rises-to-2-6bn
+    total_raised:
+      amount_million_usd: 545
+      note: "~$545M"
+      sources:
+        - https://seedtable.com/companies/quantexa/funding-rounds
+    valuation:
+      amount_million_usd: 2600
+      note: "$2.6B (Mar 2025)"
+      sources:
+        - https://www.fintechfutures.com/venture-capital-funding/quantexa-lands-175m-series-f-round-valuation-rises-to-2-6bn
+    business_model: "Enterprise software licences; revenue growth attributed to new customers plus licence expansion within existing ones."
+    business_model_sources:
+      - https://tech.eu/2026/01/08/ai-unicorn-quantexa-reports-revenue-boost-as-losses-halve/
+    target_user: "Public and private sector organisations (decision intelligence, e.g. financial crime)."
+    target_user_sources:
+      - https://pulse2.com/quantexa-175-million-series-f-raised-at-2-6-billion-valuation-for-decision-intelligence-solutions/amp/
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "09307701"
+    name: Peak AI
+    category: Enterprise software and cloud
+    one_liner: "Decision intelligence software that helps retailers and manufacturers optimise pricing, demand and supply chains."
+    one_liner_sources:
+      - https://techcrunch.com/2025/03/13/uipath-is-looking-for-a-path-to-growth-in-agentic-ai-with-its-peak-ai-acquisition
+    status: Acquired or merged
+    status_sources:
+      - https://techcrunch.com/2025/03/13/uipath-is-looking-for-a-path-to-growth-in-agentic-ai-with-its-peak-ai-acquisition
+    stage: Series C
+    stage_sources:
+      - https://businesscloud.co.uk/?p=163591
+    last_round:
+      stage: Series C
+      amount_million_usd: 75
+      announced: 2021-08-01
+      note: "$75M Series C announced Aug 2021; Peak AI was acquired by UiPath in Mar 2025 (acquisition price undisclosed), so this round is its last as an independent company."
+      sources:
+        - https://businesscloud.co.uk/?p=163591
+    total_raised:
+      amount_million_usd: 119
+      note: "~$119M"
+      sources:
+        - https://businesscloud.co.uk/?p=163591
+    valuation: null  # not public (acquisition price undisclosed)
+    business_model: "Subscription cloud AI platform in three editions (Essentials, Business, Enterprise) scaling by data feeds, workflows, API calls and apps; prices not published, sold via demo."
+    business_model_sources:
+      - https://peak.ai/pricing/
+    target_user: "Retail, manufacturing and supply chain firms (pricing and inventory decisions)."
+    target_user_sources:
+      - https://techcrunch.com/2025/03/13/uipath-is-looking-for-a-path-to-growth-in-agentic-ai-with-its-peak-ai-acquisition
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "07474948"
+    name: Matillion
+    category: Enterprise software and cloud
+    one_liner: Cloud data integration platform that moves and transforms data in warehouses like Snowflake.
+    one_liner_sources:
+      - https://prnewswire.com/news-releases/matillion-raises-35-million-in-series-c-round-to-further-advance-its-leadership-in-data-transformation-in-the-cloud-300860010.html
+    status: Active
+    status_sources:
+      - https://siliconangle.com/?p=557910
+    stage: Series E
+    stage_sources:
+      - https://siliconangle.com/?p=557910
+    last_round:
+      stage: Series E
+      amount_million_usd: 150
+      announced: 2021-09-01
+      note: "$150M Series E announced Sep 2021 at a $1.5B valuation per SiliconANGLE."
+      sources:
+        - https://siliconangle.com/?p=557910
+    total_raised:
+      amount_million_usd: 310
+      note: "$310M"
+      sources:
+        - https://siliconangle.com/?p=557910
+    valuation:
+      amount_million_usd: 1500
+      note: "$1.5B (Sep 2021)"
+      sources:
+        - https://siliconangle.com/?p=557910
+    business_model: "Consumption-based credits paid for completed pipeline-task hours, bought in fixed annual packages across Developer, Teams and Scale plans."
+    business_model_sources:
+      - https://www.matillion.com/pricing
+    target_user: Data teams at enterprises using cloud data warehouses.
+    target_user_sources:
+      - https://prnewswire.com/news-releases/matillion-raises-35-million-in-series-c-round-to-further-advance-its-leadership-in-data-transformation-in-the-cloud-300860010.html
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "10998363"
+    name: Builder.ai
+    category: Enterprise software and cloud
+    one_liner: "Platform for building custom apps with AI assistance and developer teams; went insolvent in 2025."
+    one_liner_sources:
+      - https://techcrunch.com/?p=3009406
+    status: Closed
+    status_sources:
+      - https://techcrunch.com/2025/05/20/once-worth-over-1b-microsoft-backed-builder-ai-is-running-out-of-money
+    stage: Series D
+    stage_sources:
+      - https://inc42.com/?p=399773
+    last_round:
+      stage: Series D
+      amount_million_usd: 250
+      announced: 2023-05-01
+      note: "$250M Series D announced May 2023 per Inc42; company became insolvent in May 2025."
+      sources:
+        - https://inc42.com/?p=399773
+    total_raised:
+      amount_million_usd: 450
+      note: "Over $450M"
+      sources:
+        - https://techcrunch.com/?p=3009406
+    valuation:
+      amount_million_usd: null
+      note: "not public (once reported above $1B; now insolvent)"
+      sources:
+        - https://techcrunch.com/?p=3009406
+    business_model: "No published price list: cost depends on chosen features, OS and delivery timeline; payments can be weekly or monthly; hosting/support/subscription/enterprise mentioned without figures."
+    business_model_sources:
+      - https://builder.ai/pricing
+    target_user: Businesses and founders building custom apps with little or no coding.
+    target_user_sources:
+      - https://techcrunch.com/?p=3009406
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Registered at Companies House as ENGINEER.AI GLOBAL LIMITED (10998363), status: liquidation.
+    # Builder.ai was Engineer.ai's rebrand; the name search for "Builder.ai Limited" only turns up
+    # an unrelated dissolved shell (BUILDERAID LTD, 11902363) and must not be confused with it.
+
+  - company_number: "13264637"
+    name: Darktrace
+    category: Cybersecurity
+    one_liner: Cybersecurity company using self-learning AI to detect and respond to network threats.
+    one_liner_sources:
+      - https://siliconangle.com/?p=653764
+    status: Acquired or merged
+    status_sources:
+      - https://adsgroup.org.uk/knowledge/industry-member-news/darktrace-formally-completes-its-acquisition-by-thoma-bravo
+    stage: Unknown
+    stage_sources:
+      - https://adsgroup.org.uk/knowledge/industry-member-news/darktrace-formally-completes-its-acquisition-by-thoma-bravo
+    last_round: null
+    total_raised: null  # n/a (public company until 2024)
+    valuation:
+      amount_million_usd: 5300
+      note: "$5.3B (Thoma Bravo acquisition price)"
+      sources:
+        - https://www.bankinfosecurity.com/thoma-bravo-to-buy-cybersecurity-ai-firm-darktrace-for-53b-a-24950
+    business_model: "Over 99% of revenue from recurring subscription contracts averaging 33 months, sold through direct sales staff and reseller partners (FY2022 results)."
+    business_model_sources:
+      - https://ir.darktrace.com/regulatory-news/2022/9/8/1622704
+    target_user: Enterprise security teams.
+    target_user_sources:
+      - https://siliconangle.com/?p=653764
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+    # The only dated capital figure in the source set is the $199.4M raised at Darktrace's Apr 2021
+    # LSE IPO (https://www.bankinfosecurity.com/thoma-bravo-darktrace-ax-deal-over-disagreement-on-terms-a-20025),
+    # which is not a private funding round and has no Stage enum equivalent; the company's last true
+    # VC round predates this review's sources. Left last_round Unknown/null rather than mislabelled.
+    # Delisted and acquired by Thoma Bravo for $5.3B, completed Oct 2024. Company number is for the
+    # current operating entity (Darktrace Limited, incorporated 2021); the pre-2021 holding company
+    # was Darktrace Holdings Limited (08562035).
+
+  - company_number: "SC428761"
+    name: BenevolentAI
+    category: Biotech and pharma
+    one_liner: AI-driven drug discovery company that finds and develops new medicines with pharma partners.
+    one_liner_sources:
+      - https://yespress.io/benevolentai.md
+    status: Active
+    status_sources:
+      - https://www.businesswire.com/news/home/20250312584164/en
+    stage: Unknown
+    stage_sources:
+      - https://www.businesswire.com/news/home/20250312584164/en
+    last_round: null
+    total_raised:
+      amount_million_usd: 378
+      note: "~$378M"
+      sources:
+        - https://intuitionlabs.ai/companies/biotech/benevolentai
+    valuation: null  # not public
+    business_model: "Collaboration revenue: the AstraZeneca deal generated about GBP 32M since 2019, with milestone and tiered-royalty eligibility; Merck KGaA collaboration expected to bring development milestone revenue."
+    business_model_sources:
+      - https://www.benevolent.com/news-and-media/press-releases-and-in-media/interim-results-six-months-ended-30-june-2024/
+    target_user: "Biopharma R&D teams and pharma partners (e.g. AstraZeneca, Merck KGaA)."
+    target_user_sources:
+      - https://yespress.io/benevolentai.md
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # No new funding round found; delisted from Euronext Amsterdam Mar 2025. Left last_round null
+    # rather than treating cumulative total-raised (~$378M) as a round.
+
+  - company_number: "13483814"
+    name: Exscientia
+    category: Biotech and pharma
+    one_liner: "AI drug design company, now part of Recursion, that designs candidate drugs faster."
+    one_liner_sources:
+      - https://siliconcanals.com/?p=52654
+    status: Acquired or merged
+    status_sources:
+      - https://seedtable.com/exits/exscientia
+    stage: Series D
+    stage_sources:
+      - https://seedtable.com/exits/exscientia
+    last_round:
+      stage: Series D
+      amount_million_usd: 225
+      announced: 2021-04-01
+      note: "$225M Series D announced Apr 2021 per Seedtable's exits page; acquired by Recursion in an all-stock deal reported at ~$688M, completed Nov 2024 per SEC filing."
+      sources:
+        - https://seedtable.com/exits/exscientia
+    total_raised:
+      amount_million_usd: 710
+      note: "$710M, flagged by the drafter as not independently re-verified"
+      sources: []
+    valuation:
+      amount_million_usd: 688
+      note: "~$688M (reported all-stock deal value, Aug 2024)"
+      sources:
+        - https://www.sec.gov/Archives/edgar/data/1865408/000094787124000666/ss3728016_ex9905.htm
+    business_model: "Pharma collaborations (Sanofi, Merck KGaA, BMS) paid through milestones and royalties; now part of Recursion."
+    business_model_sources:
+      - https://www.sec.gov/Archives/edgar/data/1865408/000094787124000666/ss3728016_ex9905.htm
+    target_user: Pharma R&D teams and large pharma partners.
+    target_user_sources:
+      - https://siliconcanals.com/?p=52654
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Two UK entities named Exscientia exist: EXSCIENTIA AI LIMITED (SC428761, Scottish, incorporated
+    # 2012, matches the Dundee founding) and EXSCIENTIA LIMITED (13483814, English, incorporated 2021,
+    # likely a holding entity set up around the US listing). Used the 2012 entity as the operating
+    # company; flag for the user to confirm which CH number the pipeline should resolve to.
+
+  - company_number: "09229684"
+    name: Babylon Health
+    category: Healthtech and digital health
+    one_liner: "Digital-first healthcare provider offering app-based GP consultations and AI triage; collapsed in 2023."
+    one_liner_sources:
+      - https://coverager.com/?p=180886
+    status: Closed
+    status_sources:
+      - https://en.wikipedia.org/wiki/Babylon_Health
+    stage: Series C
+    stage_sources:
+      - https://en.wikipedia.org/wiki/Babylon_Health
+    last_round:
+      stage: Series C
+      amount_million_usd: 550
+      announced: 2019-08-01
+      note: "$550M Series C announced Aug 2019 per Wikipedia; UK arm went into administration Sep 2023."
+      sources:
+        - https://en.wikipedia.org/wiki/Babylon_Health
+    total_raised:
+      amount_million_usd: 1000
+      note: "Over $1B (equity and debt)"
+      sources:
+        - https://coverager.com/?p=180886
+    valuation:
+      amount_million_usd: null
+      note: "not public (peaked near $4.2B at 2021 SPAC listing)"
+      sources:
+        - https://thenationalnews.com/world/uk-news/2023/08/31/online-healthcare-company-babylon-places-two-units-into-administration
+    business_model: "Subscriptions to private healthcare sold directly, pay-as-you-go, or through insurers such as Bupa, plus partnerships; NHS and US contract terms not confirmed by source."
+    business_model_sources:
+      - https://en.wikipedia.org/wiki/Babylon_Health
+    target_user: Patients using NHS and private GP services.
+    target_user_sources:
+      - https://coverager.com/?p=180886
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "07725451"
+    name: Huma
+    category: Healthtech and digital health
+    one_liner: Digital health platform for remote patient monitoring and decentralised clinical trials.
+    one_liner_sources:
+      - https://www.clay.com/dossier/huma-funding
+    status: Active
+    status_sources:
+      - https://hospitalmanagement.net/newsletters/huma-series-d-funding
+    stage: Series D
+    stage_sources:
+      - https://hospitalmanagement.net/newsletters/huma-series-d-funding
+    last_round:
+      stage: Series D
+      amount_million_usd: 80
+      announced: 2024-07-01
+      note: "$80M Series D announced Jul 2024 at a valuation nearing $1B per BNN Bloomberg."
+      sources:
+        - https://hospitalmanagement.net/newsletters/huma-series-d-funding
+        - https://www.bnnbloomberg.ca/business/technology/2024/07/16/health-ai-startup-huma-gets-80-million-at-near-1-billion-value/
+    total_raised:
+      amount_million_usd: 300
+      note: "Over $300M"
+      sources:
+        - https://hospitalmanagement.net/newsletters/huma-series-d-funding
+    valuation:
+      amount_million_usd: 1000
+      note: "Nearly $1B (Jul 2024)"
+      sources:
+        - https://www.bnnbloomberg.ca/business/technology/2024/07/16/health-ai-startup-huma-gets-80-million-at-near-1-billion-value/
+    business_model: "Not confirmed by source; builds digital health apps and a cloud platform, often with pharma partners."
+    business_model_sources:
+      - https://pharmaphorum.com/news/huma-raises-80m-launches-shopify-digital-health
+    target_user: "Pharma and life science companies, hospitals and governments."
+    target_user_sources:
+      - https://www.clay.com/dossier/huma-funding
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Originally incorporated as Medopad Limited, renamed Huma Therapeutics Limited (07725451, 2011).
+    # A name search for "Huma" alone surfaces several unrelated shells; do not confuse with those.
+
+  - company_number: "10163800"
+    name: Satellite Vu
+    category: "Defense, aerospace and space"
+    one_liner: Plans a constellation of satellites that capture thermal infrared imagery of buildings and infrastructure.
+    one_liner_sources:
+      - https://parsers.vc/news/260223-satvu-secures-30m-for-thermal-intelligence/
+    status: Active
+    status_sources:
+      - https://europeanspaceflight.com/earth-observation-data-provider-satvu-closes-30-million-funding-round/
+    stage: Unknown
+    stage_sources:
+      - https://europeanspaceflight.com/earth-observation-data-provider-satvu-closes-30-million-funding-round/
+    last_round:
+      stage: Unknown
+      amount_million_usd: 41
+      announced: 2026-02-01
+      note: "GBP 30M (~$41M) equity round announced Feb 2026 per European Spaceflight; the funding stage/series was not stated in the announcement, so Unknown is used even though a round is public."
+      sources:
+        - https://europeanspaceflight.com/earth-observation-data-provider-satvu-closes-30-million-funding-round/
+    total_raised:
+      amount_million_usd: 82
+      note: "GBP 60M equity (~$82M)"
+      sources:
+        - https://europeanspaceflight.com/earth-observation-data-provider-satvu-closes-30-million-funding-round/
+    valuation: null  # not public
+    business_model: "Catalogue imagery sold per image with the price shown before ordering, plus tasking for new captures; ordering starts through sales."
+    business_model_sources:
+      - https://www.satellitevu.com/products/catalog
+    target_user: "Allied governments and defence, plus commercial earth observation users."
+    target_user_sources:
+      - https://parsers.vc/news/260223-satvu-secures-30m-for-thermal-intelligence/
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Registered at Companies House as GLOBAL SATELLITE VU LTD (10163800); no plain "Satellite Vu Ltd"
+    # entity found.
+
+  - company_number: "10185006"
+    name: Graphcore
+    category: Semiconductors and AI hardware
+    one_liner: "Designer of AI processors (IPUs) for machine learning workloads, now owned by SoftBank."
+    one_liner_sources:
+      - https://funding.tech.eu/companies/9BFCF4DF-B5B9-4102-AE4D-EA02156AB6CB
+    status: Acquired or merged
+    status_sources:
+      - https://seedtable.com/companies/graphcore/funding-rounds/series-e-2026-05
+    stage: Growth
+    stage_sources:
+      - https://seedtable.com/companies/graphcore/funding-rounds/series-e-2026-05
+    last_round:
+      stage: Growth
+      amount_million_usd: 450
+      announced: 2026-05-01
+      note: "~$450M SoftBank capital injection, May 2026, following SoftBank's Jul 2024 acquisition of Graphcore."
+      sources:
+        - https://seedtable.com/companies/graphcore/funding-rounds/series-e-2026-05
+    total_raised:
+      amount_million_usd: 682
+      note: "~$682M before acquisition"
+      sources:
+        - https://www.cbinsights.com/company/graphcore/financials
+    valuation:
+      amount_million_usd: 2800
+      note: "$2.8B (last private valuation, 2020); acquired for a reported ~$400M+"
+      sources:
+        - https://www.globalsmt.net/world-news/ai-chip-startup-graphcore-acquired-by-softbank/
+    business_model: "IPU products bought through authorised cloud providers; pricing and purchase details on request via a contact form. Now a SoftBank subsidiary."
+    business_model_sources:
+      - https://www.graphcore.ai/contact-cloud-provider
+    target_user: AI developers and operators buying accelerator chips.
+    target_user_sources:
+      - https://funding.tech.eu/companies/9BFCF4DF-B5B9-4102-AE4D-EA02156AB6CB
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "10924127"
+    name: Wayve Technologies
+    category: Robotics and automation
+    one_liner: Develops end-to-end AI driving software for automakers and robotaxi fleets.
+    one_liner_sources:
+      - https://ai2.work/blog/wayve-s-1-5b-series-d-and-the-oem-licensing-revolution-in-autonomous-ai
+    status: Active
+    status_sources:
+      - https://www.zawya.com/en/business/investment/uk-self-driving-startup-wayve-raises-12bln-from-investors-including-mercedes-stellantis-yu8kwpcv
+    stage: Series D
+    stage_sources:
+      - https://www.zawya.com/en/business/investment/uk-self-driving-startup-wayve-raises-12bln-from-investors-including-mercedes-stellantis-yu8kwpcv
+    last_round:
+      stage: Series D
+      amount_million_usd: 1200
+      announced: 2026-02-01
+      note: "$1.2B Series D (up to $1.5B including Uber milestone funding) announced Feb 2026 per Zawya."
+      sources:
+        - https://www.zawya.com/en/business/investment/uk-self-driving-startup-wayve-raises-12bln-from-investors-including-mercedes-stellantis-yu8kwpcv
+    total_raised:
+      amount_million_usd: 2800
+      note: "~$2.8B"
+      sources:
+        - https://www.zawya.com/en/business/investment/uk-self-driving-startup-wayve-raises-12bln-from-investors-including-mercedes-stellantis-yu8kwpcv
+    valuation:
+      amount_million_usd: 8600
+      note: "$8.6B (Feb 2026, post-money)"
+      sources:
+        - https://www.just-auto.com/newsletters/wayve-raises-1-2bn-series-d
+    business_model: "Licenses its AI Driver directly to automakers to customise for their vehicles; for robotaxis it supplies the AI Driver while Uber owns and operates the fleet. Pricing basis not stated."
+    business_model_sources:
+      - https://wayve.ai/press/series-d/
+    target_user: "Automakers (OEM licensing) and robotaxi operators."
+    target_user_sources:
+      - https://ai2.work/blog/wayve-s-1-5b-series-d-and-the-oem-licensing-revolution-in-autonomous-ai
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "08070525"
+    name: Improbable
+    category: "Consumer social, media and gaming"
+    one_liner: "Builds defence simulation and synthetic environment technology, formerly the SpatialOS game platform."
+    one_liner_sources:
+      - https://www.zoominfo.com/financial/improbable-llc/356801661
+    status: Active
+    status_sources:
+      - https://www.cbinsights.com/company/improbable/financials
+    stage: Growth
+    stage_sources:
+      - https://www.cbinsights.com/company/improbable/financials
+    last_round:
+      stage: Growth
+      amount_million_usd: 112
+      announced: 2022-10-01
+      note: "~$112M in late-stage venture and strategic funding, Oct 2022, per CB Insights."
+      sources:
+        - https://www.cbinsights.com/company/improbable/financials
+    total_raised:
+      amount_million_usd: 866
+      note: "~$866M (aggregators range $722M to $930M)"
+      sources:
+        - https://www.cbinsights.com/company/improbable/financials
+    valuation:
+      amount_million_usd: 3000
+      note: "~$3B to $3.36B (2022)"
+      sources:
+        - https://getlatka.com/companies/improbable.io
+    business_model: "Former defence arm (sold 2023) earned revenue from government contracts including the UK Ministry of Defence. Kept metaverse business builds virtual worlds; no pricing given."
+    business_model_sources:
+      - https://www.improbable.io/news/improbable-sells-defence-business-to-group-of-investors-led-by-noia-capital
+    target_user: Game studios and builders of entertainment and metaverse platforms.
+    target_user_sources:
+      - https://www.zoominfo.com/financial/improbable-llc/356801661
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Registered at Companies House as IMPROBABLE WORLDS LIMITED (08070525, incorporated 2012);
+    # distinct from a bare "IMPROBABLE" entity (08561272, incorporated 2013).
+
+  - company_number: "07132083"
+    name: Lyst
+    category: E-commerce and retail tech
+    one_liner: Global fashion shopping platform that aggregates products from thousands of brands and retailers.
+    one_liner_sources:
+      - https://www.businessoffashion.com/articles/finance/lvmh-pumps-over-60-million-into-lyst/
+    status: Acquired or merged
+    status_sources:
+      - https://www.cbinsights.com/company/lyst/financials
+    stage: Series D
+    stage_sources:
+      - https://www.cbinsights.com/company/lyst/financials
+    last_round:
+      stage: Series D
+      amount_million_usd: 85
+      announced: 2021-05-01
+      note: "$85M Series D announced May 2021; acquired by ZOZO, completed Apr 2025."
+      sources:
+        - https://www.exchangewire.com/blog/2021/05/19/lyst-raise-pre-ipo-85m-marie-claire-us-acquired-by-future/
+    total_raised:
+      amount_million_usd: 182
+      note: "~$181.5M"
+      sources:
+        - https://www.cbinsights.com/company/lyst/financials
+    valuation:
+      amount_million_usd: 500
+      note: "$500M to $700M (May 2021)"
+      sources:
+        - https://www.cbinsights.com/company/lyst/financials
+    business_model: "Earns a commission on sales; the commission rate Lyst is paid is one factor in how products are ranked."
+    business_model_sources:
+      - https://www.lyst.com/help/product-ranking-information/
+    target_user: Online fashion shoppers, and brands and retailers listed on the platform.
+    target_user_sources:
+      - https://www.businessoffashion.com/articles/finance/lvmh-pumps-over-60-million-into-lyst/
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "08813912"
+    name: Ocado Technology
+    category: Robotics and automation
+    one_liner: "Ocado Group's technology arm, building robotic warehouse and online grocery platforms for retailers."
+    one_liner_sources:
+      - https://www.wealthmanagement.com/wealth-management-industry-trends/ocado-seeks-704-million-from-share-placing-to-fund-expansion
+    status: Subsidiary
+    status_sources:
+      - https://www.wealthmanagement.com/wealth-management-industry-trends/ocado-seeks-704-million-from-share-placing-to-fund-expansion
+    stage: Unknown
+    stage_sources:
+      - https://www.wealthmanagement.com/wealth-management-industry-trends/ocado-seeks-704-million-from-share-placing-to-fund-expansion
+    last_round: null
+    total_raised:
+      amount_million_usd: null
+      note: "n/a at subsidiary level (group raised GBP 1bn in 2020 and GBP 575M in 2022)"
+      sources:
+        - https://egi.co.uk/news/ocado-taps-investors-for-575m-to-fund-robotic-warehouses
+    valuation: null  # n/a (listed parent)
+    business_model: "Recurring licence fees of about 5% of partner retail sales that scale with live modules, plus upfront fees of about 4% of retail sales (Ocado's investor page)."
+    business_model_sources:
+      - https://www.ocadogroup.com/investors/investor-questions
+    target_user: "Grocery retailers (e.g. Kroger, Coles)."
+    target_user_sources:
+      - https://www.wealthmanagement.com/wealth-management-industry-trends/ocado-seeks-704-million-from-share-placing-to-fund-expansion
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Subsidiary of Ocado Group (LSE-listed); no standalone round. No entity literally named "Ocado
+    # Technology Limited" exists at Companies House; used OCADO INNOVATION LIMITED (08813912), the
+    # group's R&D/technology subsidiary, pending the user confirming this is the right seed company.
+
+  - company_number: "10260255"
+    name: Riverlane
+    category: Deep tech and quantum
+    one_liner: Develops quantum error correction technology to make quantum computers reliable.
+    one_liner_sources:
+      - https://osborneclarke.com/node/24189
+    status: Active
+    status_sources:
+      - https://thequantuminsider.com/2024/08/06/riverlane-raises-75-million-in-series-c-round-to-meet-demand-for-quantum-error-correction-technology/
+    stage: Series C
+    stage_sources:
+      - https://thequantuminsider.com/2024/08/06/riverlane-raises-75-million-in-series-c-round-to-meet-demand-for-quantum-error-correction-technology/
+    last_round:
+      stage: Series C
+      amount_million_usd: 75
+      announced: 2024-08-01
+      note: "$75M Series C announced Aug 2024 per The Quantum Insider."
+      sources:
+        - https://thequantuminsider.com/2024/08/06/riverlane-raises-75-million-in-series-c-round-to-meet-demand-for-quantum-error-correction-technology/
+        - https://www.eenewseurope.com/en/riverlane-raises-75m-series-c-for-quantum-error-correction
+    total_raised:
+      amount_million_usd: 122
+      note: "~$122M"
+      sources:
+        - https://www.eenewseurope.com/en/riverlane-raises-75m-series-c-for-quantum-error-correction
+    valuation:
+      amount_million_usd: 400
+      note: "Over $400M (Aug 2024)"
+      sources:
+        - https://www.datacenterdynamics.com/en/news/quantum-computing-error-correction-specialist-riverlane-raises-75m/
+    business_model: "Sells Deltaflow, a quantum error correction stack, to quantum computer makers, partnering with them to design, test and implement it; pricing or licence terms not stated."
+    business_model_sources:
+      - https://www.riverlane.com/products/
+    target_user: Quantum computer makers and governments.
+    target_user_sources:
+      - https://osborneclarke.com/node/24189
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "08873131"
+    name: Faculty
+    category: Consultancy and services
+    one_liner: "AI consultancy and software firm helping organisations build and deploy AI, now part of Accenture."
+    one_liner_sources:
+      - https://www.marcamoney.com/accenture-to-acquire-uk-based-ai-firm-faculty/
+    status: Acquired or merged
+    status_sources:
+      - https://www.nasdaq.com/press-release/accenture-completes-acquisition-faculty-2026-03-16
+    stage: Growth
+    stage_sources:
+      - https://www.nasdaq.com/press-release/accenture-completes-acquisition-faculty-2026-03-16
+    last_round:
+      stage: Growth
+      amount_million_usd: 43
+      announced: 2021-05-01
+      note: "GBP 30M (~$42.5M) growth investment from Apax Digital, announced May 2021; acquired by Accenture, completed Mar 2026, for a reported ~$1B (terms not disclosed)."
+      sources:
+        - https://tech.eu/2026/01/06/uk-ai-firm-faculty-to-be-acquired-by-consulting-giant-accenture/
+    total_raised:
+      amount_million_usd: 54
+      note: "~GBP 40M (~$54M)"
+      sources:
+        - https://www.staffingindustry.com/news/global-daily-news/accenture-acquires-uk-based-ai-startup-faculty
+    valuation:
+      amount_million_usd: null
+      note: "~$1B (reported acquisition value; terms not disclosed)"
+      sources:
+        - https://multiples.vc/private-comps/faculty
+    business_model: "Builds custom AI systems for clients and sells its Frontier decision intelligence software; the split between the two is not stated."
+    business_model_sources:
+      - https://askwonder.com/research/faculty-company-analysis-zf8zh2bec
+    target_user: "Enterprises and public sector bodies adopting AI (Frontier decision intelligence)."
+    target_user_sources:
+      - https://www.marcamoney.com/accenture-to-acquire-uk-based-ai-firm-faculty/
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+    # Registered at Companies House as FACULTY SCIENCE LIMITED (08873131, formerly ASI Data Science);
+    # a newer, unrelated FACULTY AI SAFETY AND EVALUATION FOUNDATION (17397891, 2026) must not be
+    # confused with this company.
+
+  - company_number: "09742902"
+    name: Adarga
+    category: AI apps text
+    one_liner: AI software that analyses large volumes of text for defence and security intelligence.
+    one_liner_sources:
+      - https://www.businesswire.com/news/home/20230518005092/en
+    status: Active
+    status_sources:
+      - https://www.cbinsights.com/company/adarga
+    stage: Series B
+    stage_sources:
+      - https://www.cbinsights.com/company/adarga
+    last_round:
+      stage: Series B
+      amount_million_usd: 20
+      announced: 2023-05-01
+      note: "$20M Series B announced May 2023, led by BOKA Group, per Business Wire; reportedly sought a further GBP 6M-8M in May 2025."
+      sources:
+        - https://www.businesswire.com/news/home/20230518005092/en
+    total_raised:
+      amount_million_usd: 29
+      note: "~$29M (aggregators range $29M to $64M)"
+      sources:
+        - https://www.cbinsights.com/company/adarga
+    valuation: null  # not public
+    business_model: "Licence-based: customers such as bp license its AI platform; payment terms and pricing not stated."
+    business_model_sources:
+      - https://adarga.ai/article/bp-licenses-adarga-s-ai-platform-to-improve-risk-management-decision-making
+    target_user: Defence, national security and intelligence customers.
+    target_user_sources:
+      - https://www.businesswire.com/news/home/20230518005092/en
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+
+  - company_number: "10689249"
+    name: Astroscale UK
+    category: "Defense, aerospace and space"
+    one_liner: UK arm of Astroscale, working on satellite servicing and removal of space debris.
+    one_liner_sources:
+      - https://spacewatch.global/2024/07/astroscale-secures-uksa-and-esa-elsa-m-mission/
+    status: Subsidiary
+    status_sources:
+      - https://en.wikipedia.org/wiki/Astroscale
+    stage: Unknown
+    stage_sources:
+      - https://en.wikipedia.org/wiki/Astroscale
+    last_round: null
+    total_raised:
+      amount_million_usd: 383
+      note: "~$383M (parent, as of Series G)"
+      sources:
+        - https://astroscale.com/?p=7538
+    valuation: null  # n/a (listed parent)
+    business_model: "Per-mission service contracts for debris removal and satellite life extension, with clients primarily government agencies (UKSA, ESA, JAXA); fee figures are company estimates, not Astroscale's own disclosures."
+    business_model_sources:
+      - https://www.kratosspace.com/constellations/articles/astroscale-poised-for-450m-revenue-with-satellite-debris-removal-and-life-extension-services
+    target_user: "Satellite operators and space agencies (UKSA, ESA, Eutelsat OneWeb)."
+    target_user_sources:
+      - https://spacewatch.global/2024/07/astroscale-secures-uksa-and-esa-elsa-m-mission/
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Subsidiary of Astroscale Holdings (public parent). The parent's Series G ($7.5M close, following
+    # an earlier $76M tranche in Feb 2023) is the parent's round, not a standalone round for the UK
+    # subsidiary, so left as last_round: null.
+
+  # --- Deliberate Other / non-startup entries (name-collision and shell-company risk) ---
+
+  - company_number: "13440205"
+    name: Association for Artificial Intelligence Ltd
+    category: Other
+    one_liner: Registered UK company with an AI association name; no trading details found.
+    one_liner_sources:
+      - https://open.endole.co.uk/insight/company/13440205-association-for-artificial-intelligence-ltd
+    status: Unclear
+    status_sources:
+      - https://open.endole.co.uk/insight/company/13440205-association-for-artificial-intelligence-ltd
+    stage: Unknown
+    stage_sources:
+      - https://open.endole.co.uk/insight/company/13440205-association-for-artificial-intelligence-ltd
+    last_round: null
+    total_raised: null
+    valuation: null
+    business_model: Not stated.
+    target_user: Not stated.
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+    # Active UK company; no trading details or funding found.
+
+  - company_number: "13109245"
+    name: Artificial Intelligence Traders Limited
+    category: Other
+    one_liner: Dormant UK company registered under software development activity codes.
+    one_liner_sources:
+      - https://corpsignals.uk/companies/uk/artificial-intelligence-traders-ltd-13109245.html
+    status: Dormant (shell)
+    status_sources:
+      - https://corpsignals.uk/companies/uk/artificial-intelligence-traders-ltd-13109245.html
+    stage: Unknown
+    stage_sources:
+      - https://corpsignals.uk/companies/uk/artificial-intelligence-traders-ltd-13109245.html
+    last_round: null
+    total_raised: null
+    valuation: null
+    business_model: Not stated (registered under software development SIC codes).
+    target_user: Not stated.
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Dormant UK shell company.
+
+  - company_number: "11627084"
+    name: China Britain Artificial Intelligence Association
+    category: Other
+    one_liner: Not-for-profit association connecting AI professionals and researchers in the UK and China.
+    one_liner_sources:
+      - https://londontechweek.com/exhibitor-list/china-britain-artificial-intelligence-association
+    status: Active
+    status_sources:
+      - https://londontechweek.com/exhibitor-list/china-britain-artificial-intelligence-association
+    stage: Unknown
+    stage_sources:
+      - https://londontechweek.com/exhibitor-list/china-britain-artificial-intelligence-association
+    last_round: null
+    total_raised: null
+    valuation: null
+    business_model: Not-for-profit membership association (per its own listing).
+    business_model_sources:
+      - https://londontechweek.com/exhibitor-list/china-britain-artificial-intelligence-association
+    target_user: UK-based AI professionals and researchers (UK-China collaboration).
+    target_user_sources:
+      - https://londontechweek.com/exhibitor-list/china-britain-artificial-intelligence-association
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Not-for-profit association, not a startup.
+
+  - company_number: "13617274"
+    name: Oxford Centre for Artificial Intelligence
+    category: Consultancy and services
+    one_liner: UK entity offering AI training and consultancy; profile details vary between sources.
+    one_liner_sources:
+      - https://app.foundernest.com/public/space/18457/companies/15627954?page=5
+    status: Unclear
+    status_sources:
+      - https://bringo.co.uk/company/1741727
+    stage: Unknown
+    stage_sources:
+      - https://bringo.co.uk/company/1741727
+    last_round: null
+    total_raised: null
+    valuation: null
+    business_model: Not stated.
+    target_user: Organisations seeking AI training and consultancy.
+    target_user_sources:
+      - https://app.foundernest.com/public/space/18457/companies/15627954?page=5
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+    # No funding found; net assets GBP 0 in 2024 accounts. Labelled Consultancy and services rather
+    # than Other because it is a genuine, if tiny, AI training/consultancy business, not a shell.
+
+  - company_number: "17357322"
+    name: The National Academy of Artificial Intelligence of the United Kingdom
+    category: Other
+    one_liner: Recently incorporated UK company limited by guarantee; no activity details found.
+    one_liner_sources:
+      - https://gbcomp.p-o.co.uk/en/company_details/17357322/
+    status: Unclear
+    status_sources:
+      - https://gbcomp.p-o.co.uk/en/company_details/17357322/
+    stage: Unknown
+    stage_sources:
+      - https://gbcomp.p-o.co.uk/en/company_details/17357322/
+    last_round: null
+    total_raised: null
+    valuation: null
+    business_model: Not stated.
+    target_user: Not stated.
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Recently incorporated company limited by guarantee; no activity details found.
+
+  - company_number: "13109583"
+    name: Artificial Intelligence Investments Limited
+    category: Other
+    one_liner: Exact name not found in the drafter's original search; a fresh Companies House search found this exact, active entity.
+    one_liner_sources:
+      - https://find-and-update.company-information.service.gov.uk/company/13109583
+    status: Unclear
+    status_sources:
+      - https://find-and-update.company-information.service.gov.uk/company/13109583
+    stage: Unknown
+    stage_sources:
+      - https://find-and-update.company-information.service.gov.uk/company/13109583
+    last_round: null
+    total_raised: null
+    valuation: null
+    business_model: Not stated.
+    target_user: Not stated.
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # The drafter's original search found no exact Companies House match and cited the dissolved
+    # ARTIFICIAL INTELLIGENCE INVESTMENTS INC. LIMITED (13592757) as the closest. A fresh search
+    # found an exact, active match under this name (13109583), used here instead.
+
+  - company_number: "16617905"
+    name: European Artificial Intelligence Industry Development Group Ltd
+    category: Other
+    one_liner: No matching UK company was found in the drafter's original search; a fresh Companies House search found this exact, active entity.
+    one_liner_sources:
+      - https://find-and-update.company-information.service.gov.uk/company/16617905
+    status: Unclear
+    status_sources:
+      - https://find-and-update.company-information.service.gov.uk/company/16617905
+    stage: Unknown
+    stage_sources:
+      - https://find-and-update.company-information.service.gov.uk/company/16617905
+    last_round: null
+    total_raised: null
+    valuation: null
+    business_model: Not stated.
+    target_user: Not stated.
+    split: holdout
+    label:
+      date: 2026-11-05
+      verified: true
+    # The drafter's original search reported no matching UK company. A fresh Companies House search
+    # found an exact, active match under this name (16617905), used here instead.
+
+  - company_number: "16945199"
+    name: Association of Artificial Intelligence
+    category: Other
+    one_liner: Company limited by guarantee incorporated in 2026; no activity details found.
+    one_liner_sources:
+      - https://association-of-artificial-intelligence.ltds.uk/
+    status: Unclear
+    status_sources:
+      - https://association-of-artificial-intelligence.ltds.uk/
+    stage: Unknown
+    stage_sources:
+      - https://association-of-artificial-intelligence.ltds.uk/
+    last_round: null
+    total_raised: null
+    valuation: null
+    business_model: Not stated.
+    target_user: Not stated.
+    split: dev
+    label:
+      date: 2026-11-05
+      verified: true
+    # Company limited by guarantee incorporated 2026; no activity details found.
