@@ -171,6 +171,10 @@ def calibrate(client, *, model: str, batch: BatchBudget, path=CALIBRATION_PATH) 
 
 Judge design: the strong model (Sonnet 5.5) judges the bulk model's output, so judge and generator differ; the prompt shows the reference first, tells the judge to ignore fluency, length and detail beyond the reference, to mark a contradiction `incorrect`, and states that the candidate text is untrusted data (it is scraped, so it is wrapped with `wrap_untrusted`). `evals/judge_calibration.yaml` holds about 12 user-graded triples, deliberately including fluent-but-wrong and terse-but-right candidates. `--calibrate` scores the judge against them; judge rows are labelled "uncalibrated" in the report until agreement is at least 80 percent (10 of 12). Free-text drafts for the calibration set may be written by the implementer, the verdict column is the user's.
 
+### Low-confidence re-check
+
+Haiku/low stays the bulk default. A 10-company pilot comparison (Haiku/low, Haiku/medium, Sonnet/low) found medium effort buys no extra sourced facts over low (same 10.8 mean, same miss) and adds a failure Haiku/low did not have; Sonnet extracts fewer facts on average (8.3 vs 10.8) but correctly categorised the one company both Haiku runs put in `Other` with a single sourced fact. A full switch to Sonnet is not justified by this sample, but a targeted re-check is: any submitted profile with `category == Other` and `sourced_facts <= 3` gets a Sonnet/low re-check pass before the profile counts as final. Not yet a row in the metrics table above; once the golden set has a baseline run, measure how often this fires and whether the re-check changes the category, then decide if it needs its own gate.
+
 ## Batch cap and cost (D24)
 
 ```python
