@@ -12,9 +12,9 @@ from pydantic import AnyHttpUrl, AwareDatetime, BaseModel, ConfigDict, Field, mo
 
 
 class Category(StrEnum):
-    AI_APPS_VISION = "Vision"
-    AI_APPS_VOICE = "Voice"
-    AI_APPS_LANGUAGE = "Language"
+    AI_APPS_VISION = "AI apps vision"
+    AI_APPS_VOICE = "AI apps voice"
+    AI_APPS_LANGUAGE = "AI apps language"
     FINTECH_AND_PAYMENTS = "Fintech and payments"
     ENTERPRISE_SOFTWARE_AND_CLOUD = "Enterprise software and cloud"
     CYBERSECURITY = "Cybersecurity"
