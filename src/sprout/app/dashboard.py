@@ -36,13 +36,16 @@ def _bar_chart(
     horizontal: bool = False,
     full_labels: bool = False,
     height: int | None = None,
+    label_angle: int | None = None,
 ) -> alt.Chart:
     """A static bar chart: unlike `st.bar_chart`, this never calls Altair's `.interactive()`, so
     the mouse wheel does not pan or zoom it. `percent_of` adds a "% of total" tooltip field;
     `horizontal` puts the category on the y-axis (for long labels); `full_labels` never truncates
     the category axis labels (Vega-Lite's default limit is 180px); `height` fixes the plot height
     in pixels, so two horizontal charts with a different row count still end at the same y
-    position instead of each sizing itself to its own row count."""
+    position instead of each sizing itself to its own row count; `label_angle` fixes the category
+    axis label rotation, so charts with different label lengths still render at the same total
+    height instead of Vega-Lite auto-rotating some and not others."""
     rows = []
     for key, value in counts.items():
         row = {category_title: key, value_title: value}
@@ -52,7 +55,12 @@ def _bar_chart(
     tooltip = [alt.Tooltip(category_title), alt.Tooltip(value_title)]
     if percent_of:
         tooltip.append(alt.Tooltip("percent:Q", title="% of enriched companies", format=".1f"))
-    axis = alt.Axis(labelLimit=0) if full_labels else alt.Axis()
+    axis_kwargs = {}
+    if full_labels:
+        axis_kwargs["labelLimit"] = 0
+    if label_angle is not None:
+        axis_kwargs["labelAngle"] = label_angle
+    axis = alt.Axis(**axis_kwargs)
     if rows:
         columns = [category_title, value_title] + (["percent"] if percent_of else [])
         df = pd.DataFrame(rows, columns=columns)
@@ -325,6 +333,9 @@ def render_companies() -> None:
                 value_title="officers",
                 horizontal=True,
                 full_labels=True,
+                # Altair's default vertical-chart height (300px), so it matches the age chart
+                # on the left instead of sizing itself to its own (shorter) row count.
+                height=300,
             ),
             width="stretch",
         )
@@ -607,8 +618,9 @@ def render_observability() -> None:
         cost_day_col.altair_chart(
             alt.Chart(cost_day_df)
             .mark_bar()
+            .properties(height=300)
             .encode(
-                x=alt.X("day:T", title="day", axis=alt.Axis(format="%Y-%m-%d")),
+                x=alt.X("day:T", title=None, axis=alt.Axis(format="%Y-%m-%d", labelAngle=0)),
                 y=alt.Y("cost:Q", title="cost (US$)"),
                 tooltip=[
                     alt.Tooltip("day:T", title="day", format="%Y-%m-%d"),
@@ -620,7 +632,13 @@ def render_observability() -> None:
 
         cost_kind_col.caption("Cost by kind (US$)")
         cost_kind_col.altair_chart(
-            _bar_chart(cost_kind, category_title="kind", value_title="cost (US$)"),
+            _bar_chart(
+                cost_kind,
+                category_title="kind",
+                value_title="cost (US$)",
+                height=300,
+                label_angle=0,
+            ),
             width="stretch",
         )
 
@@ -638,8 +656,9 @@ def render_observability() -> None:
             cost_tool_col.altair_chart(
                 alt.Chart(cost_tool_df)
                 .mark_bar()
+                .properties(height=300)
                 .encode(
-                    x=alt.X("tool:N", title="tool", sort="-y"),
+                    x=alt.X("tool:N", title=None, sort="-y", axis=alt.Axis(labelAngle=0)),
                     y=alt.Y("cost:Q", title="cost (US$)"),
                     tooltip=[
                         alt.Tooltip("tool:N", title="tool"),
