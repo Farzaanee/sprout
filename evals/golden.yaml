@@ -651,12 +651,12 @@ entries:
     status: Acquired or merged
     status_sources:
       - https://seedtable.com/companies/graphcore/funding-rounds/series-e-2026-05
-    stage: Growth
+    stage: Series E
     stage_sources:
       - https://seedtable.com/companies/graphcore/funding-rounds/series-e-2026-05
     last_round:
-      stage: Growth
-      amount_million_usd: 450
+      stage: Series E
+      amount_million_usd: 222
       announced: 2026-05-01
       note: "~$450M SoftBank capital injection, May 2026, following SoftBank's Jul 2024 acquisition of Graphcore."
       sources:

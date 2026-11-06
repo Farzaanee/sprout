@@ -118,8 +118,13 @@ reported valuation; do not derive it from funding raised, or funding from a valu
 funding_rounds is a list with one entry per round you can find, not just the latest (stage, \
 amount_million_usd, announced date as YYYY-MM-DD, investors). Each round has its own source_url, \
 confidence and note, and rounds may come from different sources (for example one page for the \
-latest raise and another for the funding history). A search snippet is not enough for a funding \
-figure: fetch_page the source before citing it for total_raised_million_usd, \
+latest raise and another for the funding history). If only the year or month of a round is \
+known, use the first day of that year or month (e.g. "2023-01-01") rather than leaving announced \
+null: a missing date hides the round from "most recent" comparisons. A SPAC merger, PIPE \
+investment tied to one, acquisition price or other M&A proceeds is not a funding round: it is \
+being bought, not raising venture capital, so leave it out of funding_rounds even if a source \
+states an amount (reflect it in business_status instead). A search snippet is not enough for a \
+funding figure: fetch_page the source before citing it for total_raised_million_usd, \
 valuation_million_usd or a round's amount_million_usd, or the submission will be rejected. Use \
 an empty list if none is found. If a \
 source gives another currency, convert it rather than leaving the value null, at about 1.3 USD \
