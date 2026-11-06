@@ -1,6 +1,6 @@
 # Phase 2: Single-company enrichment agent
 
-Status: done, with caveats (listed under [Outstanding](#outstanding)). Phase 3 later added step logging on top of this loop; where that changes a contract below it is marked. Part of the [Sprout architecture docs](../README.md).
+Part of the [Sprout architecture docs](../README.md). Status: see [7. status.md](../7.%20status.md). Phase 3 later added step logging on top of this loop; where that changes a contract below it is marked.
 
 ```mermaid
 flowchart TB
@@ -334,8 +334,7 @@ Work that is not done or not verified, as of the end of Phase 3. Nothing here bl
 
 | Item | Detail |
 |---|---|
-| User review of the pilot profiles | The 10-company pilot (10/10 submitted) was reviewed by the implementing agent only |
-| Search price unconfirmed | US$0.01 per search is an assumption from the `claude-api` skill; check it against the first console invoice (search is about 70 percent of a run's cost) |
+| User review of the pilot profiles, search price unconfirmed | See `implementation-notes.md` Phase 2 open items |
 | No `-m live` enrichment test | Deliberate, so a plain `pytest` with a key never spends money. The tiny-cap criterion is verified with mocks only |
 | Never run live | `--strong` (Sonnet 5.5), forced `tool_choice` on Haiku 5.5, the over-100K-token price tier, the 512-token minimum cacheable prefix. `pause_turn` has only mock evidence |
 | No per-run fetch cap, no batch-level USD cap | `BatchBudget` (Phase 4, D24) closes the second; the first is bounded only by the iteration cap |

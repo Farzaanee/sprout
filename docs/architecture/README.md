@@ -18,16 +18,18 @@ This architecture is split by concern; each page below is self-contained except 
 
 Phase pages live under `docs/architecture/phases/`.
 
-| Phase | Page | Status |
-|---|---|---|
-| 0 | [Setup and definitions](phases/phase-0-setup.md) | Done |
-| 1 | [Data foundations](phases/phase-1-data-foundations.md) | Done |
-| 2 | [Single-company enrichment agent](phases/phase-2-enrichment.md) | Done, with caveats |
-| 3 | [Observability](phases/phase-3-observability.md) | Done, one live check not achieved |
-| 4 | [Evals and guardrails](phases/phase-4-evals-guardrails.md) | Design only |
-| 5 | [Multi-agent pipeline](phases/phase-5-multi-agent.md) | Planned |
-| 6 | [Dashboard](phases/phase-6-dashboard.md) | Partial |
-| 7 | [MCP server](phases/phase-7-mcp-server.md) | Planned |
-| 8 | [Automation, deployment, docs](phases/phase-8-automation.md) | Planned |
+| Phase | Page |
+|---|---|
+| 0 | [Setup and definitions](phases/phase-0-setup.md) |
+| 1 | [Data foundations](phases/phase-1-data-foundations.md) |
+| 2 | [Single-company enrichment agent](phases/phase-2-enrichment.md) |
+| 3 | [Observability](phases/phase-3-observability.md) |
+| 4 | [Evals and guardrails](phases/phase-4-evals-guardrails.md) |
+| 5 | [Multi-agent pipeline](phases/phase-5-multi-agent.md) |
+| 6 | [Dashboard](phases/phase-6-dashboard.md) |
+| 7 | [MCP server](phases/phase-7-mcp-server.md) |
+| 8 | [Automation, deployment, docs](phases/phase-8-automation.md) |
+
+Status per phase: see [7. status.md](7.%20status.md).
 
 Legend (used across the phase diagrams): cylinders are storage, rounded boxes are external services, dotted arrows are planned (in the Phase 2 diagram only, a dotted arrow instead marks work done by Anthropic's servers rather than our code).

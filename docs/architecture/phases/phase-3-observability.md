@@ -1,6 +1,6 @@
 # Phase 3: Observability
 
-Status: done, except one live check (see [Build status](#build-status)). Part of the [Sprout architecture docs](../README.md). Built in three pieces: (a) backend (schema, `failures.py`, loop and enrich wiring), (b) UI (queries and the dashboard tab), (c) an analysis step that used a fresh batch of logged runs to review the [Phase 4](phase-4-evals-guardrails.md) design; its findings are in `docs/implementation-notes.md` ("Step 3c findings").
+Part of the [Sprout architecture docs](../README.md). Status: see [7. status.md](../7.%20status.md); detail in [Build status](#build-status) below. Built in three pieces: (a) backend (schema, `failures.py`, loop and enrich wiring), (b) UI (queries and the dashboard tab), (c) an analysis step that used a fresh batch of logged runs to review the [Phase 4](phase-4-evals-guardrails.md) design; its findings are in `docs/implementation-notes.md` ("Step 3c findings").
 
 ```mermaid
 %%{init: {"flowchart": {"rankSpacing": 20, "nodeSpacing": 20}}}%%

@@ -1,6 +1,6 @@
 # Phase 0: Setup and definitions
 
-Status: done. Part of the [Sprout architecture docs](../README.md).
+Part of the [Sprout architecture docs](../README.md). Status: see [7. status.md](../7.%20status.md).
 
 ```mermaid
 flowchart TB
@@ -23,7 +23,7 @@ The taxonomy, stage enum, `Sourced[T]` and `CompanyProfile` are the contract eve
 
 | Name | What it is | Why it matters |
 |---|---|---|
-| `Category` (taxonomy) | Fixed 19-value enum (18 sectors plus `Other`), frozen in Phase 0 | Every profile's grouping; changing it after classifications or the golden set exist invalidates both, so it stays small and stable |
+| `Category` (taxonomy) | Fixed 20-value enum (19 sectors plus `Other`), frozen in Phase 0 | Every profile's grouping; changing it after classifications or the golden set exist invalidates both, so it stays small and stable |
 | `Stage` | Enum: Pre-seed through Series F, Growth, Unknown | Funding stage for the company and for each `FundingRound`; `Unknown` is a valid, sourced-or-not value |
 | `Sourced[T]` | Generic wrapper: `value`, `source_url`, `retrieved_at`, `confidence`, optional `note` | Carries provenance for every fact. `value=None` means "not disclosed" and is always valid; a non-null value without `source_url` fails validation, enforcing "provenance over completeness" in code, not just in prompts |
 | `Confidence` | Enum: `low`, `medium`, `high` | The `confidence` field on every `Sourced[T]`; defaults to `low`. A source seen only in a search snippet and never fetched is capped at `medium` (see [Phase 2](phase-2-enrichment.md)) |

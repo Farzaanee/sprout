@@ -1,6 +1,6 @@
 # Phase 6: Dashboard
 
-Status: partial (progress and test console and the Phase 3 Observability tab exist). Part of the [Sprout architecture docs](../README.md).
+Part of the [Sprout architecture docs](../README.md). Status: see [7. status.md](../7.%20status.md).
 
 ```mermaid
 flowchart TB
