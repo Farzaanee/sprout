@@ -5,7 +5,7 @@ Source: `docs/architecture/risks.md` section 6.3 and the Phase 4 row in `docs/ar
 ## Decisions only you can make (before or during implementation)
 
 - [ ] **Hand-label the golden set**, about 30 companies, in `evals/golden.yaml` (category, stage, last-round amount if public, target user). Record the label date and source per the plan's caveat. Flagged as critical path, about 1.5 hours (A21).
-- [ ] **Approve the fabricated-funding definition**: number-match against the cited page text as the model saw it, not "value present with no source" (that one is always 0 percent by construction). (A18, D21)
+- [x] **Approve the fabricated-funding definition**: number-match against the cited page text as the model saw it, not "value present with no source" (that one is always 0 percent by construction). Approved 2026-11-06. (A14, D21)
 - [ ] **Approve the last-round rule**, i.e. how "latest funding round" is picked when sources disagree. (A19)
 - [ ] **Approve the two-tier injection acceptance**: offline `ScriptedClient` cases plus a live canary tier gated on `SPROUT_RUN_LIVE_INJECTION=1`. (A20)
 - [ ] **Choose the golden-set file format**: `pyyaml` or TOML. (A24)

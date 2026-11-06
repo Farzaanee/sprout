@@ -245,8 +245,6 @@ Only a validated `submit_profile` carries facts, so on any non-`submitted` stop 
 
 There is no per-run fetch cap beyond the iteration cap (the prompt's "at most 4 pages" is advice, not enforced), and no partial profile is ever written on a cap stop. There is also no batch-level USD cap: the CLI enforces `--max-usd` per company and only prints the total, so a long target list can spend `n * max_usd`. A `BatchBudget` is planned for Phase 4 (see the [Phase 4 page](phase-4-evals-guardrails.md), D24) so the evals have a batch cap, and the Phase 5 orchestrator must reuse it.
 
-**Known defect (Phase 3 finding, unfixed).** `--max-iterations 2` reproducibly ends `error` with a 400 on the second request: "`web_search` tool use ... was found without a corresponding `web_search_tool_result` block". Iteration 1 returned a server-side `web_search` together with a custom `lookup_companies_house` `tool_use` and no search result block, and the loop appended that content unchanged. Default-cap runs accepted the same pattern, so the trigger is not isolated (the wrap-up notice on the second request is one suspect). It is not caused by step logging. A fix needs a live reproduction (for example dropping a `server_tool_use` block that has no matching result before it goes into history, or avoiding mixed server and custom calls in one turn), so it is left for a decision. It blocks a deterministic live `iteration_cap` run and adds `api_error` noise to any low-cap test.
-
 ## Inside `loop.py`: the iteration state machine
 
 The table above as a flowchart, one pass per iteration; "next iteration" loops back to the guard check at the top.
@@ -336,7 +334,6 @@ Work that is not done or not verified, as of the end of Phase 3. Nothing here bl
 
 | Item | Detail |
 |---|---|
-| Mixed server and custom tool call 400 | See "Known defect" above. Needs a live reproduction and a decision before the Phase 4 baseline, or the baseline carries `api_error` noise whenever a low iteration cap is used |
 | User review of the pilot profiles | The 10-company pilot (10/10 submitted) was reviewed by the implementing agent only |
 | Search price unconfirmed | US$0.01 per search is an assumption from the `claude-api` skill; check it against the first console invoice (search is about 70 percent of a run's cost) |
 | No `-m live` enrichment test | Deliberate, so a plain `pytest` with a key never spends money. The tiny-cap criterion is verified with mocks only |
