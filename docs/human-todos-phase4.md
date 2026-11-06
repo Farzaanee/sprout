@@ -7,8 +7,8 @@ Source: `docs/architecture/risks.md` section 6.3 and the Phase 4 row in `docs/ar
 - [ ] **Hand-label the golden set**, about 30 companies, in `evals/golden.yaml` (category, stage, last-round amount if public, target user). Record the label date and source per the plan's caveat. Flagged as critical path, about 1.5 hours (A21).
 - [x] **Approve the fabricated-funding definition**: number-match against the cited page text as the model saw it, not "value present with no source" (that one is always 0 percent by construction). Approved 2026-11-06. (A14, D21)
 - [ ] **Approve the last-round rule**, i.e. how "latest funding round" is picked when sources disagree. (A19)
-- [ ] **Approve the two-tier injection acceptance**: offline `ScriptedClient` cases plus a live canary tier gated on `SPROUT_RUN_LIVE_INJECTION=1`. (A20)
-- [ ] **Choose the golden-set file format**: `pyyaml` or TOML. (A24)
+- [ ] **Approve the two-tier injection acceptance**: offline `ScriptedClient` cases plus a live canary tier gated on `SPROUT_RUN_LIVE_INJECTION=1`. (A16)
+- [x] **Choose the golden-set file format**: YAML, with `pyyaml` added to the `dev` dependency group. (A20)
 - [ ] **Confirm the eval budget and default cap**: US$1.50 default. (A23, A26)
 - [ ] **Confirm the judge calibration plan**: Sonnet 5.5 judging Haiku 5.5 output, about 12 graded triples, 80 percent agreement threshold before judge rows are trusted. (A26)
 - [ ] **Veto or accept the other design decisions** if you disagree with any: repo-root `evals/` layout (D19), separate `data/eval.db` (D20), judge calls through `run_agent` with a `submit_verdict` tool (D23), `BatchBudget` (D24), `UrlPolicy` (D25), the overall injection design (D26).

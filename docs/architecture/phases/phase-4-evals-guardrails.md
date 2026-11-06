@@ -68,7 +68,7 @@ tests/test_evals_golden.py, test_evals_metrics.py, test_evals_judge.py, test_inj
 tests/test_web.py (policy cases), tests/test_costs.py (BatchBudget)
 ```
 
-`pyproject.toml`: pytest `pythonpath = ["scripts", "."]`; ruff `src = ["src", "tests", "."]`; add `pyyaml` to the `dev` dependency group (**open, A20**: the zero-dependency alternative is `golden.toml` read with stdlib `tomllib`). `data/eval.db` is already covered by `*.db` in `.gitignore`.
+`pyproject.toml`: pytest `pythonpath = ["scripts", "."]`; ruff `src = ["src", "tests", "."]`; `pyyaml` is in the `dev` dependency group (A20). `data/eval.db` is already covered by `*.db` in `.gitignore`.
 
 ## Golden set schema (`evals/golden.yaml`)
 
