@@ -1,8 +1,7 @@
 version: 1
-# About 12 hand-graded (reference, candidate, verdict) triples for calibrating evals/judge.py.
+# 12 hand-graded (reference, candidate, verdict) triples for calibrating evals/judge.py.
 # Drafted by the implementer from evals/golden.yaml references (never from pipeline output).
-# verdict is a placeholder guess (correct | partial | incorrect): the user confirms or corrects
-# each one before --calibrate is trusted.
+# verdict (correct | partial | incorrect) is user-confirmed.
 pairs:
   - company: Synthesia
     field: business_model

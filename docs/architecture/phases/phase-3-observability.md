@@ -49,6 +49,52 @@ flowchart TB
 | `src/sprout/app/dashboard.py` | `render_observability` and the new tab |
 | Tests | `test_failures.py`, additions to `test_agent_loop.py`, `test_enrich.py`, `test_db.py`, `test_app_queries.py`, `test_dashboard.py` |
 
+## Key files
+
+`failures.py`
+
+| Aspect | Detail |
+| --- | --- |
+| Role | `FailureCategory` (a `StrEnum`) and `failure_category_for(stop)`. Pure, with no `sprout` imports, so `loop`, `enrich` and `db` can all share it without a cycle. |
+| Design | The `_BY_STOP` dict is the single mapping from `Stop` to category. `submitted` returns None. A stop not in the table becomes `internal_error`. The order of enum members is also the tie-break order for `failure_counts`. |
+
+`agents/loop.py` additions
+
+| Aspect | Detail |
+| --- | --- |
+| `StepRecord` | One per model response: iteration, timestamp, `stop_reason`, tool names, `tool_errors`, `Usage`, `cost_usd`, truncated `response_text`. `tool_errors` is incremented when a tool outcome is an error, after the record is created. |
+| `LoopResult` | Gains `steps` and `error_type` (the exception class name, or `unexpected_stop_reason`), set through the `finish` helper. |
+| Constraint | The loop must stay DB-free and must not read `steps`. Anything that wants live step output needs an optional callback, not a database handle. |
+
+`agents/enrich.py` additions
+
+| Aspect | Detail |
+| --- | --- |
+| Wiring | `_stats` gains `error_type`. `enrich_with_result` sets `failure_category`, adds `_step_row` rows and commits before the existing `EnrichmentFailed` raise. |
+| Later phases | Phase 5 workers will each need the same ordering (commit steps, then raise). Do not move the step insert after the raise. |
+
+`db.py` additions
+
+| Aspect | Detail |
+| --- | --- |
+| Schema | `RunLog.failure_category` and the `RunLogStep` table, with a unique constraint on `(run_log_id, iteration)`. |
+| `init_db` | Runs `_add_missing_columns`, then `_backfill_failure_categories`, so an existing `data/sprout.db` upgrades in place. |
+| `logged_run` | After rollback, sets `internal_error` if the category is still NULL, so an escaped exception is never recorded as a success. |
+
+`app/queries.py` additions
+
+| Aspect | Detail |
+| --- | --- |
+| Functions | `enrich_runs`, `failure_counts`, `cost_trend`, `daily_outcomes`, `run_steps`, returning small dataclasses (`EnrichRun`, `TrendPoint`, `DayOutcome`) rather than ORM rows. Streamlit-free, so Phase 6 can reuse them. |
+| Details | `enrich_runs` with both a category and `failures_only=True` applies only the category filter. `cost_per_iteration` is None when iterations is 0. The file moves to `sprout/queries.py` before Phase 7. |
+
+`app/dashboard.py` additions
+
+| Aspect | Detail |
+| --- | --- |
+| Tab | `render_observability` sits after News and before the gated Run & test tab. Tabs are now `(name, renderer)` pairs zipped with `strict=True`, so a name and renderer cannot drift apart. |
+| Content | Four metrics, failures by category (chart and table), cost per iteration and failures per day, a filterable runs table, and a per-run step drill-down. Runs from before this phase have no steps, and the tab says so. |
+
 ## Failure taxonomy (`failures.py`)
 
 Eight fixed values, one per non-success outcome. The plan's "stop reason, error type" are the only two dimensions; `invalid` is deliberately not split by sub-reason (A8). A success is **NULL**, not a `'none'` value: `WHERE failure_category IS NOT NULL` is then exactly "failed runs", a `GROUP BY` never charts a fake "none" bar, and `ingest_*` runs (which have no failure concept) need no value. The cost is that a historical failed row and a success are both NULL until the backfill runs, which is why `init_db` backfills (below).
