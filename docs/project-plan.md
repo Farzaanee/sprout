@@ -2,7 +2,7 @@
 
 An agent system that discovers UK AI startups, groups them by sector (AI models, fintech, enterprise software, healthtech, …) and keeps a sourced profile for each one: funding raised, stage, business model, target user and recent notable news. Results are served through a Streamlit dashboard and an MCP server, so any MCP client (Claude Desktop, Claude Code) can query the data in natural language.
 
-**Budget:** ~50 hours over ~4 weeks · **API spend cap:** ~US$26 · **Stack:** Python 3.12, Claude API (Anthropic SDK), SQLite, FastMCP, Streamlit.
+**Budget:** ~92 hours over ~4 weeks · **API spend cap:** ~US$26 · **Stack:** Python 3.12, Claude API (Anthropic SDK), SQLite, FastMCP, Streamlit.
 
 ---
 
@@ -54,16 +54,16 @@ tests/
 ## Timeline overview
 | Phase | Title | Hours |
 |---|---|---|
-| 0 | Setup & definitions | 2 |
-| 1 | Data foundations | 6 |
-| 2 | First agent: single-company enrichment | 8 |
-| 3 | Observability | 5 |
-| 4 | Evals & guardrails | 6 |
-| 5 | Multi-agent pipeline at scale | 8 |
-| 6 | Dashboard | 5 |
-| 7 | MCP server | 6 |
-| 8 | Automation, deployment & documentation | 4 |
-| | **Total** | **50** |
+| 0 | Setup & definitions | 3 |
+| 1 | Data foundations | 8 |
+| 2 | First agent: single-company enrichment | 14 |
+| 3 | Observability | 9 |
+| 4 | Evals & guardrails | 12 |
+| 5 | Multi-agent pipeline at scale | 16 |
+| 6 | Dashboard | 10 |
+| 7 | MCP server | 11 |
+| 8 | Automation, deployment & documentation | 9 |
+| | **Total** | **92** |
 
 ---
 

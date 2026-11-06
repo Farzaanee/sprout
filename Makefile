@@ -22,3 +22,6 @@ fpush:
 	git add .
 	git commit --amend --no-edit
 	git push -f
+
+eval-rec:
+	uv run python -m evals.run_evals --record

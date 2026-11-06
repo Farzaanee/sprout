@@ -84,10 +84,11 @@ class Gate:
         return f"{self.op} {self.percent:g}%"
 
 
-# Set from the baseline run, by commit. Every other metric is report-only until then.
+# Set one company below the baseline run (24/29 category, 0/70 fabricated) recorded in
+# evals/results.md. Every other metric is report-only until then.
 GATES: dict[str, Gate] = {
-    "category_accuracy": Gate(">=", 85),
-    "fabricated_funding": Gate("<=", 3),
+    "category_accuracy": Gate(">=", 79),
+    "fabricated_funding": Gate("<=", 2),
 }
 
 LABELS = {
