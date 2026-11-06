@@ -49,8 +49,10 @@ flowchart TB
 - The orchestrator is deterministic scheduling code, not an LLM supervisor (D27, see [decisions](../6.%20decisions.md)).
 - `HttpClient` is synchronous and not thread-safe: one client per worker, locking, or `asyncio.to_thread`.
 - **Schema (D32, D33):** both schema items this phase needs, `run_log.company_id` and `company_news`, are already built; this phase only writes to them (status derived from `run_log`, no `enrichment_state` table) and adds the news matcher that populates `company_news`. Enable WAL and a busy timeout in `get_engine` first. Details and the items cut from the earlier plan are in the [data model](../2.%20data-model.md#per-company-status-derived-not-stored).
-- **Open:** verifier ordering — run after the enricher, only for companies with a funding or stage claim.
-- Each added agent is judged by its Phase 4 eval deltas before being kept (D28); Phase 4 evals exist before this phase runs.
+- **Open:** verifier ordering: run after the enricher, only for companies with a funding or stage claim.
+- Each added agent is judged by its Phase 4 eval deltas before being kept (D28); Phase 4 evals exist before this phase runs. The eval runner keeps its per-company call in one function (`_enrich_entry`) so the orchestrator can be swapped in and measured against the same golden set.
+- Retry of failed enrichment runs and any partial-facts behaviour are owned by this phase (selector retries a failed latest attempt, D32); Phase 4 changes neither: a failed run persists only its `run_log` row.
+- What Phase 4 leaves for the orchestrator: `BatchBudget` (add a lock for concurrent workers; same object caps enrichment, judge and any verifier spend), `enrich_with_result(..., extra_context=...)`, `stats["sources"]` (the verifier's list of already-read pages), and `ALLOWED_ENRICHMENT_TOOLS`, which covers the enrichment agent only; classify, news and verify define their own tool sets.
 
 ## Planned modules (interfaces are proposals; the [Phase 4](phase-4-evals-guardrails.md) modules are specified there)
 

@@ -11,7 +11,7 @@ This architecture is split by concern; each page below is self-contained except 
 - [Built modules](3.%20built-modules.md): the built-module table, with the phase each module was added in.
 - [Cross-cutting concerns](4.%20cross-cutting.md): sourcing/provenance, agent orchestration, error handling, testing, configuration, security, cost and observability.
 - [Risks and open questions](5.%20risks.md): the risk register, open ambiguities A1-A32, and what's left to resolve by phase.
-- [Key design decisions](6.%20decisions.md): the numbered decision log, D1-D33.
+- [Key design decisions](6.%20decisions.md): the numbered decision log, D1-D37.
 - [Status per phase](7.%20status.md): status and outstanding items for each phase.
 
 ## Diagrams and designs by phase
