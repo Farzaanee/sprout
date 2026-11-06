@@ -554,6 +554,9 @@ def _render_run_detail(session: Session, run: queries.EnrichRun) -> None:
             if s.response_text:
                 with st.expander(f"Step {s.iteration} response"):
                     st.code(s.response_text, language=None, wrap_lines=True)
+            if s.tool_error_text:
+                with st.expander(f"Step {s.iteration} tool error"):
+                    st.code(s.tool_error_text, language=None, wrap_lines=True)
     elif run.iterations > 0:
         st.info("This run predates step logging (Phase 3), run-level stats only.")
     else:

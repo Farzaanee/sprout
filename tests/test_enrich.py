@@ -428,8 +428,10 @@ def test_success_persists_one_step_per_response_and_no_failure_category(session,
     )  # fmt: skip
     assert (first.input_tokens, first.output_tokens) == (1000, 100)
     assert (first.cache_write_tokens, first.web_searches, first.tool_errors) == (3000, 1, 1)
+    assert first.tool_error_text == f"fetch_page: Could not fetch {SEEN}: GET {SEEN} returned 404"
     assert (second.iteration, second.tool_name) == (2, "submit_profile")
     assert (second.cache_read_tokens, second.web_searches, second.tool_errors) == (3000, 0, 0)
+    assert second.tool_error_text is None
     assert first.created_at <= second.created_at
     assert sum(s.cost_usd for s in (first, second)) == pytest.approx(
         run.stats["cost_usd"], abs=1e-5

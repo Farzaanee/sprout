@@ -78,7 +78,9 @@ class Tool:
 
 @dataclass
 class StepRecord:
-    """One model response. Tool inputs and thinking blocks are deliberately not recorded."""
+    """One model response. Tool inputs and thinking blocks are deliberately not recorded; a tool
+    error's own message is (capped), since it is structured (URL, status, validation reason) and
+    is the only diagnostic signal available when `response_text` is empty (A7 amendment)."""
 
     iteration: int
     at: datetime
@@ -88,6 +90,7 @@ class StepRecord:
     usage: Usage
     cost_usd: Decimal
     response_text: str
+    tool_error_text: str = ""
 
 
 @dataclass
@@ -116,13 +119,17 @@ def _usage_of(response: Any) -> Usage:
     )
 
 
+def _capped(text: str) -> str:
+    if len(text) > LOGGED_TEXT_MAX_CHARS:
+        return text[:LOGGED_TEXT_MAX_CHARS] + TRUNCATED_MARKER
+    return text
+
+
 def _logged_text(content: list[Any]) -> str:
     text = "\n".join(
         b.text for b in content if getattr(b, "type", None) == "text" and getattr(b, "text", None)
     )
-    if len(text) > LOGGED_TEXT_MAX_CHARS:
-        return text[:LOGGED_TEXT_MAX_CHARS] + TRUNCATED_MARKER
-    return text
+    return _capped(text)
 
 
 def _step_of(model: str, iteration: int, response: Any, content: list[Any]) -> StepRecord:
@@ -278,6 +285,10 @@ def run_agent(
                 calls[block.name] += 1
                 if outcome.is_error:
                     step.tool_errors += 1
+                    entry = f"{block.name}: {outcome.text}"
+                    step.tool_error_text = _capped(
+                        f"{step.tool_error_text}\n{entry}" if step.tool_error_text else entry
+                    )
                 if tool is not None and tool.terminal:
                     if outcome.payload is not None:
                         result.payload = outcome.payload

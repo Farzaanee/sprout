@@ -367,6 +367,7 @@ def _step_row(run_id: int, step: StepRecord) -> RunLogStep:
         web_searches=usage.web_searches,
         cost_usd=round(float(step.cost_usd), 6),
         response_text=step.response_text,
+        tool_error_text=step.tool_error_text or None,
     )
 
 

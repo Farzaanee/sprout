@@ -200,6 +200,7 @@ class RunLogStep(SQLModel, table=True):
     web_searches: int = 0
     cost_usd: float = 0.0
     response_text: str | None = None  # untrusted model text, capped by the loop
+    tool_error_text: str | None = None  # tool error message(s), capped; may contain a URL (A7)
 
 
 def get_engine(path: Path | str) -> Engine:

@@ -292,6 +292,12 @@ def test_tool_errors_are_counted_per_step_including_a_rejected_submission():
     result = run(client, tools)
     assert result.stop == "submitted"
     assert [s.tool_errors for s in result.steps] == [3, 1, 0]
+    assert result.steps[0].tool_error_text == (
+        "boom: boom failed: RuntimeError: kaput\n"
+        "nope: Unknown tool 'nope'.\n"
+        "boom: boom failed: RuntimeError: kaput"
+    )
+    assert result.steps[2].tool_error_text == ""
 
 
 def test_a_second_rejected_submission_is_counted_before_the_run_ends():
