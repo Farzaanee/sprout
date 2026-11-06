@@ -22,6 +22,7 @@ USER_AGENT = "sprout/0.1 (UK AI startup research project)"
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 MAX_RETRY_AFTER_SECONDS = 60.0
 DEFAULT_MAX_BYTES = 5_000_000
+DEFAULT_MAX_SECONDS = 30.0
 
 
 class FetchError(RuntimeError):
@@ -151,7 +152,9 @@ class HttpClient:
         max_retries: int = 4,
         backoff_base: float = 1.0,
         max_bytes: int = DEFAULT_MAX_BYTES,
+        max_seconds: float = DEFAULT_MAX_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._client = client or httpx.Client(
             timeout=20.0, headers={"User-Agent": USER_AGENT}, follow_redirects=True
@@ -161,7 +164,9 @@ class HttpClient:
         self._max_retries = max_retries
         self._backoff_base = backoff_base
         self._max_bytes = max_bytes
+        self._max_seconds = max_seconds
         self._sleep = sleep
+        self._clock = clock
         self.requests_made = 0
         self.cache_hits = 0
 
@@ -227,12 +232,15 @@ class HttpClient:
         if self._limiter is not None:
             self._limiter.acquire(url)
         self.requests_made += 1
+        deadline = self._clock() + self._max_seconds  # the httpx timeout does not bound a slow drip
         with self._client.stream("GET", url, params=params) as raw:
             body = bytearray()
             for chunk in raw.iter_bytes():
                 body += chunk
                 if len(body) > self._max_bytes:
                     raise FetchError(f"GET {url}: response larger than {self._max_bytes} bytes")
+                if self._clock() > deadline:
+                    raise FetchError(f"GET {url}: not finished within {self._max_seconds:g}s")
             header = raw.headers.get("retry-after", "")
             response = Response(
                 url=str(raw.url),

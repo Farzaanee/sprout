@@ -97,6 +97,31 @@ def test_oversized_response_is_rejected(make_http):
         http.get("https://example.com/")
 
 
+def test_slow_stream_hits_the_total_deadline_and_is_not_retried(make_http):
+    clock = FakeClock()
+    attempts = []
+
+    class SlowStream(httpx.SyncByteStream):
+        def __iter__(self):
+            for _ in range(10):
+                clock.now += 10.0  # each chunk takes 10s, so the 30s budget runs out
+                yield b"x"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        return httpx.Response(200, stream=SlowStream())
+
+    http = make_http(handler, max_seconds=30.0, clock=clock)
+    with pytest.raises(FetchError, match="within 30s"):
+        http.get("https://example.com/")
+    assert len(attempts) == 1
+
+
+def test_fast_stream_within_the_deadline_succeeds(make_http):
+    http = make_http(lambda r: httpx.Response(200, text="ok"), max_seconds=30.0, clock=FakeClock())
+    assert http.get("https://example.com/").text == "ok"
+
+
 def test_failed_responses_are_not_cached(make_http):
     responses = iter([httpx.Response(500), httpx.Response(200, text="ok")])
     http = make_http(lambda r: next(responses), max_retries=0)

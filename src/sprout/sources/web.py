@@ -47,6 +47,43 @@ class FetchBlockedError(FetchError):
 
 
 @dataclass(frozen=True)
+class UrlPolicy:
+    """Rules a URL must pass before any DNS lookup or request."""
+
+    allowed_schemes: frozenset[str] = frozenset({"http", "https"})
+    allowed_ports: frozenset[int] = frozenset({80, 443})  # applies to explicit ports only
+    denied_hosts: frozenset[str] = frozenset({"localhost", "metadata.google.internal"})
+    denied_suffixes: tuple[str, ...] = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
+    allow_hosts: frozenset[str] | None = None  # None = any public host; a set = only these
+
+    def check(self, url: str) -> str:
+        """Return the hostname, or raise FetchBlockedError."""
+        parts = urlsplit(url)
+        if parts.scheme not in self.allowed_schemes:
+            raise FetchBlockedError(f"URL scheme not allowed: {url}")
+        host = (parts.hostname or "").rstrip(".")
+        if not host:
+            raise FetchBlockedError(f"URL has no host: {url}")
+        if parts.username is not None or parts.password is not None:
+            raise FetchBlockedError(f"URLs with credentials are not fetched: {host}")
+        try:
+            port = parts.port
+        except ValueError as exc:
+            raise FetchBlockedError(f"invalid port in URL for {host}") from exc
+        if port is not None and port not in self.allowed_ports:
+            raise FetchBlockedError(f"port {port} is not allowed for {host}")
+        if host in self.denied_hosts or host.endswith(self.denied_suffixes):
+            raise FetchBlockedError(f"host is denied: {host}")
+        if self.allow_hosts is not None and host not in self.allow_hosts:
+            raise FetchBlockedError(f"host is not in the allowed set: {host}")
+        return host
+
+
+DEFAULT_POLICY = UrlPolicy()
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+@dataclass(frozen=True)
 class Page:
     url: str
     title: str | None
@@ -99,6 +136,17 @@ def html_to_text(html: str) -> tuple[str | None, str]:
     return title, parser.text()
 
 
+def _is_public_address(address: str) -> bool:
+    """True if the address is globally routable, looking through IPv4-in-IPv6 encodings."""
+    ip = ipaddress.ip_address(address)
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return ip.ipv4_mapped.is_global
+        if ip in _NAT64:
+            return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF).is_global
+    return ip.is_global
+
+
 def resolve_host(host: str) -> list[str]:
     return [str(info[4][0]) for info in socket.getaddrinfo(host, None)]
 
@@ -124,8 +172,10 @@ class WebFetcher:
         resolver: Callable[[str], list[str]] = resolve_host,
         cache_ttl: timedelta = DEFAULT_CACHE_TTL,
         max_chars: int = DEFAULT_MAX_CHARS,
+        policy: UrlPolicy = DEFAULT_POLICY,
     ) -> None:
         self._http = http
+        self._policy = policy
         self._user_agent = user_agent
         self._resolver = resolver
         self._cache_ttl = cache_ttl
@@ -170,10 +220,7 @@ class WebFetcher:
         raise FetchError(f"GET {url}: more than {MAX_REDIRECTS} redirects")
 
     def _check_public_url(self, url: str) -> None:
-        parts = urlsplit(url)
-        if parts.scheme not in ("http", "https") or not parts.hostname:
-            raise FetchBlockedError(f"only http(s) URLs can be fetched: {url}")
-        self._check_public_host(parts.hostname)
+        self._check_public_host(self._policy.check(url))
 
     def _check_allowed(self, url: str) -> None:
         self._check_public_url(url)
@@ -186,7 +233,7 @@ class WebFetcher:
             addresses = self._resolver(host)
         except OSError as exc:
             raise FetchError(f"could not resolve {host}: {exc}") from exc
-        if not addresses or not all(ipaddress.ip_address(a).is_global for a in addresses):
+        if not addresses or not all(_is_public_address(a) for a in addresses):
             raise FetchBlockedError(f"{host} does not resolve to a public address")
 
     def _robots_for(self, scheme: str, netloc: str) -> RobotFileParser:
