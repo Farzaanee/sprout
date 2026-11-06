@@ -288,6 +288,7 @@ What the observability data says about failure causes: under current code the do
 | LLM judge (`judge_field`, `calibrate`, `tally_verdicts`) | [evals/judge.py](evals/judge.py) |
 | Injection: `fixture_fetcher`, `load_cases`, `run_case`, 9 cases with HTML pages | [evals/fixtures.py](evals/fixtures.py), [evals/injection.py](evals/injection.py), [evals/injection/](evals/injection/) |
 | Runner `python -m evals.run_evals` (flags, table, misses, `GATES`, `--record`) | [evals/run_evals.py](evals/run_evals.py) |
+| `validate_submission` rejects a funding field (`total_raised_million_usd`, `valuation_million_usd`, a round's `amount_million_usd`) whose source was only seen in a search snippet, not fetched; `SYSTEM_PROMPT` tells the model to `fetch_page` before citing a funding figure | [src/sprout/agents/enrich.py](src/sprout/agents/enrich.py) |
 | Tests | `tests/test_evals_golden.py`, `test_evals_metrics.py`, `test_evals_judge.py`, `test_evals_run.py`, `test_injection.py`; additions to `test_web.py`, `test_http.py`, `test_costs.py`, `test_agent_loop.py`, `test_agent_tools.py`, `test_enrich.py` |
 
 Commits: one per step (`implement phase 4 step 1` to `step 8`).
@@ -304,7 +305,7 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 3. **Judge calibration is 9/12 (75%)**, below the 80% bar, so judge rows print as uncalibrated. In the 2-company smoke the judge returned `partial` for both business models. Spot-check the disagreeing pairs (the report prints human-versus-judge counts) and adjust the prompt or the reference notes.
 4. **Live injection run:** set `SPROUT_RUN_LIVE_INJECTION=1` yourself when you want it (spends money).
 5. Registry names differ from the golden names for Builder.ai (ENGINEER.AI GLOBAL LIMITED), Ocado Technology, Improbable, Babylon Health, Satellite Vu and Huma; they look right, and the report prints both names so a bad number is visible.
-6. Unverifiable funding was 7/9 in the smoke: most funding sources are search snippets, which the fabricated-funding check cannot read. Watch this on the baseline.
+6. On the full golden set, 69 of 70 scored funding claims came back unverifiable, almost all because the source was a search snippet the agent never fetched (not a fetch failure or a number mismatch; see [learnings-ph-5.md](learnings/learnings-ph-5.md)). `validate_submission` now rejects a funding field whose source was only seen, not fetched, forcing a `fetch_page` call before the figure can be cited. Not yet re-measured against a full run; confirm the unverifiable rate drops on the next baseline.
 
 ### Decisions locked in
 - Evals write to `data/eval.db` (the runner refuses to reset the live DB); `--score-only` rescoring is free. A failed run persists only its `run_log` row; there is no retry and no partial-facts logic (Phase 6).
@@ -315,6 +316,7 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 - `judge_field` returns `None` without a call when the batch is exhausted; its cost is charged even when it ends without a verdict. Unjudged calibration pairs count as misses.
 - `UrlPolicy.check` also strips a trailing dot from the host.
 - `GATES` holds only category accuracy and fabricated funding. Source-ledger membership, dead cited URLs and live injection failures are report-only (injection failures never change the exit code); gating them is your call when you set the baseline. The judge and calibration always use the strong model, even without `--strong` for enrichment.
+- A funding value's source must be fetched, not just seen in a search snippet: `validate_submission` rejects it otherwise (one repair attempt), rather than loosening `unverifiable_funding` to accept snippet evidence, since that would remove the ledger's only proof the agent read the page it cites. Chosen over loosening the metric because the per-call cost difference is small (`fetch_page` has no flat tool fee, unlike the $0.01/call `web_search`; see [learnings-ph-5.md](learnings/learnings-ph-5.md)).
 
 ### Things later phases must know
 - `SYSTEM_PROMPT` changed (untrusted-content sentence), so `results.md` prompt hashes start from this version.

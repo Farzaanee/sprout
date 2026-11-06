@@ -205,10 +205,10 @@ def test_funding_round_with_an_uncited_url_is_rejected_per_round():
     assert r"funding_rounds[0]" not in str(err.value)
 
 
-def test_funding_rounds_come_from_different_sources_with_ledger_time_and_downgrade():
+def test_funding_rounds_come_from_different_sources_with_ledger_time():
     ledger = SourceLedger()
     ledger.add(FUNDING_URL, fetched=True)
-    ledger.add(SEEN, fetched=False)
+    ledger.add(SEEN, fetched=True)
     raw = submission(
         funding_rounds=[
             fact(SEED, FUNDING_URL, "high", "GBP 1.5m"),
@@ -216,9 +216,27 @@ def test_funding_rounds_come_from_different_sources_with_ledger_time_and_downgra
         ]
     )
     seed, series_a = validate_submission(raw, "ACME", ledger).funding_rounds
-    assert (seed.confidence, series_a.confidence) == (Confidence.HIGH, Confidence.MEDIUM)
+    assert (seed.confidence, series_a.confidence) == (Confidence.HIGH, Confidence.HIGH)
     assert seed.retrieved_at == ledger.get(FUNDING_URL).first_seen_at
     assert str(series_a.source_url) == SEEN
+
+
+def test_funding_value_from_an_unfetched_search_snippet_is_rejected():
+    ledger = ledger_with(FUNDING_URL, fetched=False)
+    raw = submission(
+        total_raised_million_usd=fact(12, FUNDING_URL, "medium", "Reported as US$12m")
+    )
+    with pytest.raises(SubmissionError, match="was only seen in a search snippet, not fetched"):
+        validate_submission(raw, "ACME", ledger)
+
+
+def test_funding_round_from_an_unfetched_search_snippet_is_rejected():
+    ledger = ledger_with(FUNDING_URL, fetched=False)
+    raw = submission(funding_rounds=[fact(SEED, FUNDING_URL, "medium", "GBP 1.5m")])
+    with pytest.raises(
+        SubmissionError, match=r"funding_rounds\[0\]: source_url .* was only seen"
+    ):
+        validate_submission(raw, "ACME", ledger)
 
 
 def test_profile_stage_disagreeing_with_latest_round_is_rejected():
@@ -405,14 +423,24 @@ def test_invalid_after_repair_writes_nothing_but_records_the_cost(session, compa
     assert run.stats["input_tokens"] == 2000
 
 
-def test_funding_without_note_goes_through_repair(session, company, deps_for):
+def test_funding_without_note_goes_through_repair(session, company, make_http):
+    """The one repair attempt is spent on the fetch requirement; a plain `fetch_page` call in
+    between (not a `submit_profile` retry) does not cost a second repair."""
     unnoted = submission(total_raised_million_usd=fact(6, FUNDING_URL, "medium"))
     noted = submission(total_raised_million_usd=fact(6, FUNDING_URL, "medium", "Reported as £5m"))
     client = ScriptedClient(
         server_search_turn([SEEN, FUNDING_URL], ("submit_profile", unnoted)),
+        tool_use_turn(("fetch_page", {"url": FUNDING_URL})),
         tool_use_turn(("submit_profile", noted)),
     )
-    enrich_company(session, company, deps_for(client))
+
+    def handler(request):
+        return httpx.Response(200, text="ACME raised £5m", headers={"content-type": "text/html"})
+
+    fetcher = WebFetcher(make_http(handler), resolver=lambda h: ["1.1.1.1"])
+    settings = Settings(None, None, MODEL, "claude-sonnet-5-5")
+    deps = Deps(client, fetcher, None, settings, MODEL)
+    enrich_company(session, company, deps)
     stored = facts_of(session, company)
     assert stored["total_raised_million_usd"].note == "Reported as £5m"
 

@@ -118,7 +118,10 @@ reported valuation; do not derive it from funding raised, or funding from a valu
 funding_rounds is a list with one entry per round you can find, not just the latest (stage, \
 amount_million_usd, announced date as YYYY-MM-DD, investors). Each round has its own source_url, \
 confidence and note, and rounds may come from different sources (for example one page for the \
-latest raise and another for the funding history). Use an empty list if none is found. If a \
+latest raise and another for the funding history). A search snippet is not enough for a funding \
+figure: fetch_page the source before citing it for total_raised_million_usd, \
+valuation_million_usd or a round's amount_million_usd, or the submission will be rejected. Use \
+an empty list if none is found. If a \
 source gives another currency, convert it rather than leaving the value null, at about 1.3 USD \
 per GBP or 1.1 USD per EUR (an approximate figure is fine). Always put the source's wording in \
 the note for any funding or valuation value, with the ORIGINAL figure, currency and rate used \
@@ -271,11 +274,18 @@ def validate_submission(
             continue
         if not entry.fetched and fact.confidence is Confidence.HIGH:
             fact.confidence = Confidence.MEDIUM  # seen in a search result, never read
-        if name.split("[")[0] in FUNDING_FIELDS and not (fact.note and fact.note.strip()):
-            problems.append(
-                f"{name}: a funding value needs a note quoting the source's wording and the "
-                "original figure and currency."
-            )
+        if name.split("[")[0] in FUNDING_FIELDS:
+            if not entry.fetched:
+                problems.append(
+                    f"{name}: source_url {fact.source_url} was only seen in a search snippet, "
+                    "not fetched. Call fetch_page on it to confirm the figure before citing it "
+                    "for a funding value, or set the value to null."
+                )
+            elif not (fact.note and fact.note.strip()):
+                problems.append(
+                    f"{name}: a funding value needs a note quoting the source's wording and the "
+                    "original figure and currency."
+                )
     latest_round_stage = _latest_round_stage(profile.funding_rounds)
     if (
         profile.stage.value is not None
