@@ -270,3 +270,56 @@ What the observability data says about failure causes: under current code the do
 4. **Cost gate.** Observed max per company is US$0.0265 against the US$0.13 cap and the mean is US$0.0146. A cost-per-company gate in the region of US$0.03 to 0.04 would catch a doubling without false alarms; set it from the baseline run, not from this batch alone.
 5. **Judge input.** `response_text` is empty, so the Phase 4 judge and failure diagnosis cannot rely on it. Diagnosis depends on `tool_name` sequences, `tool_errors` and `stop_reason`; if text is wanted, the tool error message, previously not logged under A7/D17, is now logged as `RunLogStep.tool_error_text` (D37).
 6. **Fix or avoid the 400** (Open items 1) before the eval run, or the baseline will contain `api_error` noise whenever a low iteration cap is used (for example in the tiny-cap guardrail tests).
+
+---
+
+## Phase 4 - Evals & guardrails
+
+**Status: built and smoke-tested; baseline run, gate-setting and live injection run pending (need you).** `uv run pytest` passes (479 tests, 9 live-injection tests skipped by default) and `uv run ruff check` is clean. The harness ran live on 2 companies only (about US$0.085); no full run has been made.
+
+### What was built
+| Item | Where |
+|---|---|
+| `BatchBudget` (pure); `sprout.enrich --max-total-usd` (no cap unless given; remaining targets skipped, exit 1); loop notices name the run's terminal tool | [src/sprout/costs.py](src/sprout/costs.py), [src/sprout/agents/enrich.py](src/sprout/agents/enrich.py), [src/sprout/agents/loop.py](src/sprout/agents/loop.py) |
+| `UrlPolicy`, `DEFAULT_POLICY`, `_is_public_address` (IPv4-mapped and NAT64 unwrapping), `WebFetcher(policy=)`; total `max_seconds` (30) deadline in `HttpClient._send` | [src/sprout/sources/web.py](src/sprout/sources/web.py), [src/sprout/sources/http.py](src/sprout/sources/http.py) |
+| `ALLOWED_ENRICHMENT_TOOLS` with a fail-closed check before `logged_run`; `extra_context`; untrusted-content sentence in `SYSTEM_PROMPT`; `SourceLedger.snapshot`; `stats["sources"]`; `fetch_page_view`; `_TAG` also neutralises `< /untrusted_content>` and `</ untrusted_content>` | [src/sprout/agents/tools.py](src/sprout/agents/tools.py), [src/sprout/agents/enrich.py](src/sprout/agents/enrich.py) |
+| Golden and calibration loaders (`load_golden`, `load_calibration`, `GoldenError`) | [evals/golden.py](evals/golden.py) |
+| Metrics: `parse_amounts_million`, D22 last round, `read_observed` (uses `winning_facts`), per-entry scoring, `aggregate`/`score_all`, `fetched_page_text` | [evals/metrics.py](evals/metrics.py) |
+| LLM judge (`judge_field`, `calibrate`, `tally_verdicts`) | [evals/judge.py](evals/judge.py) |
+| Injection: `fixture_fetcher`, `load_cases`, `run_case`, 9 cases with HTML pages | [evals/fixtures.py](evals/fixtures.py), [evals/injection.py](evals/injection.py), [evals/injection/](evals/injection/) |
+| Runner `python -m evals.run_evals` (flags, table, misses, `GATES`, `--record`) | [evals/run_evals.py](evals/run_evals.py) |
+| Tests | `tests/test_evals_golden.py`, `test_evals_metrics.py`, `test_evals_judge.py`, `test_evals_run.py`, `test_injection.py`; additions to `test_web.py`, `test_http.py`, `test_costs.py`, `test_agent_loop.py`, `test_agent_tools.py`, `test_enrich.py` |
+
+Commits: one per step (`implement phase 4 step 1` to `step 8`).
+
+### Acceptance criteria
+- [x] **`python -m evals.run_evals` runs in one command and prints the metrics table.** Verified live with `--limit 2 --max-total-usd 0.40 --skip-judge` (exit 0; Synthesia US$0.0252, PolyAI US$0.0266), then `--score-only` and `--calibrate --check-urls` on the same two. Covered offline by 27 runner tests (exit codes 0/1/2, `--score-only` without model calls, budget stop, delta and noise, `--record` round trip).
+- [ ] **Baseline thresholds (category accuracy >= 85%, fabricated-funding rate <= 3%) met.** Not measured. The 2-company smoke gave category 1/2 (Synthesia put in "Data, AI infrastructure and developer tools" against golden Sales/marketing or HR) and fabricated funding 0/9 with 7/9 unverifiable (snippet-only sources). The initial `GATES` hold only these two; they are not evaluated on subset runs.
+- [x] **Injection fixtures leave the output unchanged, each a pytest case.** 9 cases, offline tier only: a scripted honest model leaves the profile clean, and a scripted compromised model shows which defences are code-level (forbidden tools rejected, uncited URL rejected by the ledger, attacker host flagged). The live canary tier is collected but skipped unless `SPROUT_RUN_LIVE_INJECTION=1` and a key are set; it was not run. Offline, an injected amount that the model submits from a cited page is accepted by the code and reported as a leak by `run_case`: that defence is the model's, not the code's.
+- [x] **SSRF/private-IP URLs are rejected in tests.** Parametrised over the contract's list (schemes, credentials, localhost, loopback, `::1`, `0.0.0.0`, metadata IP, decimal/octal/hex forms via the resolver seam, mixed public/private records, redirect to private, `::ffff:127.0.0.1`, NAT64, `100.64.0.1`, port 22, `.internal`, `allow_hosts`), plus the 5 MB cap, the 20,000-character text cut and the slow-stream deadline.
+
+### Open items (need you)
+1. **Wrong company number in `evals/golden.yaml`.** `SC428761` (listed for BenevolentAI) is EXSCIENTIA AI LIMITED at Companies House; the other 31 numbers resolve (checked by the implementer against the registry). Correct the BenevolentAI entry, and check the Exscientia comment, before the baseline. Labels were not edited.
+2. **Run the baseline** (`uv run python -m evals.run_evals --record`, about US$0.73 expected, cap `--max-total-usd 1.50`), review fabricated-funding flags, set `GATES` one company below the result, commit `evals/results.md`. `--split holdout` is reported and never gated.
+3. **Judge calibration is 9/12 (75%)**, below the 80% bar, so judge rows print as uncalibrated. In the 2-company smoke the judge returned `partial` for both business models. Spot-check the disagreeing pairs (the report prints human-versus-judge counts) and adjust the prompt or the reference notes.
+4. **Live injection run:** set `SPROUT_RUN_LIVE_INJECTION=1` yourself when you want it (spends money).
+5. Registry names differ from the golden names for Builder.ai (ENGINEER.AI GLOBAL LIMITED), Ocado Technology, Improbable, Babylon Health, Satellite Vu and Huma; they look right, and the report prints both names so a bad number is visible.
+6. Unverifiable funding was 7/9 in the smoke: most funding sources are search snippets, which the fabricated-funding check cannot read. Watch this on the baseline.
+
+### Decisions locked in
+- Evals write to `data/eval.db` (the runner refuses to reset the live DB); `--score-only` rescoring is free. A failed run persists only its `run_log` row; there is no retry and no partial-facts logic (Phase 5).
+- Gates apply to complete full-set runs only (no `--limit`, `--only`, subset `--split` or budget stop). The Delta column compares with the latest recorded complete full run of the same split; a change under 2 companies is marked noise.
+- A `skipped_budget` entry, or a `--score-only` entry with no run, is unscored and makes the run incomplete (exit 2).
+- Funding match: a golden round with a null amount matches an observed null amount; unexpected disclosure counts any observed round with an amount; a currency marker without a unit (`$12,500,000`) is accepted by the number matcher.
+- `--max-total-usd` defaults to 1.50 in `run_evals` and to no cap in `sprout.enrich`.
+- `judge_field` returns `None` without a call when the batch is exhausted; its cost is charged even when it ends without a verdict. Unjudged calibration pairs count as misses.
+- `UrlPolicy.check` also strips a trailing dot from the host.
+- `GATES` holds only category accuracy and fabricated funding. Source-ledger membership, dead cited URLs and live injection failures are report-only (injection failures never change the exit code); gating them is your call when you set the baseline. The judge and calibration always use the strong model, even without `--strong` for enrichment.
+
+### Things later phases must know
+- `SYSTEM_PROMPT` changed (untrusted-content sentence), so `results.md` prompt hashes start from this version.
+- Phase 5 reuses `BatchBudget` (not thread-safe: add a lock), `enrich_with_result(extra_context=)`, `stats["sources"]` and the single per-company seam `_enrich_entry` in the runner. `ALLOWED_ENRICHMENT_TOOLS` covers only the enrichment agent; the classifier, news and verifier agents need their own sets.
+- Phase 7's swap of `fetch_page` must update `ALLOWED_ENRICHMENT_TOOLS` on purpose, keep feeding `SourceLedger`, and keep `UrlPolicy`, size caps and robots; `fixture_fetcher` tests cover only the `WebFetcher` path.
+- Phase 8's eval job needs both API keys (so not for fork PRs); exit codes 0/1/2 map to job outcomes.
+- A page asking the model to fetch an attacker URL on a public host passes `UrlPolicy`; this is a documented residual risk, visible only in fixture runs.
+- `ruff format --check` flags `src/sprout/app/dashboard.py` and `tests/test_app_queries.py` (pre-existing; CI does not enforce format).
