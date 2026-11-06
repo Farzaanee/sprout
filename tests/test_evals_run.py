@@ -350,7 +350,7 @@ def test_calibration_at_80_percent_lifts_the_uncalibrated_label(env, capsys):
     assert code == 0
     assert "| Judge calibration | 12/12 (100.0%) | n/a | >= 80% calibrated |" in out
     assert "[uncalibrated]" not in out
-    assert "Calibration (human grade -> judge verdict): correct->correct 5" in out
+    assert "Calibration (human grade -> judge verdict): correct->correct 4" in out
 
 
 # ---- liveness -------------------------------------------------------------------------------

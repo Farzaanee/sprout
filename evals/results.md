@@ -108,3 +108,35 @@ Gates: FAIL (category_accuracy).
   - China Britain Artificial Intelligence Association target_user: partial (The candidate narrows the users to UK-based Chinese AI professionals, while the reference says UK-based AI professionals and researchers in the context of UK-China collaboration, so the candidate may exclude non-Chinese members. It also adds industry and academic contacts that the reference doesn't mention.)
 
 <!-- sprout-eval-counts {"split": "all", "full": true, "scored": 32, "profiles_submitted": [29, 32], "infrastructure_errors": [0, 32], "repair_rate": [24, 32], "category_accuracy": [24, 29], "stage_accuracy": [21, 29], "funding_exact": [11, 18], "funding_within_10pct": [12, 18], "unexpected_disclosure": [2, 11], "fabricated_funding": [0, 70], "unverifiable_funding": [69, 70], "source_ledger": [260, 260], "thin_other": [3, 29], "ledger_unverifiable": 0, "cost_mean_usd": "0.0230909375", "cost_max_usd": "0.027178", "judge_business_model": [3, 25], "judge_target_user": [6, 26]} -->
+
+## 2026-11-06 | aff659f | claude-haiku-5-5 | effort low | prompt ea9da8f7 | split all | scored 32 of 32
+
+Labels: verified, dated 2026-11-05. Judge model claude-sonnet-5-5. Eval database data/eval.db.
+
+Calibration (human grade -> judge verdict): correct->correct 2, correct->partial 3, incorrect->incorrect 4, partial->partial 3
+
+<!-- sprout-eval-counts {"split": "all", "full": true, "scored": 32, "profiles_submitted": [29, 32], "infrastructure_errors": [0, 32], "repair_rate": [24, 32], "category_accuracy": [24, 29], "stage_accuracy": [20, 29], "funding_exact": [12, 20], "funding_within_10pct": [13, 20], "unexpected_disclosure": [0, 9], "fabricated_funding": [0, 70], "unverifiable_funding": [69, 70], "source_ledger": [260, 260], "thin_other": [3, 29], "ledger_unverifiable": 0, "cost_mean_usd": "0.0230909375", "cost_max_usd": "0.027178", "calibration": [9, 12]} -->
+
+## 2026-11-06 | aff659f | claude-haiku-5-5 | effort low | prompt ea9da8f7 | split all | scored 32 of 32
+
+Labels: verified, dated 2026-11-05. Judge model claude-sonnet-5-5. Eval database data/eval.db.
+
+Calibration (human grade -> judge verdict): correct->correct 2, correct->partial 3, incorrect->incorrect 4, partial->partial 3
+
+<!-- sprout-eval-counts {"split": "all", "full": true, "scored": 32, "profiles_submitted": [29, 32], "infrastructure_errors": [0, 32], "repair_rate": [24, 32], "category_accuracy": [24, 29], "stage_accuracy": [20, 29], "funding_exact": [12, 20], "funding_within_10pct": [13, 20], "unexpected_disclosure": [0, 9], "fabricated_funding": [0, 70], "unverifiable_funding": [69, 70], "source_ledger": [260, 260], "thin_other": [3, 29], "ledger_unverifiable": 0, "cost_mean_usd": "0.0230909375", "cost_max_usd": "0.027178", "calibration": [9, 12]} -->
+
+## 2026-11-06 | aff659f | claude-haiku-5-5 | effort low | prompt ea9da8f7 | split all | scored 32 of 32
+
+Labels: verified, dated 2026-11-05. Judge model claude-sonnet-5-5. Eval database data/eval.db.
+
+Calibration (human grade -> judge verdict): correct->correct 3, correct->partial 1, incorrect->incorrect 4, partial->partial 4
+
+<!-- sprout-eval-counts {"split": "all", "full": true, "scored": 32, "profiles_submitted": [29, 32], "infrastructure_errors": [0, 32], "repair_rate": [24, 32], "category_accuracy": [24, 29], "stage_accuracy": [20, 29], "funding_exact": [12, 20], "funding_within_10pct": [13, 20], "unexpected_disclosure": [0, 9], "fabricated_funding": [0, 70], "unverifiable_funding": [69, 70], "source_ledger": [260, 260], "thin_other": [3, 29], "ledger_unverifiable": 0, "cost_mean_usd": "0.0230909375", "cost_max_usd": "0.027178", "calibration": [11, 12]} -->
+
+## 2026-11-06 | aff659f | claude-haiku-5-5 | effort low | prompt ea9da8f7 | split all | scored 32 of 32
+
+Labels: verified, dated 2026-11-05. Judge model claude-sonnet-5-5. Eval database data/eval.db.
+
+Calibration (human grade -> judge verdict): correct->correct 4, incorrect->incorrect 4, partial->partial 4
+
+<!-- sprout-eval-counts {"split": "all", "full": true, "scored": 32, "profiles_submitted": [29, 32], "infrastructure_errors": [0, 32], "repair_rate": [24, 32], "category_accuracy": [24, 29], "stage_accuracy": [20, 29], "funding_exact": [12, 20], "funding_within_10pct": [13, 20], "unexpected_disclosure": [0, 9], "fabricated_funding": [0, 70], "unverifiable_funding": [69, 70], "source_ledger": [260, 260], "thin_other": [3, 29], "ledger_unverifiable": 0, "cost_mean_usd": "0.0230909375", "cost_max_usd": "0.027178", "calibration": [12, 12]} -->

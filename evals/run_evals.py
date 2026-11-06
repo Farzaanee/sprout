@@ -568,16 +568,22 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
         gate_line = "Gates not evaluated: subset run (only a complete --split all run is gated)."
     else:
         gate_line = f"Gates: {'FAIL (' + ', '.join(failed) + ')' if failed else 'pass'}."
+    # A calibration-only invocation (--calibrate --skip-judge) scores nothing new: the full
+    # table and misses list would just repeat the last real run's numbers verbatim.
+    calibration_only = args.calibrate and args.skip_judge
     sections = [
         f"## {datetime.now(UTC):%Y-%m-%d} | {_git_short_sha()} | {model} | effort {args.effort} "
         f"| prompt {hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()[:8]} | split {args.split} "
         f"| scored {scores.scored} of {len(entries)}",
         f"Labels: verified, dated {_label_dates(entries)}. Judge model {settings.strong_model}"
         f"{judge_note}. Eval database {db}.",
-        table,
-        gate_line,
-        "### Misses\n" + render_misses(pairs, scores, ch_names, extras.judge_notes),
     ]
+    if not calibration_only:
+        sections += [
+            table,
+            gate_line,
+            "### Misses\n" + render_misses(pairs, scores, ch_names, extras.judge_notes),
+        ]
     if extras.calibration is not None:
         cells = sorted(extras.calibration.confusion.items())
         sections.append(

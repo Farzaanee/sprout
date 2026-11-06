@@ -53,7 +53,7 @@ def test_real_golden_file_loads():
 def test_real_calibration_file_loads():
     pairs = load_calibration()
     assert len(pairs) == 12
-    assert Counter(p.verdict for p in pairs) == {"correct": 5, "partial": 3, "incorrect": 4}
+    assert Counter(p.verdict for p in pairs) == {"correct": 4, "partial": 4, "incorrect": 4}
     assert Counter(p.field for p in pairs) == {"business_model": 7, "target_user": 5}
 
 

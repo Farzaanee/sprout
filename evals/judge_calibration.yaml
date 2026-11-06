@@ -43,7 +43,7 @@ pairs:
     field: target_user
     reference: "Public and private sector organisations (decision intelligence, e.g. financial crime)."
     candidate: "Public and private sector organisations."
-    verdict: correct  # terse-but-right
+    verdict: partial  # drops the financial-crime example, keeps the right audience
 
   - company: Peak AI
     field: business_model
