@@ -235,6 +235,11 @@ def validate_submission(
     """
     data = {k: v for k, v in raw.items() if k not in _NOT_MODEL_OUTPUT}
     data["name"] = company_name
+    # category is model judgement against a fixed taxonomy, not a sourced fact (see models.py),
+    # so an unrecognized value falls back to its own default instead of spending the one repair
+    # the schema guarantees (D13) on a field that already has a safe answer.
+    if data.get("category") not in {c.value for c in Category}:
+        data["category"] = Category.OTHER.value
     now = datetime.now(UTC)
 
     def stamped(value: dict[str, Any]) -> dict[str, Any]:

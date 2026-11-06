@@ -135,6 +135,12 @@ def test_valid_submission_gets_name_and_ledger_time_stamped():
     assert profile.category is Category.ENTERPRISE_SOFTWARE_AND_CLOUD
 
 
+def test_unrecognized_category_falls_back_to_other_instead_of_a_repair():
+    raw = submission(category="Generative AI video")
+    profile = validate_submission(raw, "ACME", ledger_with(SEEN))
+    assert profile.category is Category.OTHER
+
+
 def test_model_supplied_retrieved_at_and_news_are_ignored():
     ledger = ledger_with(SEEN)
     raw = submission(news=[{"title": "x", "url": "https://x.example"}])
