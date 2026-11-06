@@ -15,15 +15,21 @@ from sprout.agents.loop import Tool, ToolOutcome
 from sprout.sources.companies_house import PUBLIC_COMPANY_URL, CompaniesHouseClient
 from sprout.sources.http import FetchError
 from sprout.sources.rss import normalise_url
-from sprout.sources.web import WebFetcher
+from sprout.sources.web import Page, WebFetcher
 
 TOOL_RESULT_MAX_CHARS = 8_000
 TRUNCATION_MARKER = "\n[truncated]"
 WEB_SEARCH_TOOL_TYPE = "web_search_20260209"
 WEB_SEARCH_MAX_USES = 3
 FILING_ITEMS = 15
+# Every tool name an enrichment run may offer the model. Update on purpose (Phase 7 swaps
+# fetch_page for an MCP tool); `enrich.py` refuses to run with anything else.
+ALLOWED_ENRICHMENT_TOOLS = frozenset(
+    {"web_search", "fetch_page", "lookup_companies_house", "submit_profile"}
+)
 
-_TAG = re.compile(r"<(/?)untrusted_content", re.IGNORECASE)
+# Tolerates case and whitespace inside the tag so `< /UNTRUSTED_CONTENT >` cannot close our block.
+_TAG = re.compile(r"<\s*(/?)\s*untrusted_content", re.IGNORECASE)
 
 
 @dataclass
@@ -60,17 +66,36 @@ class SourceLedger:
     def urls(self) -> list[str]:
         return [e.url for e in self._entries.values()]
 
+    def snapshot(self) -> list[dict[str, Any]]:
+        """JSON-ready `{"url", "fetched"}` per entry, in first-seen order."""
+        return [{"url": e.url, "fetched": e.fetched} for e in self._entries.values()]
+
     def __len__(self) -> int:
         return len(self._entries)
 
 
-def wrap_untrusted(source_url: str, text: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -> str:
-    """Truncate `text`, neutralise any delimiter in it, and mark it as data from `source_url`."""
+def _truncate(text: str, max_chars: int) -> str:
     if len(text) > max_chars:
-        text = text[:max_chars].rstrip() + TRUNCATION_MARKER
+        return text[:max_chars].rstrip() + TRUNCATION_MARKER
+    return text
+
+
+def fetch_page_view(page: Page) -> str:
+    """The title line plus text of a page, capped: what the model reads from `fetch_page`
+    (before delimiter wrapping). The evals number-match check reuses it."""
+    title = f"Title: {page.title}\n" if page.title else ""
+    return _truncate(title + page.text, TOOL_RESULT_MAX_CHARS)
+
+
+def _wrap(source_url: str, text: str) -> str:
     text = _TAG.sub(r"&lt;\1untrusted_content", text)
     safe_url = source_url.replace('"', "%22").replace("<", "%3C").replace(">", "%3E")
     return f'<untrusted_content source="{safe_url}">\n{text}\n</untrusted_content>'
+
+
+def wrap_untrusted(source_url: str, text: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -> str:
+    """Truncate `text`, neutralise any delimiter in it, and mark it as data from `source_url`."""
+    return _wrap(source_url, _truncate(text, max_chars))
 
 
 def _fetch_page_tool(fetcher: WebFetcher, ledger: SourceLedger) -> Tool:
@@ -84,8 +109,7 @@ def _fetch_page_tool(fetcher: WebFetcher, ledger: SourceLedger) -> Tool:
             return ToolOutcome(f"Could not fetch {url}: {exc}", is_error=True)
         ledger.add(url.strip(), fetched=True, at=page.retrieved_at)
         ledger.add(page.url, fetched=True, at=page.retrieved_at)
-        title = f"Title: {page.title}\n" if page.title else ""
-        return ToolOutcome(wrap_untrusted(page.url, title + page.text))
+        return ToolOutcome(_wrap(page.url, fetch_page_view(page)))
 
     return Tool(
         spec={
