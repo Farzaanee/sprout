@@ -20,7 +20,7 @@ from sqlmodel import Session
 
 from sprout import hello, ingest
 from sprout.app import queries
-from sprout.config import get_settings
+from sprout.config import DEFAULT_EVAL_DB_PATH, get_settings
 from sprout.db import RunKind, get_engine, init_db
 
 DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
@@ -100,7 +100,8 @@ def _engine(db_path: str):
 
 
 def _session() -> Session:
-    return Session(_engine(str(get_settings().db_path)))
+    db_path = st.session_state.get("db_path", str(get_settings().db_path))
+    return Session(_engine(db_path))
 
 
 def _run_captured(func, *args) -> tuple[int, str]:
@@ -132,6 +133,7 @@ def render_progress() -> None:
             st.caption(p.status_line)
 
     st.subheader("Data in the database")
+    render_db_picker()
     with _session() as session:
         counts = queries.count_rows(session)
         runs = queries.recent_runs(session)
@@ -846,6 +848,15 @@ def render_run_and_test() -> None:
         code, output = _run_captured(hello.main)
         (st.success if code == 0 else st.error)(f"exit code {code}")
         st.code(output)
+
+
+def render_db_picker() -> None:
+    default_db = str(get_settings().db_path)
+    options = {default_db: "Main database"}
+    if Path(DEFAULT_EVAL_DB_PATH).exists():
+        options[DEFAULT_EVAL_DB_PATH] = "Eval database"
+    choice = st.selectbox("Database", list(options), format_func=lambda p: options[p])
+    st.session_state["db_path"] = choice
 
 
 def main() -> None:

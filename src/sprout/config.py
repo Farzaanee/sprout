@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 DEFAULT_DB_PATH = "data/sprout.db"
 DEFAULT_SNAPSHOT_DB_PATH = "data/sprout_snapshot.db"
+DEFAULT_EVAL_DB_PATH = "data/eval.db"
 DEFAULT_CACHE_DIR = ".cache/http"
 
 # Cheap model for bulk extraction/classification; stronger one for orchestration,

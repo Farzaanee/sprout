@@ -396,11 +396,21 @@ entries:
     status: Acquired or merged
     status_sources:
       - https://adsgroup.org.uk/knowledge/industry-member-news/darktrace-formally-completes-its-acquisition-by-thoma-bravo
-    stage: Unknown
+    stage: Series E
     stage_sources:
       - https://adsgroup.org.uk/knowledge/industry-member-news/darktrace-formally-completes-its-acquisition-by-thoma-bravo
-    last_round: null
-    total_raised: null  # n/a (public company until 2024)
+    last_round:
+      stage: Series E
+      amount_million_usd: 50
+      announced: 2018-09-26
+      note: "Darktrace is registered under the ticker LSE:DARK. Their stock opened with £250.00 in its Apr 30, 2021 IPO"
+      sources:
+        - https://www.crunchbase.com/organization/darktrace
+    total_raised:
+      amount_million_usd: 230
+      sources:
+        - https://www.crunchbase.com/organization/darktrace
+    # n/a (public company until 2024)
     valuation:
       amount_million_usd: 5300
       note: "$5.3B (Thoma Bravo acquisition price)"
@@ -436,13 +446,21 @@ entries:
     stage: Unknown
     stage_sources:
       - https://www.businesswire.com/news/home/20250312584164/en
-    last_round: null
+    last_round:
+      stage: Unknown
+      amount_million_usd: 90
+      announced: 2019-09-01
+      sources:
+        - https://multiples.vc/private-comps/benevolentai
     total_raised:
       amount_million_usd: 378
       note: "~$378M"
       sources:
         - https://intuitionlabs.ai/companies/biotech/benevolentai
-    valuation: null  # not public
+    valuation:
+      amount_million_usd: 1000
+      sources:
+        - https://multiples.vc/private-comps/benevolentai
     business_model: "Collaboration revenue: the AstraZeneca deal generated about GBP 32M since 2019, with milestone and tiered-royalty eligibility; Merck KGaA collaboration expected to bring development milestone revenue."
     business_model_sources:
       - https://www.benevolent.com/news-and-media/press-releases-and-in-media/interim-results-six-months-ended-30-june-2024/

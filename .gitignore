@@ -18,6 +18,7 @@ CLAUDE.md
 *.db
 *.db-journal
 !data/sprout_snapshot.db
+!data/eval.db
 .cache/
 
 # Tooling

@@ -53,7 +53,7 @@ from sprout.agents.enrich import (
     resolve_company,
 )
 from sprout.agents.loop import Budget, MessagesClient, make_client
-from sprout.config import MissingConfigError, Settings, get_settings
+from sprout.config import DEFAULT_EVAL_DB_PATH, MissingConfigError, Settings, get_settings
 from sprout.costs import BatchBudget
 from sprout.db import Company, delete_profile, get_engine, init_db
 from sprout.sources import companies_house, web
@@ -61,7 +61,7 @@ from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.http import FetchError
 from sprout.sources.web import WebFetcher
 
-DEFAULT_DB = "data/eval.db"
+DEFAULT_DB = DEFAULT_EVAL_DB_PATH
 DEFAULT_MAX_TOTAL_USD = Decimal("1.50")
 RESULTS_PATH = EVALS_DIR / "results.md"
 NOISE_COMPANIES = 2  # a change smaller than this is within run-to-run noise (one company ~3 points)

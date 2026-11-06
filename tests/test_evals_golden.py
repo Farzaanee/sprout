@@ -47,7 +47,7 @@ def test_real_golden_file_loads():
     assert len(entries) == 32
     assert Counter(e.split for e in entries) == {"dev": 22, "holdout": 10}
     assert sum(len(e.categories) > 1 for e in entries) == 8
-    assert sum(e.last_round is None for e in entries) == 12
+    assert sum(e.last_round is None for e in entries) == 10
 
 
 def test_real_calibration_file_loads():
