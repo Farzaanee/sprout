@@ -2,7 +2,7 @@
 
 An agent system that discovers UK AI startups and keeps a sourced profile for each: category, stage, funding, business model, target user and recent news. Every fact carries a source URL, a retrieval time and a confidence level; "not disclosed" is a valid value.
 
-**Status:** Phases 0–1 (setup, data ingestion) are done and a Streamlit progress console exists. The enrichment agents, MCP server and evals are planned. See [docs/implementation-notes.md](docs/implementation-notes.md).
+**Status:** Phases 1–2 (setup, data ingestion) are done and a Streamlit progress console exists. The enrichment agents, MCP server and evals are planned. See [docs/implementation-notes.md](docs/implementation-notes.md).
 
 ## Setup
 

@@ -2,7 +2,7 @@
 
 Running log of what was built, why, and what later phases need to know. Newest phase last.
 
-## Phase 0 - Setup & definitions
+## Phase 1 - Setup & definitions
 
 **Status: done except two items that need your credentials** (see "Open items").
 
@@ -25,33 +25,33 @@ Running log of what was built, why, and what later phases need to know. Newest p
 
 ### Open items (need you)
 1. **Anthropic API key**: create one, set a monthly spend limit in the console *before* the first paid call, `cp .env.example .env`, fill in `ANTHROPIC_API_KEY`, then run `uv run python -m sprout.hello` and `uv run pytest -m live`.
-2. **Companies House API key**: register at developer.company-information.service.gov.uk and put it in `COMPANIES_HOUSE_API_KEY` (needed from Phase 1).
+2. **Companies House API key**: register at developer.company-information.service.gov.uk and put it in `COMPANIES_HOUSE_API_KEY` (needed from Phase 2).
 3. **Git**: `uv init` ran `git init` on branch `main`; there are no commits yet (nothing was committed). `.gitignore` is in place, so `git add .` will not pick up `.env`.
 
 ### Decisions locked in
 - **Taxonomy (20, frozen):** Fintech and payments, Enterprise software and cloud, Data AI infrastructure and developer tools, Sales marketing and customer experience software, HR and people software, Cybersecurity, Biotech and pharma, Healthtech and digital health, Electric vehicles and batteries, Climate, energy and cleantech, Semiconductors and AI hardware, Robotics and automation, Defense, aerospace and space, E-commerce and retail tech, Consumer social, media and gaming, Logistics and supply chain, Deep tech and quantum, Consultancy and services, Legal tech and compliance, Other. Changing it later invalidates classifications and the golden set. Tests assert the exact 20 labels and contain `Other`.
 - **Stage enum:** Pre-seed, Seed, Series A, Series B, Series C, Series D, Series E, Series F, Growth, Unknown.
-- **`Sourced[T]`** = `value`, `source_url`, `retrieved_at`, `confidence` (low/medium/high), plus an optional `note` (added for Phase 2's "funding in USD with original currency noted", e.g. `"US$12m converted"`).
+- **`Sourced[T]`** = `value`, `source_url`, `retrieved_at`, `confidence` (low/medium/high), plus an optional `note` (added for Phase 3's "funding in USD with original currency noted", e.g. `"US$12m converted"`).
   - `value=None` means "not disclosed" and is always valid.
   - **A non-null value without `source_url` fails validation.** This enforces "provenance over completeness" in code, not only in the prompt.
   - `source_url` must be `http(s)`; `retrieved_at` must be timezone-aware; unknown fields are rejected (`extra="forbid"` on every model).
 - **Every `Sourced` field defaults to "not disclosed"** (via `default_factory`, so profiles never share an instance). An empty `CompanyProfile(name=...)` is valid and states nothing it cannot back up.
-- **`category` is a plain `Category`, not `Sourced`.** It is a classification against our own taxonomy, not a fact found at a URL. Defaults to `Other`. If you'd rather have a per-profile rationale/confidence, add it in Phase 5 with the classifier.
+- **`category` is a plain `Category`, not `Sourced`.** It is a classification against our own taxonomy, not a fact found at a URL. Defaults to `Other`. If you'd rather have a per-profile rationale/confidence, add it in Phase 6 with the classifier.
 - **Money is whole USD as `int` (`>= 0`)**, not float, to avoid rounding artefacts; original-currency detail goes in `note`.
 - **`funding_rounds`** is `list[Sourced[FundingRound]]` (each round has stage, amount_million_usd, announced date, investors, and its own source, confidence and note), stored in the `funding_round` table and replaced wholesale on each `save_profile`. `founded` is bounded to 1800–2100.
-- **Models:** see `docs/architecture/4. cross-cutting.md` for the model routing and env overrides. IDs are taken from the `claude-api` skill's model table (dated 2026-10-06); re-check before Phase 2.
-- **Deviation from the plan's layout:** `costs.py` and `db.py` are not created yet (they belong to Phases 1–2). No console-script entry point (`uv init` adds one; removed as unused).
+- **Models:** see `docs/architecture/4. cross-cutting.md` for the model routing and env overrides. IDs are taken from the `claude-api` skill's model table (dated 2026-10-06); re-check before Phase 3.
+- **Deviation from the plan's layout:** `costs.py` and `db.py` are not created yet (they belong to Phases 2–3). No console-script entry point (`uv init` adds one; removed as unused).
 
 ### Things later phases must know
 - **`anthropic` is now 1.x, built on `httpx2`, not `httpx`.** Don't pass a plain `httpx.Client` to the SDK; use `DefaultHttpxClient`. Our own code (Companies House, fetcher) can keep using `httpx`; they are separate libraries.
-- **Phase 2 (`submit_profile`):** the plan's "final tool whose input schema is the Pydantic model" still works, but on Claude Sonnet 5.5 / Opus 5.5 / Fable 5.1 *forced* `tool_choice` (`any`/`tool`) returns a 400. Use `tool_choice: auto` + a prompt instruction naming the tool, with `strict: true` on the tool, or `output_config.format` structured outputs. Haiku 5.5 should be checked against `shared/model-migration.md` in the skill.
-- **Thinking tokens count against `max_tokens`** on the 5.x models (adaptive thinking is on by default; effort defaults to `medium` on Haiku 5.5). `hello.py` uses `effort: low` and `max_tokens=1024` for that reason. Set effort explicitly per agent; budget caps in Phase 2 must count thinking tokens.
+- **Phase 3 (`submit_profile`):** the plan's "final tool whose input schema is the Pydantic model" still works, but on Claude Sonnet 5.5 / Opus 5.5 / Fable 5.1 *forced* `tool_choice` (`any`/`tool`) returns a 400. Use `tool_choice: auto` + a prompt instruction naming the tool, with `strict: true` on the tool, or `output_config.format` structured outputs. Haiku 5.5 should be checked against `shared/model-migration.md` in the skill.
+- **Thinking tokens count against `max_tokens`** on the 5.x models (adaptive thinking is on by default; effort defaults to `medium` on Haiku 5.5). `hello.py` uses `effort: low` and `max_tokens=1024` for that reason. Set effort explicitly per agent; budget caps in Phase 3 must count thinking tokens.
 - **Server-side web tools** are now `web_search_20260209` / `web_fetch_20260209` on Sonnet 5.5; older type strings in the plan's era are stale. Don't declare `code_execution` alongside them.
-- **Pydantic generics:** `Sourced[T]` uses PEP 695 syntax; instantiate as `Sourced[int](...)`. Bare `Sourced(...)` has an unparameterised `T` and won't validate the value type. Database storage (Phase 1) will need to flatten `Sourced` into `fact` rows (value serialised as JSON).
+- **Pydantic generics:** `Sourced[T]` uses PEP 695 syntax; instantiate as `Sourced[int](...)`. Bare `Sourced(...)` has an unparameterised `T` and won't validate the value type. Database storage (Phase 2) will need to flatten `Sourced` into `fact` rows (value serialised as JSON).
 - **Ruff rules:** `E, F, I, UP, B`, line length 100. CI runs `ruff check` and `pytest` only; `ruff format` is applied locally but not enforced.
 - **CI action versions** (`actions/checkout@v4`, `astral-sh/setup-uv@v6`) were written from memory and haven't been run yet; confirm the first run is green.
 
-## Phase 1 - Data foundations
+## Phase 2 - Data foundations
 
 **Status: done.** Verified end to end against the live Companies House API and the RSS feeds.
 
@@ -76,34 +76,34 @@ Running log of what was built, why, and what later phases need to know. Newest p
 
 ### Open items (need you)
 1. **Companies House key (resolved).** The first key returned `401` because it belonged to a *test* application: test keys only work on `https://api-sandbox.company-information.service.gov.uk` (which holds generated test data only and returns no real companies). Sprout needs a key from a **live** application, which is what `.env` now has. Keep the two environments apart if you create more keys.
-2. **Candidate quality needs a look before Phase 2.** The filter is name-based, so the 876 candidates include many micro-companies, consultancies and shells (e.g. "Ai Personal Trainer Ltd", "Hamilton Robotics Limited") and will miss AI startups with non-descriptive names. Matched keywords: robotics 190+, artificial intelligence 150, ai 112, analytics 98, neural 81. Treat as a candidate pool; Phase 2 enrichment and Phase 5 classification decide what is a real startup. Options if the pool is too noisy: require a tech SIC code for all keywords, raise the score threshold, or seed from investor portfolio/startup lists (the plan's other discovery sources).
-3. Phase 0's Anthropic-key items are unchanged by this phase.
+2. **Candidate quality needs a look before Phase 3.** The filter is name-based, so the 876 candidates include many micro-companies, consultancies and shells (e.g. "Ai Personal Trainer Ltd", "Hamilton Robotics Limited") and will miss AI startups with non-descriptive names. Matched keywords: robotics 190+, artificial intelligence 150, ai 112, analytics 98, neural 81. Treat as a candidate pool; Phase 3 enrichment and Phase 6 classification decide what is a real startup. Options if the pool is too noisy: require a tech SIC code for all keywords, raise the score threshold, or seed from investor portfolio/startup lists (the plan's other discovery sources).
+3. Phase 1's Anthropic-key items are unchanged by this phase.
 
 ### Decisions locked in
 - **One HTTP entry point.** All network code goes through `HttpClient.get`. 2xx and 404 responses are cached (404 so a missing `robots.txt` or company is not re-requested); 3xx are returned uncached; other 4xx raise `FetchError` without retrying; 429/5xx/transport errors retry (4 retries, 1s·2ⁿ, raised to `Retry-After`, capped at 60s). `max_age` is per call: Companies House 7 days, feeds 6 hours, pages 7 days, `robots.txt` 1 day. Cache files are JSON under `.cache/http/` keyed by a hash of the URL + sorted params; **the API key lives only in the `httpx` client's auth, never in a key or file.** There is no `--refresh` flag; delete `.cache/http/` to force refetching.
 - **Companies House rate limit** is 550 calls / 300 s (the API allows ~600). Web pages and feeds are limited to 1 request per host per 2 s / 1 s.
 - **Discovery uses `/advanced-search/companies`** (`company_name_includes`, `company_status=active`, `incorporated_from=2012-01-01`), because its results carry SIC codes and the plain `/search/companies` results do not. A 404 from either is treated as "no results". Verified live: the parameters work (the response also carries `hits` and a `top_hit`; `top_hit` is repeated in `items`, so we ignore it).
-- **Candidate filter** (`assess`): requires active status and incorporation ≥ 2012-01-01. A *strong* name keyword (artificial intelligence, machine learning, deep learning, neural, generative, computer vision, llm, robot*) is enough on its own; a *weak* one (`ai`, intelligen*, cognitive, autonomous, algorithm*, analytics) counts only together with a tech SIC code (62011/62012/62020/62090/63110/63120/63990/72190), so "Ai Restaurant Ltd" is rejected. Whole-word matching, so "Airways" ≠ "ai". Score = 2/strong + 1/weak + 1 for a tech SIC. Only the name and SIC are used; the search API has no description. `Company.candidate_score` and `matched_keywords` are stored so Phase 5 can rank or re-filter without re-querying.
+- **Candidate filter** (`assess`): requires active status and incorporation ≥ 2012-01-01. A *strong* name keyword (artificial intelligence, machine learning, deep learning, neural, generative, computer vision, llm, robot*) is enough on its own; a *weak* one (`ai`, intelligen*, cognitive, autonomous, algorithm*, analytics) counts only together with a tech SIC code (62011/62012/62020/62090/63110/63120/63990/72190), so "Ai Restaurant Ltd" is rejected. Whole-word matching, so "Airways" ≠ "ai". Score = 2/strong + 1/weak + 1 for a tech SIC. Only the name and SIC are used; the search API has no description. `Company.candidate_score` and `matched_keywords` are stored so Phase 6 can rank or re-filter without re-querying.
 - **Company identity = Companies House number** (unique index); the upsert refreshes name/status/SIC/locality. Companies found later by other means have `company_number = NULL`.
 - **`fact` table** = one row per (company, field, source_url): `value_json` (via `pydantic_core.to_json`, so models like `FundingRound` serialise), `source_url`, `retrieved_at`, `confidence`, `note`. `save_fact` upserts on that key; `value_json IS NULL` represents "not disclosed". Ingestion writes two registry-sourced facts per company, both `confidence=medium` and sourced to the public Companies House page: `hq` (registered-office locality) and `founded` (incorporation year; the note says it can differ from the real founding year). `retrieved_at` is the ingest time, and a cached response can be up to 7 days old.
 - **Timestamps are timezone-aware UTC** everywhere: this SQLModel version rejects naive datetimes.
-- **Table class names** are `Company`, `Fact`, `NewsItemRow` (avoids clashing with the Pydantic `NewsItem`) and `RunLog`; table names match the plan. `run_log` stores `kind`, status (`running|ok|error`), start/finish, `stats` JSON (including `http_requests`/`cache_hits`) and the error. Cost logging is still Phase 2 (`costs.py`).
-- **News feeds (6):** Sifted, UKTN, Tech.eu, The Guardian (AI), TechCrunch (Startups), BBC (Technology). One more than the plan's 3–5, to clear 100 items from a single fetch. They are not filtered for UK relevance (Tech.eu/TechCrunch are broader); Phase 5's news agent should match items to companies. A broken feed is reported in `failed_feeds` and exit code 1, but does not stop the others. Only title, link, a ≤500-char plain-text summary and date are stored; URLs are deduped after stripping `utm_*`/`fbclid`/fragments.
+- **Table class names** are `Company`, `Fact`, `NewsItemRow` (avoids clashing with the Pydantic `NewsItem`) and `RunLog`; table names match the plan. `run_log` stores `kind`, status (`running|ok|error`), start/finish, `stats` JSON (including `http_requests`/`cache_hits`) and the error. Cost logging is still Phase 3 (`costs.py`).
+- **News feeds (6):** Sifted, UKTN, Tech.eu, The Guardian (AI), TechCrunch (Startups), BBC (Technology). One more than the plan's 3–5, to clear 100 items from a single fetch. They are not filtered for UK relevance (Tech.eu/TechCrunch are broader); Phase 6's news agent should match items to companies. A broken feed is reported in `failed_feeds` and exit code 1, but does not stop the others. Only title, link, a ≤500-char plain-text summary and date are stored; URLs are deduped after stripping `utm_*`/`fbclid`/fragments.
 - **Web fetcher safety** (URLs will come from untrusted scraped content): only `http(s)`; every host (and every redirect hop, which is followed manually) must resolve to a public IP, so loopback/private/link-local/metadata addresses are refused; `robots.txt` is honoured (4xx other than 429 → allow all, unreachable/5xx → refuse); only `text/html`, `application/xhtml+xml`, `text/plain` are accepted; max 5 redirects; 5 MB download cap; text truncated to 20k chars. Residual risk: DNS can change between our check and the connection (rebinding); acceptable for this project.
 - **HTML→text** uses the standard library (`html.parser`), so no new dependency. It drops script/style/noscript/head and keeps block structure as lines. It does not extract "main content", so nav/footer text is included; JavaScript-rendered pages yield little text.
 - **No new dependencies.** `pyproject.toml` and `uv.lock` are unchanged.
 
 ### Things later phases must know
-- **Phase 2 `fetch_page` tool** should call `WebFetcher.fetch` (build the client with `web.make_http_client(settings.cache_dir)`); it raises `FetchBlockedError` / `FetchError`, which the tool should turn into a `tool_result` error string for the model rather than crash the loop. Page text is untrusted: wrap it as data in the prompt.
+- **Phase 3 `fetch_page` tool** should call `WebFetcher.fetch` (build the client with `web.make_http_client(settings.cache_dir)`); it raises `FetchBlockedError` / `FetchError`, which the tool should turn into a `tool_result` error string for the model rather than crash the loop. Page text is untrusted: wrap it as data in the prompt.
 - **`lookup_companies_house`** can use `CompaniesHouseClient.get_company` / `filing_history` (both return `None` on 404 and validate the company number before building the URL). Build the HTTP client with `companies_house.make_http_client(key, settings.cache_dir)`.
 - **Persisting profiles:** flatten each `Sourced` field of `CompanyProfile` with `save_fact(session, company_id, field, sourced)`; `category` is not `Sourced`, so it needs its own column on `company` (not added yet).
 - **In-place JSON mutation isn't tracked by SQLAlchemy.** Assign a whole new dict/list to `Company.sic_codes`, `matched_keywords` or `RunLog.stats` rather than mutating it.
 - **The DB has no migrations.** `init_db` only creates missing tables; after changing a model, delete `data/sprout.db` (or add Alembic if the data becomes precious).
-- **`HttpClient` is synchronous and not thread-safe** (the rate limiter and counters are plain objects). If Phase 5 parallelises, use one client per worker or add locking.
+- **`HttpClient` is synchronous and not thread-safe** (the rate limiter and counters are plain objects). If Phase 6 parallelises, use one client per worker or add locking.
 
-## Streamlit progress & test console (ahead of Phase 6)
+## Streamlit progress & test console (ahead of Phase 7)
 
-**Status: done.** A working UI to check progress and exercise ingestion; it is not the Phase 6 dashboard (no funding/stage views, because no enrichment data exists yet).
+**Status: done.** A working UI to check progress and exercise ingestion; it is not the Phase 7 dashboard (no funding/stage views, because no enrichment data exists yet).
 
 ### What was built
 | Item | Where |
@@ -125,11 +125,11 @@ Running log of what was built, why, and what later phases need to know. Newest p
 - Ingestion is run by calling `sprout.ingest.main` in-process and showing its output.
 
 ### Things later phases must know
-- **Streamlit Community Cloud has no persistent disk and `*.db` is gitignored**, so a deployed copy starts empty. Phase 6/8's bundled snapshot DB is still needed for a populated public app. Secrets go in the app's Secrets settings (exposed as environment variables), never in the repo.
-- Phase 6 should extend `queries.py` (shared service layer) rather than add SQL in the page code.
+- **Streamlit Community Cloud has no persistent disk and `*.db` is gitignored**, so a deployed copy starts empty. Phase 7/8's bundled snapshot DB is still needed for a populated public app. Secrets go in the app's Secrets settings (exposed as environment variables), never in the repo.
+- Phase 7 should extend `queries.py` (shared service layer) rather than add SQL in the page code.
 
 
-## Phase 2 - First agent: single-company enrichment
+## Phase 3 - First agent: single-company enrichment
 
 **Status: done, with caveats.** The agent was built, covered by mocked tests (169 tests pass in total, `ruff check` clean) and run live on 10 companies. The tiny-cap criterion is verified with mocks only, not live. The pilot is a manual review by the implementing agent; the user's own review of the profiles is still open (see "Open items").
 
@@ -166,7 +166,7 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 ### Open items (need you)
 1. **Review the 10 profiles yourself** (`uv run python -m sprout.enrich <number> --show`, or query the `fact` table). The pilot companies are not in the name-matched candidate pool; their numbers: Wayve 10924127, PolyAI 11048129, Synthesia 10933652, Graphcore 10185006, Cleo AI 09864205, Faculty Science 08873131, Tractable 09315523, Peak AI 09307701, Quantexa 10045407, Airborne Robotics 10889295.
 2. **Check the first console invoice** against the assumption of US$10 per 1,000 web searches (taken from the `claude-api` skill, where it appears only in a Managed Agents note). Cost per company is dominated by this number.
-3. ~~`data/sprout.db` is tracked by git~~ **Resolved (2026-10-25):** untracked `sprout.db`; committed `data/sprout_snapshot.db` instead (refresh by hand: `cp data/sprout.db data/sprout_snapshot.db`). `config.get_settings()` falls back to the snapshot when the live db is missing (Streamlit Cloud has no persistent disk). The DB the agent found held 305 companies, not the 876 recorded in the Phase 1 notes (that was probably a different local DB); it now holds 314.
+3. ~~`data/sprout.db` is tracked by git~~ **Resolved (2026-10-25):** untracked `sprout.db`; committed `data/sprout_snapshot.db` instead (refresh by hand: `cp data/sprout.db data/sprout_snapshot.db`). `config.get_settings()` falls back to the snapshot when the live db is missing (Streamlit Cloud has no persistent disk). The DB the agent found held 305 companies, not the 876 recorded in the Phase 2 notes (that was probably a different local DB); it now holds 314.
 4. Some already-enriched companies have facts stored under stage labels or field names that predate the current schema; re-run `sprout.enrich` on them to refresh.
 5. Not tested live: `--strong` (Sonnet 5.5), forced `tool_choice` on Haiku 5.5, the over-100K-token price tier, and the 512-token minimum cacheable prefix.
 
@@ -185,25 +185,25 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 - **Deviations from the architecture doc:** `build_tools(fetcher, ch, ledger)` instead of `build_tools(deps, ledger)` (to avoid `tools.py` importing `Deps`); `Deps` gained `model` and `effort`; `enrich_with_result` added; extra CLI flags and a Companies House name-search for suggestions. No new dependencies or env vars.
 
 ### Things later phases must know
-- **Model output is non-deterministic.** Even with the ledger, an occasional run ends `invalid` (invented homepage URL, correctly rejected) or `refused` (transient). Phase 5 needs retries and `enrichment_state`.
+- **Model output is non-deterministic.** Even with the ledger, an occasional run ends `invalid` (invented homepage URL, correctly rejected) or `refused` (transient). Phase 6 needs retries and `enrichment_state`.
 - **The model sometimes leaves funding amounts null for non-USD figures** despite the prompt. Null is the safe failure, but it understates funding coverage.
-- **Search results arrive encrypted**, so snippet-only claims cannot be audited from our side. The code caps them at `medium` and the model records the source in the note. A verifier (Phase 5) is the real check.
+- **Search results arrive encrypted**, so snippet-only claims cannot be audited from our side. The code caps them at `medium` and the model records the source in the note. A verifier (Phase 6) is the real check.
 - **A claimed website can be wrong** (Airborne Robotics' site returned another company's content); it is stored at medium confidence with a caveat in the note.
 - **Cost is dominated by the web search** (about 70 percent); lowering `max_uses` or caching search results is the lever, not the model.
 - Use `enrich_with_result` when the caller needs the `LoopResult`; `enrich_company` returns only the profile.
 - `LoopResult.stop` values: `submitted`, `invalid`, `max_iter`, `budget`, `no_submit`, `truncated`, `refused`, `error`.
-- `Company.category` exists now, so Phase 5's classifier can write it; `save_profile` writes the enrichment agent's category.
+- `Company.category` exists now, so Phase 6's classifier can write it; `save_profile` writes the enrichment agent's category.
 - **Found by the end-of-phase architecture review (not fixed):**
-  - There is no per-run fetch cap (fetches are bounded only by the iteration cap) and no batch-level USD cap: the CLI applies `--max-usd` per company, so a long target list can spend `n * 0.13`. The Phase 5 orchestrator needs a batch cap.
+  - There is no per-run fetch cap (fetches are bounded only by the iteration cap) and no batch-level USD cap: the CLI applies `--max-usd` per company, so a long target list can spend `n * 0.13`. The Phase 6 orchestrator needs a batch cap.
   - A capped or failed run persists no partial facts (the older architecture text promised "partial"; it was corrected). Its `run_log.status` is `error` with the reason in `stats.stop`.
   - Re-running a company can leave both a valued fact and a NULL-value fact for the same field (valued in run 1, null in run 2, same source or different). The winning-value rule must exist before any front end reads facts.
   - Latent nit in `_simplify` ([src/sprout/agents/enrich.py](src/sprout/agents/enrich.py)): it drops any dict key named `title`, `default`, `minimum`, `format` etc., including a `CompanyProfile` field with such a name inside `properties`. No current field collides.
-  - `agents/enrich.py` is about 460 lines (agent, schema, CLI, `resolve_company`); split it when Phase 5 adds an orchestrator.
+  - `agents/enrich.py` is about 460 lines (agent, schema, CLI, `resolve_company`); split it when Phase 6 adds an orchestrator.
   - `pause_turn` has only mock evidence; `--strong` and forced `tool_choice` were never run live.
 
 ---
 
-## Phase 3 - Observability
+## Phase 4 - Observability
 
 **Status: done, with one live check not achieved.** Steps and failure categories are recorded for every enrichment run, queryable through five new functions and shown in a new Observability tab. `uv run pytest -q` passes (229 tests) and `uv run ruff check` is clean. The live check wrote steps and categories end to end against the real API, but the planned deterministic `iteration_cap` run could not be produced because `--max-iterations 2` hits an API 400 (see "Open items"). The step 3c findings batch (20 live runs) is recorded under "Step 3c findings" at the end of this section.
 
@@ -241,9 +241,9 @@ Built as designed per D14-D17 in `docs/architecture/6. decisions.md` (run_log_st
 ### Things later phases must know
 - `RunLogStep.created_at` must be timezone-aware on insert (a naive value raises in SQLModel); `started_at` reads back naive UTC.
 - `init_db` backfills `failure_category` from `stats.stop` for historic enrich rows, so a hand-seeded success row needs `stop: "submitted"`.
-- The Observability metrics and charts use the newest 200 runs (`enrich_runs` default limit); the failure-category chart covers all runs. Irrelevant at about 45 runs, relevant in Phase 5.
-- Steps are persisted at the end of a run, so a hard process kill loses that run's steps (as it already loses its stats). Live per-worker progress in Phase 5 needs the optional `on_step` callback described in the architecture (A29 notes).
-- Queries live in `app/queries.py`, Streamlit-free, reusable by the Phase 6 service layer; the file moves to `sprout/queries.py` before Phase 7.
+- The Observability metrics and charts use the newest 200 runs (`enrich_runs` default limit); the failure-category chart covers all runs. Irrelevant at about 45 runs, relevant in Phase 6.
+- Steps are persisted at the end of a run, so a hard process kill loses that run's steps (as it already loses its stats). Live per-worker progress in Phase 6 needs the optional `on_step` callback described in the architecture (A29 notes).
+- Queries live in `app/queries.py`, Streamlit-free, reusable by the Phase 7 service layer; the file moves to `sprout/queries.py` before Phase 8.
 
 ### Step 3c findings (live batch, 2026-10-28)
 Batch: the 20 highest-`candidate_score` companies that were not pilots and not yet enriched (run ids 47 to 66, Haiku 5.5, defaults, `uv run python -m sprout.enrich <20 numbers>`). Total cost **US$0.3049**. All figures come from `run_log`, `run_log_step` and the new query functions; the 20 runs are all name-matched "artificial intelligence" shell-style companies, not the pilot set, so they are not representative of real startups.
@@ -252,7 +252,7 @@ Batch: the 20 highest-`candidate_score` companies that were not pilots and not y
 |---|---|
 | Outcome of the batch | 20/20 `submitted`, 0 failures, 0 `failure_category` values |
 | Cost per run | min 0.0117, mean 0.0152, max 0.0242 USD; steps sum exactly to the run cost on all 20 |
-| Cost driver | 1 web search: mean about 0.0126 (15 runs); 2 searches: about 0.0232 (5 runs). The search is the cost, as in Phase 2 |
+| Cost driver | 1 web search: mean about 0.0126 (15 runs); 2 searches: about 0.0232 (5 runs). The search is the cost, as in Phase 3 |
 | Iterations | 2 (6 runs), 3 (13 runs), 5 (1 run); mean 2.8 |
 | Repairs | 7 of 20 runs needed one repair (35%); all 7 succeeded, so they are invisible in `failure_category` |
 | Tool errors (56 steps) | 11: 7 in steps containing `submit_profile` (5 of 22 submit-only steps, 1 of 4 search+submit, 1 of 1 double-search+submit; matches the 7 repairs) and 4 of 7 `fetch_page`-only steps (blocked pages). No errors in the Companies House lookup steps |
@@ -263,17 +263,17 @@ Batch: the 20 highest-`candidate_score` companies that were not pilots and not y
 
 What the observability data says about failure causes: under current code the dominant risk is not the model but the loop's handling of mixed server and custom tool calls (the 400 in Open items 1). Everything else is a rare, transient event (one refusal in 64).
 
-**Proposed Phase 4 adjustments (for you to approve, none applied):**
+**Proposed Phase 5 adjustments (for you to approve, none applied):**
 1. **Golden-set stratification.** The candidate pool's top scores are mostly shell-style names whose real category is `Other`. A golden set drawn only from famous startups would flatter category accuracy; include a deliberate share of `Other`/non-startup names (for example 6 to 8 of 30) and label them honestly, so the metric tests the "unknown is acceptable" behaviour.
-2. **Profiles-submitted floor.** Current code submitted 20/20 on the batch and 10/10 on the pilot. A floor set near the old 85% target would not catch a regression such as 2 failures in 24; consider raising it (for example to 95%) after Phase 4's first baseline run, and count `api_error` separately from model failures so an infrastructure 400 does not look like a quality regression.
+2. **Profiles-submitted floor.** Current code submitted 20/20 on the batch and 10/10 on the pilot. A floor set near the old 85% target would not catch a regression such as 2 failures in 24; consider raising it (for example to 95%) after Phase 5's first baseline run, and count `api_error` separately from model failures so an infrastructure 400 does not look like a quality regression.
 3. **Add a repair-rate metric** (runs with `stats.repairs > 0` over runs). 35% of runs needed a repair yet all count as success; a prompt change that doubles the rate would be invisible to the current gates.
 4. **Cost gate.** Observed max per company is US$0.0265 against the US$0.13 cap and the mean is US$0.0146. A cost-per-company gate in the region of US$0.03 to 0.04 would catch a doubling without false alarms; set it from the baseline run, not from this batch alone.
-5. **Judge input.** `response_text` is empty, so the Phase 4 judge and failure diagnosis cannot rely on it. Diagnosis depends on `tool_name` sequences, `tool_errors` and `stop_reason`; if text is wanted, the tool error message, previously not logged under A7/D17, is now logged as `RunLogStep.tool_error_text` (D37).
+5. **Judge input.** `response_text` is empty, so the Phase 5 judge and failure diagnosis cannot rely on it. Diagnosis depends on `tool_name` sequences, `tool_errors` and `stop_reason`; if text is wanted, the tool error message, previously not logged under A7/D17, is now logged as `RunLogStep.tool_error_text` (D37).
 6. **Fix or avoid the 400** (Open items 1) before the eval run, or the baseline will contain `api_error` noise whenever a low iteration cap is used (for example in the tiny-cap guardrail tests).
 
 ---
 
-## Phase 4 - Evals & guardrails
+## Phase 5 - Evals & guardrails
 
 **Status: built and smoke-tested; baseline run, gate-setting and live injection run pending (need you).** `uv run pytest` passes (479 tests, 9 live-injection tests skipped by default) and `uv run ruff check` is clean. The harness ran live on 2 companies only (about US$0.085); no full run has been made.
 
@@ -307,7 +307,7 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 6. Unverifiable funding was 7/9 in the smoke: most funding sources are search snippets, which the fabricated-funding check cannot read. Watch this on the baseline.
 
 ### Decisions locked in
-- Evals write to `data/eval.db` (the runner refuses to reset the live DB); `--score-only` rescoring is free. A failed run persists only its `run_log` row; there is no retry and no partial-facts logic (Phase 5).
+- Evals write to `data/eval.db` (the runner refuses to reset the live DB); `--score-only` rescoring is free. A failed run persists only its `run_log` row; there is no retry and no partial-facts logic (Phase 6).
 - Gates apply to complete full-set runs only (no `--limit`, `--only`, subset `--split` or budget stop). The Delta column compares with the latest recorded complete full run of the same split; a change under 2 companies is marked noise.
 - A `skipped_budget` entry, or a `--score-only` entry with no run, is unscored and makes the run incomplete (exit 2).
 - Funding match: a golden round with a null amount matches an observed null amount; unexpected disclosure counts any observed round with an amount; a currency marker without a unit (`$12,500,000`) is accepted by the number matcher.
@@ -318,8 +318,8 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 
 ### Things later phases must know
 - `SYSTEM_PROMPT` changed (untrusted-content sentence), so `results.md` prompt hashes start from this version.
-- Phase 5 reuses `BatchBudget` (not thread-safe: add a lock), `enrich_with_result(extra_context=)`, `stats["sources"]` and the single per-company seam `_enrich_entry` in the runner. `ALLOWED_ENRICHMENT_TOOLS` covers only the enrichment agent; the classifier, news and verifier agents need their own sets.
-- Phase 7's swap of `fetch_page` must update `ALLOWED_ENRICHMENT_TOOLS` on purpose, keep feeding `SourceLedger`, and keep `UrlPolicy`, size caps and robots; `fixture_fetcher` tests cover only the `WebFetcher` path.
-- Phase 8's eval job needs both API keys (so not for fork PRs); exit codes 0/1/2 map to job outcomes.
+- Phase 6 reuses `BatchBudget` (not thread-safe: add a lock), `enrich_with_result(extra_context=)`, `stats["sources"]` and the single per-company seam `_enrich_entry` in the runner. `ALLOWED_ENRICHMENT_TOOLS` covers only the enrichment agent; the classifier, news and verifier agents need their own sets.
+- Phase 8's swap of `fetch_page` must update `ALLOWED_ENRICHMENT_TOOLS` on purpose, keep feeding `SourceLedger`, and keep `UrlPolicy`, size caps and robots; `fixture_fetcher` tests cover only the `WebFetcher` path.
+- Phase 9's eval job needs both API keys (so not for fork PRs); exit codes 0/1/2 map to job outcomes.
 - A page asking the model to fetch an attacker URL on a public host passes `UrlPolicy`; this is a documented residual risk, visible only in fixture runs.
 - `ruff format --check` flags `src/sprout/app/dashboard.py` and `tests/test_app_queries.py` (pre-existing; CI does not enforce format).

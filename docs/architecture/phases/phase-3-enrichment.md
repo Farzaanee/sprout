@@ -1,13 +1,13 @@
-# Phase 2: Single-company enrichment agent
+# Phase 3: Single-company enrichment agent
 
-Part of the [Sprout architecture docs](../README.md). Status: see [7. status.md](../7.%20status.md). Phase 3 later added step logging on top of this loop; where that changes a contract below it is marked.
+Part of the [Sprout architecture docs](../README.md). Status: see [7. status.md](../7.%20status.md). Phase 4 later added step logging on top of this loop; where that changes a contract below it is marked.
 
 ```mermaid
 flowchart TB
     CLI["python -m sprout.enrich (shim): resolve_company maps a name or company number to a company row"]
     subgraph AGENT["agents/ (anthropic is imported only by loop.py)"]
         ENR["enrich.py:<br/>system prompt, submit_profile schema and validation,<br/>enrich_company, enrich_with_result,<br/>CLI main, run_log stats"]
-        LOOP["loop.py: run_agent, stop-reason handling, iteration and USD guards, one repair,<br/>one StepRecord per model response (Phase 3)"]
+        LOOP["loop.py: run_agent, stop-reason handling, iteration and USD guards, one repair,<br/>one StepRecord per model response (Phase 4)"]
         TOOLS["tools.py:<br/>build_tools, tool handlers,<br/>SourceLedger, untrusted-content wrapping"]
     end
     subgraph TOOLSET["Tools offered to the model"]
@@ -53,12 +53,12 @@ flowchart TB
 
 ## Design notes
 
-- **Search backend (A2, D8).** Search is Anthropic's server-side `web_search` (`max_uses` 3). Any page the agent reads is fetched through our own `fetch_page`, so robots/SSRF/size/cache protections still apply; server-side `web_fetch` is not used, since it would bypass them. A custom search backend (Brave/Tavily) isn't needed while search cost stays well under target; the swap point is left open for Phase 7.
+- **Search backend (A2, D8).** Search is Anthropic's server-side `web_search` (`max_uses` 3). Any page the agent reads is fetched through our own `fetch_page`, so robots/SSRF/size/cache protections still apply; server-side `web_fetch` is not used, since it would bypass them. A custom search backend (Brave/Tavily) isn't needed while search cost stays well under target; the swap point is left open for Phase 8.
 - **Swap point.** `build_tools(fetcher, ch, ledger)` in `agents/tools.py` builds the whole tool list in one place. Swapping the search tool touches only that function and the price table. The lever for lowering cost is `WEB_SEARCH_MAX_USES` (or caching search results), not the model.
 - **Server-side search mechanics.** `server_tool_use` / `web_search_tool_result` blocks are appended to history unchanged (they carry encrypted content needed next turn). `pause_turn` appends the assistant content and calls again with no new user message, counting as an iteration. Search errors arrive as result blocks, not exceptions, so the model can still submit honest nulls. Search usage is added to cost, and search-result URLs reach the seen-URL ledger via an `on_search_urls` callback (the loop itself stays generic; `enrich.py` supplies the callback).
 - **Models.** `claude-haiku-5-5` is the default; `claude-sonnet-5-5` via `--strong`. `tool_choice` is `auto`, with the system prompt naming `submit_profile` as the required final step. `submit_profile` is **not** `strict`, since the derived schema exceeds the API's parameter limit, so enforcement is Pydantic validation plus one repair attempt (D13). Thinking tokens count as output tokens, so they're inside the USD budget. Effort defaults to `low`, overridable with `--effort`.
 - **Prompt caching.** The system block and the top-level call both set `cache_control: ephemeral`, so each iteration re-reads the growing conversation at the cheaper read price. The tool list order is fixed because it sits at the start of the cached prefix.
-- **Prompt injection.** Every custom tool result is wrapped in `<untrusted_content source="URL">...</untrusted_content>` (delimiters inside the text neutralised, truncated at 8,000 characters), and the system prompt states that wrapped content is data, never instructions. Search snippets arrive unwrapped but are covered by the same system-prompt rule. No tool writes to the DB; that only happens in our code after validation. Open risk: a model-chosen URL in `fetch_page` could be used to leak context via a query string; Phase 4 added `UrlPolicy` and injection fixtures, but a public attacker host still passes.
+- **Prompt injection.** Every custom tool result is wrapped in `<untrusted_content source="URL">...</untrusted_content>` (delimiters inside the text neutralised, truncated at 8,000 characters), and the system prompt states that wrapped content is data, never instructions. Search snippets arrive unwrapped but are covered by the same system-prompt rule. No tool writes to the DB; that only happens in our code after validation. Open risk: a model-chosen URL in `fetch_page` could be used to leak context via a query string; Phase 5 added `UrlPolicy` and injection fixtures, but a public attacker host still passes.
 - **Provenance, beyond Pydantic (D11, in `validate_submission`).** `retrieved_at` is stamped by our code, never the model. `source_url` must match a URL a tool actually returned (ignoring tracking params, fragments, case, trailing slash); anything else is rejected with one repair attempt that lists citable URLs. Funding facts must carry a `note` with the original figure and currency. A source seen only in a snippet, never fetched, is capped at `medium` confidence. Null values with no source always pass. `profile.stage` disagreeing with the most recently announced round's stage is rejected the same way (see [`validate_submission`](#validate_submission) and [Stage](#stage-two-independent-fields-reconciled-by-one-repair-a3)).
 - **`submit_profile` schema.** Generated from `CompanyProfile` via `submit_profile_schema()`: `$ref`s inlined, `name`/`news`/`retrieved_at` dropped, remaining fields made required, descriptive keywords (`title`, `default`, bounds, `format`) stripped, so numeric bounds are enforced by Pydantic only, not the schema.
 - **Known non-determinism.** Occasional runs end `invalid` or `refused`. The model sometimes leaves non-USD funding amounts null despite the prompt, which is safe but understates funding coverage.
@@ -181,7 +181,7 @@ class Tool:
 @dataclass(frozen=True)
 class ToolOutcome: text: str; is_error: bool = False; payload: Any = None   # payload set => accepted submission
 @dataclass
-class StepRecord:                          # Phase 3: one per model response; tool inputs and thinking are not recorded
+class StepRecord:                          # Phase 4: one per model response; tool inputs and thinking are not recorded
     iteration: int; at: datetime; stop_reason: str | None; tool_names: tuple[str, ...]
     tool_errors: int; usage: Usage; cost_usd: Decimal; response_text: str   # response_text capped at LOGGED_TEXT_MAX_CHARS (1,000)
 @dataclass
@@ -189,8 +189,8 @@ class LoopResult:
     payload: Any | None; usage: Usage; cost_usd: Decimal; iterations: int; repairs: int; tool_calls: dict[str, int]
     stop: Literal["submitted","invalid","max_iter","budget","no_submit","truncated","refused","error"]
     error: str | None
-    error_type: str | None                 # Phase 3: exception class name for an API failure, else None
-    steps: list[StepRecord]                # Phase 3: len(steps) == iterations; the loop never reads it
+    error_type: str | None                 # Phase 4: exception class name for an API failure, else None
+    steps: list[StepRecord]                # Phase 4: len(steps) == iterations; the loop never reads it
 def run_agent(client, *, model, system, messages, tools, budget, max_tokens, effort,
               on_search_urls: Callable[[list[str]], None] | None = None) -> LoopResult
 
@@ -223,13 +223,13 @@ def add_company_by_number(session, number: str, data: dict) -> Company   # for p
 def winning_facts(facts: Iterable[Fact]) -> dict[str, Fact]                # A6: one current Fact per field name
 ```
 
-`run_agent` has no `on_step` callback: steps accumulate on `LoopResult.steps` and `enrich_with_result` persists them afterwards. An optional `on_step` for live per-worker progress is a possible Phase 5 addition (see the [Phase 3 page](phase-3-observability.md#what-phase-5-needs-hooks-only-nothing-built)).
+`run_agent` has no `on_step` callback: steps accumulate on `LoopResult.steps` and `enrich_with_result` persists them afterwards. An optional `on_step` for live per-worker progress is a possible Phase 6 addition (see the [Phase 4 page](phase-4-observability.md#what-phase-6-needs-hooks-only-nothing-built)).
 
 `tools.py` does not import `Deps` from `enrich.py`; `build_tools` takes the fetcher, an optional Companies House client and the ledger directly. `SourceLedger.add` takes an optional `at` so a fetched page keeps the fetcher's `retrieved_at`. The CLI also offers `--effort`, `--show` and a Companies House name search for "did you mean" hints. `Deps.ch` is `CompaniesHouseClient | None` and is dropped for a company with no number, which also drops `lookup_companies_house` from the tool list.
 
 ## Loop contract (stop-reason handling, covered by scripted-client tests)
 
-Each iteration: check the guards, call `messages.create`, add `usage` to the running total, append a `StepRecord` (Phase 3), then act on `stop_reason`. A custom tool result with `is_error` increments that step's `tool_errors`, including a rejected `submit_profile`.
+Each iteration: check the guards, call `messages.create`, add `usage` to the running total, append a `StepRecord` (Phase 4), then act on `stop_reason`. A custom tool result with `is_error` increments that step's `tool_errors`, including a rejected `submit_profile`.
 
 | Condition | Action |
 |---|---|
@@ -243,7 +243,7 @@ Each iteration: check the guards, call `messages.create`, add `usage` to the run
 
 Only a validated `submit_profile` carries facts, so on any non-`submitted` stop nothing is written to `fact` or `category`; the cost, `failure_category` (from `failures.failure_category_for(stop)`) and step rows are still recorded. The only per-run caps are iterations, USD, search `max_uses` (3) and the tool-result character cap.
 
-There is no per-run fetch cap beyond the iteration cap (the prompt's "at most 4 pages" is advice, not enforced), and no partial profile is ever written on a cap stop. The CLI enforces `--max-usd` per company; `--max-total-usd` (Phase 4, `BatchBudget`, D24; default no cap) caps a whole target list, and the Phase 5 orchestrator must reuse it.
+There is no per-run fetch cap beyond the iteration cap (the prompt's "at most 4 pages" is advice, not enforced), and no partial profile is ever written on a cap stop. The CLI enforces `--max-usd` per company; `--max-total-usd` (Phase 5, `BatchBudget`, D24; default no cap) caps a whole target list, and the Phase 6 orchestrator must reuse it.
 
 ## Inside `loop.py`: the iteration state machine
 
@@ -325,24 +325,24 @@ valuation.
 - Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](../4.%20cross-cutting.md#4-testing)).
 - Tool handlers return error outcomes and never raise into the loop (`run_agent` also catches any handler exception and turns it into an error result).
 - `enrich_with_result` writes facts and the `company_enrich` run_log row in one session: it assigns `run.stats` and the run-level columns (`company_id`, `model`, `effort`, `iterations`, `repairs`, `max_iterations`, `max_usd`, `tool_calls`, `error_message`), sets `run.failure_category` and adds the `run_log_step` rows, then **commits before raising** on failure, because `logged_run` rolls back on exceptions and would otherwise discard the record of what a failed run cost; on success it then calls `save_profile`. On failure `logged_run` also marks the row `status="error"`, filling in `error_message` only if it is still null. The status therefore means "run did not produce a profile", and `stats.stop` and `failure_category` say why.
-- `agents/enrich.py` (about 510 lines: agent, schema, CLI, `resolve_company`) should be split when Phase 5 adds an orchestrator.
-- Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 7 so MCP does not import from the UI package.
+- `agents/enrich.py` (about 510 lines: agent, schema, CLI, `resolve_company`) should be split when Phase 6 adds an orchestrator.
+- Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 8 so MCP does not import from the UI package.
 
 ## Outstanding
 
-Work that is not done or not verified, as of the end of Phase 3. Nothing here blocks Phase 4.
+Work that is not done or not verified, as of the end of Phase 4. Nothing here blocks Phase 5.
 
 | Item | Detail |
 |---|---|
-| User review of the pilot profiles, search price unconfirmed | See `implementation-notes.md` Phase 2 open items |
+| User review of the pilot profiles, search price unconfirmed | See `implementation-notes.md` Phase 3 open items |
 | No `-m live` enrichment test | Deliberate, so a plain `pytest` with a key never spends money. The tiny-cap criterion is verified with mocks only |
 | Never run live | `--strong` (Sonnet 5.5), forced `tool_choice` on Haiku 5.5, the over-100K-token price tier, the 512-token minimum cacheable prefix. `pause_turn` has only mock evidence |
-| No per-run fetch cap | Bounded only by the iteration cap (the batch-level USD cap is `BatchBudget`, Phase 4, D24) |
-| No winning-value rule | A re-run can leave both a valued and a NULL-value fact for a field, and stale facts from URLs no longer cited remain (A6). Must exist before Phase 6 reads facts. `--reset` is the manual workaround |
+| No per-run fetch cap | Bounded only by the iteration cap (the batch-level USD cap is `BatchBudget`, Phase 5, D24) |
+| No winning-value rule | A re-run can leave both a valued and a NULL-value fact for a field, and stale facts from URLs no longer cited remain (A6). Must exist before Phase 7 reads facts. `--reset` is the manual workaround |
 | Non-USD funding amounts sometimes left null | Safe (null, not a guess) but understates funding coverage; the note carries the original figure |
-| Snippet-only claims cannot be audited | Search results arrive encrypted; the code caps them at `medium` and requires a note; the Phase 5 verifier is the real check |
+| Snippet-only claims cannot be audited | Search results arrive encrypted; the code caps them at `medium` and requires a note; the Phase 6 verifier is the real check |
 | Claimed website can be wrong | Stored at medium confidence with a caveat in the note (Airborne Robotics returned another company's content) |
 | Latent nit in `_simplify` | It drops any dict key named `title`, `default`, `minimum`, `format` and so on, including a `CompanyProfile` field with such a name inside `properties`. No current field collides |
 | Older facts under superseded field or stage names | Re-run `sprout.enrich <number> --reset` to refresh |
 
-Planned Phase 5/7 modules that build on this phase are on the [Phase 5 page](phase-5-multi-agent.md).
+Planned Phase 6/7 modules that build on this phase are on the [Phase 6 page](phase-6-multi-agent.md).

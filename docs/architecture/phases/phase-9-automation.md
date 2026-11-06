@@ -1,4 +1,4 @@
-# Phase 8: Automation, deployment, docs (planned)
+# Phase 9: Automation, deployment, docs (planned)
 
 Part of the [Sprout architecture docs](../README.md).
 

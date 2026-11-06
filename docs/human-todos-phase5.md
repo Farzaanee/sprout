@@ -1,6 +1,6 @@
-# Human to-dos, Phase 4 (Evals & guardrails)
+# Human to-dos, Phase 5 (Evals & guardrails)
 
-Source: `docs/architecture/5. risks.md` section 6.3 and the Phase 4 row in `docs/architecture/7. status.md`, cross-checked against `docs/project-plan.md`. Phase 4 is design-only right now, nothing in `evals/` is built yet.
+Source: `docs/architecture/5. risks.md` section 6.3 and the Phase 5 row in `docs/architecture/7. status.md`, cross-checked against `docs/project-plan.md`. Phase 5 is design-only right now, nothing in `evals/` is built yet.
 
 ## Actions that need you specifically (not just review)
 
@@ -10,7 +10,7 @@ Source: `docs/architecture/5. risks.md` section 6.3 and the Phase 4 row in `docs
 
 ## Carried over from earlier phases, still outstanding
 
-See `docs/implementation-notes.md` Phase 2 open items: pilot profile review, and the search-price invoice check against `costs.py` (D9).
+See `docs/implementation-notes.md` Phase 3 open items: pilot profile review, and the search-price invoice check against `costs.py` (D9).
 
 ## Final acceptance check (do this last)
 

@@ -1,4 +1,4 @@
-# Phase 1: Data foundations
+# Phase 2: Data foundations
 
 Part of the [Sprout architecture docs](../README.md). Status: see [7. status.md](../7.%20status.md).
 
@@ -39,9 +39,9 @@ flowchart TB
     DBM --> SQL
 ```
 
-`WebFetcher` is not used by ingest; since Phase 2 it is called by the enrichment agent's `fetch_page` tool (see the [Phase 2 page](phase-2-enrichment.md)). Ingest writes two registry-sourced facts per company (`hq`, `founded`, confidence medium).
+`WebFetcher` is not used by ingest; since Phase 3 it is called by the enrichment agent's `fetch_page` tool (see the [Phase 3 page](phase-3-enrichment.md)). Ingest writes two registry-sourced facts per company (`hq`, `founded`, confidence medium).
 
-`db.py` grows past this phase: `funding_round` is added in Phase 2 (written by `save_profile`, see the [Phase 2 page](phase-2-enrichment.md)) and `run_log_step` in Phase 3 (written by `enrich.py` after a loop run, see the [Phase 3 page](phase-3-observability.md)). Ingest itself never writes to either table; the diagram above only shows what the Phase 1 flow touches.
+`db.py` grows past this phase: `funding_round` is added in Phase 3 (written by `save_profile`, see the [Phase 3 page](phase-3-enrichment.md)) and `run_log_step` in Phase 4 (written by `enrich.py` after a loop run, see the [Phase 4 page](phase-4-observability.md)). Ingest itself never writes to either table; the diagram above only shows what the Phase 2 flow touches.
 
 ## Key files
 
@@ -97,7 +97,7 @@ flowchart TB
 | Aspect | Detail |
 | --- | --- |
 | Role | <ul><li>SQLModel schema plus the write helpers ingestion needs (`upsert_company`, `save_fact`, `add_news_items`, `logged_run`)</li></ul> |
-| Phase 1 tables | <ul><li>`company`, `fact`, `news_item`, `run_log`</li><li>`funding_round` and `run_log_step` also live here but are written only from Phase 2 and Phase 3 onward, not by ingest</li></ul> |
+| Phase 2 tables | <ul><li>`company`, `fact`, `news_item`, `run_log`</li><li>`funding_round` and `run_log_step` also live here but are written only from Phase 3 and Phase 4 onward, not by ingest</li></ul> |
 | Identity | <ul><li>`upsert_company` dedupes on Companies House `company_number`, not name (names change, numbers don't)</li></ul> |
 | `save_fact` | <ul><li>Replaces an existing row for the same `(company_id, field, source_url)`; a NULL `value_json` means "researched, nothing found", not "never tried"</li></ul> |
 | Migrations | <ul><li>`init_db` creates missing tables and adds missing nullable columns to an existing database via `ALTER TABLE`</li><li>Raises if a needed change is not a plain nullable column, so a schema break surfaces instead of silently corrupting data</li></ul> |

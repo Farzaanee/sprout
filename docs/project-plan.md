@@ -54,20 +54,20 @@ tests/
 ## Timeline overview
 | Phase | Title | Hours |
 |---|---|---|
-| 0 | Setup & definitions | 3 |
-| 1 | Data foundations | 8 |
-| 2 | First agent: single-company enrichment | 14 |
-| 3 | Observability | 9 |
-| 4 | Evals & guardrails | 12 |
-| 5 | Multi-agent pipeline at scale | 16 |
-| 6 | Dashboard | 10 |
-| 7 | MCP server | 11 |
-| 8 | Automation, deployment & documentation | 9 |
+| 1 | Setup & definitions | 3 |
+| 2 | Data foundations | 8 |
+| 3 | First agent: single-company enrichment | 14 |
+| 4 | Observability | 9 |
+| 5 | Evals & guardrails | 12 |
+| 6 | Multi-agent pipeline at scale | 16 |
+| 7 | Dashboard | 10 |
+| 8 | MCP server | 11 |
+| 9 | Automation, deployment & documentation | 9 |
 | | **Total** | **92** |
 
 ---
 
-## Phase 0 - Setup & definitions (≈2h)
+## Phase 1 - Setup & definitions (≈2h)
 **Objectives:** a working Python 3.12 project and a locked-in vocabulary (taxonomy + schema) that every later phase depends on.
 
 **Steps**
@@ -89,7 +89,7 @@ tests/
 
 ---
 
-## Phase 1 - Data foundations (≈6h)
+## Phase 2 - Data foundations (≈6h)
 **Objectives:** reliable, cached, rate-limited ingestion of candidate companies and news into SQLite.
 
 **Steps**
@@ -110,7 +110,7 @@ tests/
 
 ---
 
-## Phase 2 - First agent: single-company enrichment (≈8h)
+## Phase 3 - First agent: single-company enrichment (≈8h)
 **Objectives:** a hand-written tool-using agent that turns a company name into a validated, sourced `CompanyProfile`.
 
 **Steps**
@@ -132,7 +132,7 @@ tests/
 
 ---
 
-## Phase 3 - Observability (≈5h)
+## Phase 4 - Observability (≈5h)
 **Objectives:** structured, queryable records of what each enrichment run actually did, so failures can be categorised and diagnosed before locking in eval design and before the pipeline runs concurrently.
 
 **Steps**
@@ -146,13 +146,13 @@ tests/
 - The dashboard groups failures by category and shows cost/error trends across runs.
 - Step logging does not change enrichment behaviour or materially slow down a run.
 
-**Risks & caveats:** Categorising *why* a run failed beyond the stop reason (e.g. what in the model's reasoning went wrong) isn't free, it needs either a fixed taxonomy decided up front or a judge call; start with the stop/error dimensions only and treat anything deeper as a stretch goal. Logging raw model text means untrusted scraped content can end up in the log too, so truncate and treat logged text as untrusted, same as elsewhere. This schema will likely need to grow in Phase 5 (multi-agent) to track per-company status across concurrent workers.
+**Risks & caveats:** Categorising *why* a run failed beyond the stop reason (e.g. what in the model's reasoning went wrong) isn't free, it needs either a fixed taxonomy decided up front or a judge call; start with the stop/error dimensions only and treat anything deeper as a stretch goal. Logging raw model text means untrusted scraped content can end up in the log too, so truncate and treat logged text as untrusted, same as elsewhere. This schema will likely need to grow in Phase 6 (multi-agent) to track per-company status across concurrent workers.
 
 **Learnings:** structured logging/observability design for agentic systems, designing a failure taxonomy for comparability, building a minimal internal dashboard from operational data.
 
 ---
 
-## Phase 4 - Evals & guardrails (≈6h)
+## Phase 5 - Evals & guardrails (≈6h)
 **Objectives:** quantify quality, protect against bad inputs, and make regressions visible.
 
 **Steps**
@@ -175,7 +175,7 @@ tests/
 
 ---
 
-## Phase 5 - Multi-agent pipeline at scale (≈8h)
+## Phase 6 - Multi-agent pipeline at scale (≈8h)
 **Objectives:** split the work across specialised agents and run the whole pipeline over ~50 companies (for now).
 
 **Steps**
@@ -198,7 +198,7 @@ tests/
 
 ---
 
-## Phase 6 - Dashboard (≈5h)
+## Phase 7 - Dashboard (≈5h)
 **Objectives:** a clear interface for exploring the market.
 
 **Steps**
@@ -220,7 +220,7 @@ tests/
 
 ---
 
-## Phase 7 - MCP server (≈6h)
+## Phase 8 - MCP server (≈6h)
 **Objectives:** expose the dataset to any MCP client, and consume at least one external MCP server.
 
 **Steps**
@@ -243,7 +243,7 @@ tests/
 
 ---
 
-## Phase 8 - Automation, deployment & documentation (≈4h)
+## Phase 9 - Automation, deployment & documentation (≈4h)
 **Objectives:** make the project reproducible, self-updating and easy to understand.
 
 **Steps**

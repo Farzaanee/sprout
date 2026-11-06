@@ -1,26 +1,25 @@
-# Sprout: Learnings - Phase 1 - Data foundations
+# Sprout: Learnings - Phase 1 - Setup & definitions
 
-**Planned:** REST API consumption, HTTP resilience (retries, backoff, rate limits, caching), idempotent ingestion, ORM/SQL modelling, web-scraping etiquette and its legal/ethical limits.
+**Planned:** modern Python packaging (`uv`, `pyproject.toml`), secrets handling, Pydantic data modelling, designing a schema before building agents.
 
 **Actual (done):**
+- `uv` needs Python 3.12 set explicitly (`requires-python`, `.python-version`); macOS ships 3.9, so everything must run through `uv run` or the wrong interpreter gets picked up.
+- Enforcing "provenance over completeness" in the schema itself, not just the prompt, works: `Sourced[T]` rejects a non-null value without a `source_url`, so a model can't silently skip citing a fact.
+- PEP 695 generics (`Sourced[T]`) must be instantiated parametrised (`Sourced[int](...)`); bare `Sourced(...)` leaves `T` unchecked.
+- `anthropic` 1.x is built on `httpx2`, not `httpx`; a plain `httpx.Client` can't be passed to the SDK.
+- On the 5.x models, forced `tool_choice` (`any`/`tool`) 400s; thinking tokens also count against `max_tokens`, so budgets must account for them.
+- Locking the taxonomy and schema before any agent code avoids churn: changing either later invalidates classifications and the golden set.
+- **Pydantic data modelling:**
 
 | Topic | Key learning |
 | --- | --- |
-| Companies House environments | Sandbox and live are separate; a key issued for a "test" application only works against the sandbox and returns no real companies, even though the error (401) looks like a bad key. |
-| SIC codes as an AI signal | They say little on their own: most AI startups register under generic software codes. A name-based keyword filter (tiered strong/weak keywords, weak ones needing a tech SIC code too) is needed to keep false positives down, and the result is still a noisy candidate pool, not a verified list. |
-| `/advanced-search` vs `/search` | `/advanced-search/companies` returns SIC codes in results where plain `/search/companies` does not, which matters when SIC is part of the filter. |
-| Idempotent ingestion | One HTTP entry point with per-call cache TTLs, a sliding-window rate limiter, and retry-with-backoff makes ingestion idempotent for free: a second run makes zero HTTP calls and adds zero rows. |
-| SQLModel JSON columns | In-place JSON mutation on SQLModel columns isn't tracked by SQLAlchemy; a whole new dict/list must be assigned to trigger a write. |
-| Timezone-naive datetimes | Rejected outright by this SQLModel version, so "UTC everywhere" has to be enforced from the first write. |
-| Web-scraping etiquette as security | Resolving every host, and every redirect hop, to a public IP blocks SSRF via DNS rebinding to loopback/private/metadata addresses, on top of honouring `robots.txt`. |
-| Paginating without a total count | `/advanced-search/companies` never reports a total result count, so paginating it has to treat "a page came back shorter than requested" as the only end-of-results signal, rather than computing how many pages are left. |
-| Taxonomy locked, left unwired | The `Category` taxonomy is deliberately locked in Phase 0 but left unwired through all of Phase 1: `ingest.py`/`candidates.py`/`db.py` never reference it, since the heuristic filter only produces uncategorised candidates by design. Assigning a category is Phase 5's job (a dedicated classifier agent), not something to bolt onto discovery early. |
-
-Key files for this phase (`ingest.py`, `candidates.py`, `sources/*.py`) are documented in [architecture/phase-1-data-foundations.md](architecture/phase-1-data-foundations.md).
-
-## Streamlit progress & test console (ahead of Phase 6)
-
-Not a plan phase, but built early to check progress. **Actual learnings:**
-- Streamlit Community Cloud has no persistent disk and the database is gitignored, so a deployed copy always starts empty; a bundled snapshot DB is unavoidable for a populated public demo.
-- Gating state-changing UI (an "ingest now" button) behind an environment variable keeps a public deployment read-only by default without separate code paths.
-- Driving a "progress" view off the shape of the docs themselves (status/checkbox conventions in this file) is cheap but brittle: the convention has to be kept consistent or the view misreports.
+| `BaseModel` vs plain class/`dataclass` | `BaseModel` validates and coerces types at the point data enters the system and raises `ValidationError` on mismatch. A plain class does none of this. `dataclass` gives `__init__`/`__eq__`/`__repr__` for free but still ignores type hints at runtime, bad data passes through silently until it breaks something downstream. |
+| `Field()` | Attaches per-field constraints and metadata on top of a type annotation: `min_length`/`max_length`, `ge`/`le`/`gt`/`lt`, `pattern`, `alias`, `description`. Complements, doesn't replace, the type-level contract the annotation already gives. |
+| `_Strict(BaseModel)` + `ConfigDict(extra="forbid")` | A shared internal base class that rejects any field not explicitly declared on the model, instead of silently ignoring (`"ignore"`, the default) or accepting (`"allow"`) it. Defined once, inherited everywhere, so malformed/hallucinated LLM output fails loudly rather than passing through unnoticed. |
+| `default_factory` | Required, not just style, for mutable defaults (`list`, `dict`, `set`): Pydantic v2 rejects a bare mutable default outright because Python evaluates default values once at definition time, so every instance would otherwise share and mutate the same object. Also fits any default that must be computed per instance rather than once at class definition (e.g. `uuid.uuid4()`, `datetime.now()`). Mutually exclusive with `default`, passing both raises an error. |
+| Typed fields (`AnyHttpUrl`, `AwareDatetime`) | Push format and timezone validation into the schema itself: `AnyHttpUrl` rejects malformed URLs, `AwareDatetime` rejects naive (timezone-less) datetimes. Moves a class of bugs from "caught later, maybe" to "caught at the model boundary, always." |
+| Class inheritance refresher | `class _Strict(BaseModel):` makes `_Strict` a subclass of `BaseModel`; it inherits all of `BaseModel`'s behaviour and overrides only `model_config`. Other models then inherit from `_Strict` instead of `BaseModel` directly, picking up the strictness rule without repeating `ConfigDict(extra="forbid")` on every model (DRY). |
+| Why `value: T \| None` on `Sourced[T]` | `None` means a genuinely absent fact, not a design gap: a company with no funding round yet, or a field the agent researched and found no sourced claim for. Every `CompanyProfile` field is a `Sourced[T]`, so if `value` were required, each field would need wrapping in `Optional[Sourced[T]]` instead, doubling the optionality for the same concept. The validator only forbids the one invalid combination, a value with no `source_url`, leaving "no claim at all" (`value=None`) as a legitimate state. |
+| `Sourced[T]` is a Pydantic model despite not importing from `pydantic` | `Sourced[T](_Strict)` and `_Strict(BaseModel)`, so it's a `pydantic.BaseModel` subclass two levels down, not a class Pydantic ships directly. Inheriting from `BaseModel` (however many levels removed) is what makes a class "a Pydantic model": validation, `.model_dump()`, `model_validator`, etc. all come along automatically, no re-import needed. |
+| "Generic" vs "custom" aren't opposites here | The `[T]` in `Sourced[T]` is PEP 695 (Python 3.12) generic class syntax, plain Python, not a Pydantic feature; it makes `T` a type parameter filled in at use-site (`Sourced[str]`, `Sourced[Stage]`). Pydantic separately knows how to validate generic models and resolves `T` to the concrete type. So `Sourced[T]` is accurately described as a custom-written, generic subclass of `pydantic.BaseModel`, all three words apply at once. |
+| What a PEP is | Python Enhancement Proposal: the numbered design-document process for language/stdlib changes. PEP 695 (new generic syntax, Python 3.12) is why `class Sourced[T](_Strict):` works and why `requires-python` is pinned to 3.12; PEP 8 is the style guide; PEP 484 introduced type hints. |

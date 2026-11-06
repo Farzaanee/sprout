@@ -1,5 +1,23 @@
-# Sprout: Learnings - Phase 5 - Multi-agent pipeline at scale
+# Sprout: Learnings - Phase 5 - Evals & guardrails
 
-**Planned:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, verification/cross-checking patterns, failure isolation.
+**Planned:** evaluating LLM systems (golden sets, metrics, LLM-as-judge and its limits), regression testing prompts, prompt-injection and SSRF defences, treating model output as untrusted too.
 
-**Status:** not started yet; no actual learnings to add.
+**Actual (built and smoke-tested; the baseline run, gate-setting and live injection run are still pending, so no accuracy or fabricated-funding figures exist yet):**
+
+| Topic | Key learning |
+| --- | --- |
+| Code-level versus model-level defences | The scripted-model injection tests show which defences are code: forbidden tools are rejected by `ALLOWED_ENRICHMENT_TOOLS`, an uncited URL is rejected by the source ledger, an attacker host is flagged. An injected amount that the model submits from a page it legitimately cited is accepted by the code and only caught by `run_case` as a leak, so that defence rests on the model and needs the live tier to measure. |
+| Residual risk stays visible | A page asking the model to fetch an attacker URL on a public host passes `UrlPolicy`. `fixture_fetcher` appends every attempted URL before the policy rejects it, which is the only reason such a blocked or allowed fetch shows up as a `forbidden_calls` entry. |
+| Hidden text is not stripped | `html_to_text` drops script, style, noscript, head, template, svg and comments but keeps `display:none` and white-on-white text, so those fixtures reach the model as ordinary text. The defence is the untrusted-content wrapper and prompt sentence, not HTML cleaning. |
+| Delimiter breakout variants | Neutralising only `</untrusted_content>` is not enough: `_TAG` is a case-insensitive regex that also catches `< /untrusted_content>` and `</ untrusted_content>`, and the source URL in the opening tag is percent-encoded for quotes and angle brackets. |
+| SSRF needs address unwrapping | Checking resolved addresses with `is_global` alone misses IPv4-mapped IPv6 (`::ffff:127.0.0.1`) and NAT64 (`64:ff9b::/96`), so `_is_public_address` unwraps both. Decimal, octal and hex host forms are tested through the resolver seam, and a trailing dot is stripped from the host before matching. |
+| Timeout must be a total deadline | The httpx timeout bounds each read, not the whole response, so a server dripping bytes never trips it. `HttpClient._send` checks a total `max_seconds` (30) deadline while streaming, alongside the 5 MB cap. |
+| Fabricated-funding check can only read cached pages | Funding is scored "supported", "fabricated" or "unverifiable" by looking for the amount in the fetched page text. In the 2-company smoke 7 of 9 funding claims were unverifiable because their sources were search snippets, so a low fabricated rate would be partly an artefact of unreadable sources. Report the unverifiable count beside the rate. |
+| Scoring reads the winning facts | `read_observed` uses `winning_facts` rather than all rows, so a run is scored on what the profile would actually show. Scoring is separate from enrichment, which is why `--score-only` rescoring is free and metric changes do not need new model spend. |
+| Budget at batch level | A per-company cap does not bound a run of 32 companies plus judge calls. `BatchBudget` is charged by enrichment, judge and injection cases alike, and an exhausted batch makes the run incomplete (exit 2) rather than silently gating on a subset. It is not thread-safe, so Phase 6 must add a lock. |
+| Gates only on complete runs | `GATES` is evaluated only on a full `--split all` run with no `--only` or `--limit`, and the delta column compares like with like. With one company worth about 3 points, a change under 2 companies is labelled noise instead of a regression. |
+| Judge is not yet trustworthy | Calibration on 12 human-labelled pairs scored 9/12 (75%), under the 80% bar, so judge rows print as uncalibrated. In the smoke the judge returned `partial` for both business models. The judge and calibration always use the strong model, even when enrichment does not. |
+| Golden labels need checking against the registry | `SC428761` was labelled BenevolentAI but is EXSCIENTIA AI LIMITED at Companies House, and six other registry names differ from the common names. The report prints both names for each failing entry so a wrong number is visible rather than scored as an agent error. |
+| Smoke result hints at label ambiguity | Synthesia was placed in "Data, AI infrastructure and developer tools" against a golden Sales/marketing or HR, one of the two companies scored. With 32 entries, a handful of boundary cases like this can decide the 85% gate, which is why counts are shown beside percentages. |
+
+Architecture and contracts for this phase are in [architecture/phase-5-evals-guardrails.md](architecture/phase-5-evals-guardrails.md).

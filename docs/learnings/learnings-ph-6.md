@@ -1,5 +1,5 @@
-# Sprout: Learnings - Phase 6 - Dashboard
+# Sprout: Learnings - Phase 6 - Multi-agent pipeline at scale
 
-**Planned:** data-app development with Streamlit (state, caching), presenting uncertain data honestly, reusing a single service layer across UI and MCP.
+**Planned:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, verification/cross-checking patterns, failure isolation.
 
-**Status:** not started yet (beyond the early progress console in [learnings-ph-1.md](learnings-ph-1.md)); no actual learnings to add.
+**Status:** not started yet; no actual learnings to add.
