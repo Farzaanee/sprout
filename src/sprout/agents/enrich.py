@@ -11,7 +11,7 @@ import re
 import sys
 from collections.abc import Sequence
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -31,6 +31,7 @@ from sprout.agents.loop import (
 )
 from sprout.agents.tools import SourceLedger, build_tools
 from sprout.config import MissingConfigError, Settings, get_settings
+from sprout.costs import BatchBudget
 from sprout.db import (
     Company,
     RunKind,
@@ -476,6 +477,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("targets", nargs="+", metavar="NAME_OR_NUMBER")
     parser.add_argument("--strong", action="store_true", help="use the strong model")
     parser.add_argument("--max-usd", type=Decimal, default=DEFAULT_BUDGET.max_usd)
+    parser.add_argument(
+        "--max-total-usd",
+        type=Decimal,
+        default=None,
+        help="stop once this much has been spent across all targets (default: no cap)",
+    )
     parser.add_argument("--max-iterations", type=int, default=DEFAULT_BUDGET.max_iterations)
     parser.add_argument("--effort", choices=["low", "medium", "high"], default=DEFAULT_EFFORT)
     parser.add_argument("--show", action="store_true", help="print each accepted profile as JSON")
@@ -499,6 +506,7 @@ def _summary(profile: CompanyProfile, company: Company, result: LoopResult) -> s
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     budget = Budget(max_iterations=args.max_iterations, max_usd=args.max_usd)
+    batch = BatchBudget(args.max_total_usd) if args.max_total_usd is not None else None
     settings = get_settings()
     model = settings.strong_model if args.strong else settings.bulk_model
     exit_code = 0
@@ -521,6 +529,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             ch = CompaniesHouseClient(stack.enter_context(ch_http))
         deps = Deps(client, fetcher, ch, settings, model, args.effort)
         for target in args.targets:
+            if batch is not None and batch.exhausted:
+                print(
+                    f"skip {target}: batch budget of USD {batch.max_usd} is used up",
+                    file=sys.stderr,
+                )
+                exit_code = 1
+                continue
             try:
                 company = resolve_company(session, target, ch)
             except (CompanyNotFound, FetchError, ValueError) as exc:
@@ -531,10 +546,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 deleted = delete_profile(session, company)
                 session.commit()
                 print(f"reset {company.name}: deleted {deleted} facts", file=sys.stderr)
+            run_budget = budget
+            if batch is not None:
+                run_budget = replace(budget, max_usd=batch.clamp(budget.max_usd))
             try:
-                profile, result = enrich_with_result(session, company, deps, budget)
+                profile, result = enrich_with_result(session, company, deps, run_budget)
             except EnrichmentFailed as exc:
                 total_usd += exc.cost_usd
+                if batch is not None:
+                    batch.charge(exc.cost_usd)
                 print(
                     f"FAIL {company.name} ({company.company_number}): {exc} "
                     f"cost=USD {exc.cost_usd:.4f}",
@@ -543,6 +563,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 exit_code = 1
                 continue
             total_usd += result.cost_usd
+            if batch is not None:
+                batch.charge(result.cost_usd)
             print(_summary(profile, company, result))
             if args.show:
                 print(profile.model_dump_json(indent=2))

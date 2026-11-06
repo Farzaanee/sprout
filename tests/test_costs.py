@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from sprout.costs import UnknownModelError, Usage, cost_usd, enrichment_batch_size
+from sprout.costs import BatchBudget, UnknownModelError, Usage, cost_usd, enrichment_batch_size
 
 
 def test_haiku_cost_is_exact_decimal_arithmetic():
@@ -46,3 +46,32 @@ def test_enrichment_batch_size_is_capped_by_budget():
 def test_enrichment_batch_size_is_capped_by_survivors():
     n = enrichment_batch_size(3, budget_usd=Decimal("0.75"), cost_per_company_usd=Decimal("0.015"))
     assert n == 3
+
+
+@pytest.mark.parametrize("bad", [Decimal(0), Decimal("-1")])
+def test_batch_budget_rejects_a_non_positive_cap(bad):
+    with pytest.raises(ValueError, match="max_usd"):
+        BatchBudget(bad)
+
+
+def test_batch_budget_charges_and_reports_remaining():
+    batch = BatchBudget(Decimal("1.00"))
+    batch.charge(Decimal("0.30"))
+    batch.charge(Decimal("0.20"))
+    assert batch.spent == Decimal("0.50") and batch.remaining == Decimal("0.50")
+    assert not batch.exhausted
+
+
+def test_batch_budget_is_exhausted_at_the_cap_and_remaining_never_negative():
+    batch = BatchBudget(Decimal("1.00"))
+    batch.charge(Decimal("1.00"))
+    assert batch.exhausted and batch.remaining == Decimal(0)
+    batch.charge(Decimal("0.25"))  # soft cap: the last response may overshoot
+    assert batch.exhausted and batch.remaining == Decimal(0)
+
+
+def test_batch_budget_clamp_is_the_smaller_of_item_cap_and_remaining():
+    batch = BatchBudget(Decimal("1.00"))
+    assert batch.clamp(Decimal("0.13")) == Decimal("0.13")
+    batch.charge(Decimal("0.95"))
+    assert batch.clamp(Decimal("0.13")) == Decimal("0.05")

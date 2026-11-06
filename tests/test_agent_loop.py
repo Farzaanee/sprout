@@ -123,6 +123,24 @@ def test_iteration_cap_is_exact_and_last_turn_gets_a_wrap_up_notice():
     assert "submit_profile" in notices[1][0]["text"]
 
 
+def test_notices_name_the_terminal_tool_of_the_run():
+    verdict = Tool(
+        spec={"name": "submit_verdict", "input_schema": {"type": "object"}},
+        handler=lambda args: ToolOutcome("ok", payload=args),
+        terminal=True,
+    )
+    client = ScriptedClient(*[tool_use_turn(("echo", {})) for _ in range(5)])
+    run(client, [echo_tool(), verdict], Budget(max_iterations=2, max_usd=Decimal("1")))
+    wrap_up = client.requests[1]["messages"][-1]["content"][-1]["text"]
+    assert "submit_verdict" in wrap_up and "submit_profile" not in wrap_up
+
+    client = ScriptedClient(text_turn("done"), text_turn("done"))
+    result = run(client, [verdict])
+    reminder = client.requests[1]["messages"][-1]["content"][0]["text"]
+    assert "submit_verdict" in reminder and "submit_profile" not in reminder
+    assert result.error == "the model stopped without calling submit_verdict"
+
+
 def test_tiny_usd_cap_stops_after_the_first_response():
     client = ScriptedClient(
         *[tool_use_turn(("echo", {}), input=5000, output=500) for _ in range(5)]
@@ -176,7 +194,7 @@ def test_end_turn_without_submission_gets_one_reminder_then_stops():
     client = ScriptedClient(text_turn("I am done"), text_turn("still done"), text_turn())
     result = run(client, [submit_tool()])
     assert result.stop == "no_submit" and client.calls == 2
-    assert "submit_profile" in client.requests[1]["messages"][-1]["content"][0]["text"]
+    assert "Call the submit tool" in client.requests[1]["messages"][-1]["content"][0]["text"]
 
 
 def test_reminder_can_rescue_the_run():

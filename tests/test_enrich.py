@@ -618,6 +618,54 @@ def test_cli_uses_the_strong_model_and_reports_failures(cli_env, monkeypatch, ca
     assert "skip nobody-here" in captured.err
 
 
+def test_cli_stops_and_skips_remaining_targets_once_the_batch_budget_is_used(
+    cli_env, monkeypatch, capsys
+):
+    engine = get_engine(cli_env.db_path)
+    with Session(engine) as s:
+        s.add(Company(company_number="87654321", name="BETA AI LTD"))
+        s.commit()
+    # Haiku: 1M output tokens cost USD 0.50, so the first run alone exceeds the USD 0.10 batch cap.
+    client = ScriptedClient(
+        server_search_turn([SEEN], ("submit_profile", submission()), output=1_000_000)
+    )
+    monkeypatch.setattr(enrich_mod, "make_client", lambda key: client)
+    argv = ["12345678", "87654321", "--max-usd", "1", "--max-total-usd", "0.10"]
+    assert enrich_cli.main(argv) == 1
+    captured = capsys.readouterr()
+    assert "ok   ACME AI LTD" in captured.out
+    assert "skip 87654321: batch budget of USD 0.10 is used up" in captured.err
+    assert client.calls == 1
+
+
+def test_cli_clamps_each_run_to_the_remaining_batch_budget(cli_env, monkeypatch, capsys):
+    seen = []
+    real = enrich_mod.enrich_with_result
+
+    def spy(session, company, deps, budget):
+        seen.append(budget.max_usd)
+        return real(session, company, deps, budget)
+
+    monkeypatch.setattr(enrich_mod, "enrich_with_result", spy)
+    client = ScriptedClient(server_search_turn([SEEN], ("submit_profile", submission())))
+    monkeypatch.setattr(enrich_mod, "make_client", lambda key: client)
+    assert enrich_cli.main(["12345678", "--max-usd", "1", "--max-total-usd", "0.05"]) == 0
+    assert seen == [Decimal("0.05")]
+
+
+def test_cli_charges_a_failed_run_to_the_batch_budget(cli_env, monkeypatch, capsys):
+    engine = get_engine(cli_env.db_path)
+    with Session(engine) as s:
+        s.add(Company(company_number="87654321", name="BETA AI LTD"))
+        s.commit()
+    client = ScriptedClient(text_turn(output=1_000_000), text_turn(output=1_000_000))
+    monkeypatch.setattr(enrich_mod, "make_client", lambda key: client)
+    argv = ["12345678", "87654321", "--max-total-usd", "0.10"]
+    assert enrich_cli.main(argv) == 1
+    err = capsys.readouterr().err
+    assert "FAIL ACME AI LTD" in err and "skip 87654321" in err
+
+
 def test_cli_reset_deletes_existing_facts_before_enriching(cli_env, monkeypatch, capsys):
     engine = get_engine(cli_env.db_path)
     with Session(engine) as s:

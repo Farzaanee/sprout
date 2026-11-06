@@ -29,12 +29,13 @@ REQUEST_TIMEOUT_SECONDS = 120.0
 LOGGED_TEXT_MAX_CHARS = 1_000
 TRUNCATED_MARKER = " [truncated]"
 
+DEFAULT_TERMINAL_TOOL = "submit_profile"
 NO_SUBMIT_REMINDER = (
-    "You have not submitted a profile. Call the submit_profile tool now with what you have "
+    "You have not submitted a profile. Call the {tool} tool now with what you have "
     "found. Use null values for anything you could not source."
 )
 WRAP_UP_NOTICE = (
-    "Budget nearly used. Call submit_profile now with what you have; null is fine for the rest."
+    "Budget nearly used. Call {tool} now with what you have; null is fine for the rest."
 )
 
 
@@ -213,6 +214,7 @@ def run_agent(
 ) -> LoopResult:
     cost_usd(model, Usage())  # fail closed on an unpriced model before spending anything
     by_name = {t.spec["name"]: t for t in tools}
+    terminal_name = next((t.spec["name"] for t in tools if t.terminal), DEFAULT_TERMINAL_TOOL)
     specs = [t.spec for t in tools]
     history = list(messages)
     pending: list[dict[str, Any]] = []  # blocks for the next user message
@@ -233,7 +235,7 @@ def run_agent(
         if pending:
             last_iteration = result.iterations + 1 >= budget.max_iterations
             if last_iteration or result.cost_usd >= budget.max_usd * WRAP_UP_FRACTION:
-                pending.append({"type": "text", "text": WRAP_UP_NOTICE})
+                pending.append({"type": "text", "text": WRAP_UP_NOTICE.format(tool=terminal_name)})
             history.append({"role": "user", "content": pending})
             pending = []
 
@@ -302,9 +304,9 @@ def run_agent(
 
         if stop_reason == "end_turn" or (stop_reason == "tool_use" and not uses):
             if reminded:
-                return finish("no_submit", "the model stopped without calling submit_profile")
+                return finish("no_submit", f"the model stopped without calling {terminal_name}")
             reminded = True
-            pending = [{"type": "text", "text": NO_SUBMIT_REMINDER}]
+            pending = [{"type": "text", "text": NO_SUBMIT_REMINDER.format(tool=terminal_name)}]
             continue
 
         return finish("error", f"unexpected stop_reason {stop_reason!r}", "unexpected_stop_reason")

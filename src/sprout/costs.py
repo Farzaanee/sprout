@@ -90,6 +90,35 @@ def cost_usd(model: str, usage: Usage) -> Decimal:
     return tokens + usage.web_searches * WEB_SEARCH_USD_EACH
 
 
+@dataclass
+class BatchBudget:
+    """Shared USD cap over many runs. Soft by at most one response per run, like the per-run cap.
+
+    Not thread-safe: the Phase 5 orchestrator adds a lock around `charge`.
+    """
+
+    max_usd: Decimal
+    spent: Decimal = Decimal(0)
+
+    def __post_init__(self) -> None:
+        if self.max_usd <= 0:
+            raise ValueError("max_usd must be positive")
+
+    def charge(self, cost: Decimal) -> None:
+        self.spent += cost
+
+    @property
+    def remaining(self) -> Decimal:
+        return max(self.max_usd - self.spent, Decimal(0))
+
+    @property
+    def exhausted(self) -> bool:
+        return self.spent >= self.max_usd
+
+    def clamp(self, per_item_usd: Decimal) -> Decimal:
+        return min(per_item_usd, self.remaining)
+
+
 def enrichment_batch_size(
     survivors_after_prescreen: int,
     *,

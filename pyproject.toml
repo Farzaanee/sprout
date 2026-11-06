@@ -29,12 +29,12 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["scripts"]
+pythonpath = ["scripts", "."]
 markers = ["live: calls the real Claude API (needs ANTHROPIC_API_KEY)"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "."]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
