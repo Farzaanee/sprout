@@ -25,3 +25,6 @@ fpush:
 
 eval-rec:
 	uv run python -m evals.run_evals --record
+
+eval-all:
+	uv run python -m evals.run_evals --split all --injection --check-urls --calibrate --record
