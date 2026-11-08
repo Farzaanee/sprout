@@ -80,7 +80,7 @@ def submission(category="Cybersecurity", amount=12, funded=True, free_text=True)
         "founded": NOT_DISCLOSED,
         "category": category,
         "stage": fact("Series A") if funded else NOT_DISCLOSED,
-        "business_status": NOT_DISCLOSED,
+        "business_status": fact("Active"),
         "total_raised_million_usd": NOT_DISCLOSED,
         "valuation_million_usd": NOT_DISCLOSED,
         "funding_rounds": [round_] if funded else [],
@@ -165,7 +165,7 @@ def test_complete_full_run_passes_gates_with_exit_0(env, capsys):
     assert code == 0
     assert client.calls == 6
     assert "| Metric | Result | Delta | Gate |" in out
-    assert "| Category accuracy | 3/3 (100.0%) | n/a | >= 79% pass |" in out
+    assert "| Category accuracy | 3/3 (100.0%) | n/a | >= 80% pass |" in out
     assert "| Fabricated funding | 0/2 (0.0%) | n/a | <= 2% pass |" in out
     assert "| Thin Other profiles | 1/3 (33.3%) | n/a | report |" in out
     assert "Gates: pass." in out
@@ -178,7 +178,7 @@ def test_failed_gate_exits_1_and_misses_show_both_company_names(env, capsys):
     code, _ = full_run(env, *turns)
     out = capsys.readouterr().out
     assert code == 1
-    assert "| Category accuracy | 2/3 (66.7%) | n/a | >= 79% FAIL |" in out
+    assert "| Category accuracy | 2/3 (66.7%) | n/a | >= 80% FAIL |" in out
     assert "Gates: FAIL (category_accuracy)." in out
     assert f"- Gamma AI ({NUMBERS[2]}, Companies House: REGISTERED {NUMBERS[2]} LTD)" in out
     assert "category: golden Cybersecurity; observed Other" in out
@@ -196,8 +196,8 @@ def test_fabricated_funding_fails_its_gate(env, capsys):
     assert "fabricated round:Series A US$99m" in out
 
 
-def test_gates_are_only_the_initial_two():
-    assert set(GATES) == {"category_accuracy", "fabricated_funding"}
+def test_gates_are_the_baseline_set():
+    assert set(GATES) == {"category_accuracy", "business_status_accuracy", "fabricated_funding"}
 
 
 def test_missing_anthropic_key_exits_2(env, capsys):
@@ -242,7 +242,7 @@ def test_budget_stop_marks_the_run_incomplete_and_ungated(env, capsys):
     assert "- Beta Holdings: skipped_budget" in out
     assert "- Gamma AI: skipped_budget" in out
     assert "Gates not evaluated: incomplete run" in out
-    assert ">= 79% not evaluated" in out
+    assert ">= 80% not evaluated" in out
     assert "| Total cost | USD 0.0200" in out
 
 
@@ -254,7 +254,7 @@ def test_limit_runs_a_subset_and_does_not_evaluate_gates(env, capsys):
     assert client.calls == 4
     assert "scored 2 of 2" in out
     assert "Gates not evaluated: subset run" in out
-    assert ">= 79% not evaluated" in out
+    assert ">= 80% not evaluated" in out
 
 
 def test_only_reruns_just_the_named_entry_and_keeps_the_database(env, capsys):
@@ -436,7 +436,7 @@ def test_next_run_reads_the_recorded_counts_for_its_delta_column(env, capsys):
     code, _ = full_run(env, *turns, extra=["--record"])
     out = capsys.readouterr().out
     assert code == 1
-    assert "| Category accuracy | 2/3 (66.7%) | -33.3pp | >= 79% FAIL |" in out
+    assert "| Category accuracy | 2/3 (66.7%) | -33.3pp | >= 80% FAIL |" in out
     assert env.results.read_text(encoding="utf-8").count("# Eval results") == 1
     assert len(run_evals.COUNTS_COMMENT.findall(env.results.read_text(encoding="utf-8"))) == 2
 

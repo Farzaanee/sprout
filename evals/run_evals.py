@@ -87,7 +87,8 @@ class Gate:
 # Set one company below the baseline run (24/29 category, 0/70 fabricated) recorded in
 # evals/results.md. Every other metric is report-only until then.
 GATES: dict[str, Gate] = {
-    "category_accuracy": Gate(">=", 79),
+    "category_accuracy": Gate(">=", 80),
+    "business_status_accuracy": Gate(">=", 80),
     "fabricated_funding": Gate("<=", 2),
 }
 

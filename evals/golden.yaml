@@ -512,10 +512,6 @@ entries:
     label:
       date: 2026-11-05
       verified: true
-    # Two UK entities named Exscientia exist: EXSCIENTIA AI LIMITED (SC428761, Scottish, incorporated
-    # 2012, matches the Dundee founding) and EXSCIENTIA LIMITED (13483814, English, incorporated 2021,
-    # likely a holding entity set up around the US listing). Used the 2012 entity as the operating
-    # company; flag for the user to confirm which CH number the pipeline should resolve to.
 
   - company_number: "09229684"
     name: Babylon Health
