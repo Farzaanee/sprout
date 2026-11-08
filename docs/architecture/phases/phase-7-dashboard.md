@@ -29,3 +29,5 @@ flowchart TB
 ```
 
 The Observability tab (built in Phase 4) is specified on the [Phase 4 page](phase-4-observability.md#dashboard-tab-appdashboardpy). The winning-value rule (needed before this phase reads facts) and the service-layer extraction are A6 in [risks and ambiguities](../5.%20risks.md) and D29 in [decisions](../6.%20decisions.md).
+
+What Phase 6 leaves for this phase (read-side only, no schema work): the news timeline and big-news feed need a `company_news` join (`search_news` returns bare `news_item` rows today; `news_kind IS NOT NULL` is big news); a displayed confidence must be the post-verification one, and the verdict comes from the winning `verification:<claim>` fact (`company_facts` will list those rows, so the fact table must label or filter them); the category rationale is on the classification run's `stats` (D41, no column); per-company status and cost come from `status.py`, not from new SQL; the category chart reads `company.category`, which the classifier now owns. `get_engine` turns on WAL for every caller, and it must tolerate a read-only snapshot file. The Run and test tab is a second spender next to the orchestrator CLI (A29).

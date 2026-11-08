@@ -7,11 +7,11 @@ This architecture is split by concern; each page below is self-contained except 
 ## Current state
 
 - [Overview and modules](1.%20overview.md): goals, legend, dependency direction, and the end-to-end composite diagram.
-- [Data model](2.%20data-model.md): the SQLite schema (built through Phase 4) and the Phase 6 additions.
+- [Data model](2.%20data-model.md): the SQLite schema (built through Phase 5; Phase 6 adds no tables or columns) and how per-company status is derived.
 - [Built modules](3.%20built-modules.md): the built-module table, with the phase each module was added in.
 - [Cross-cutting concerns](4.%20cross-cutting.md): sourcing/provenance, agent orchestration, error handling, testing, configuration, security, cost and observability.
-- [Risks and open questions](5.%20risks.md): the risk register, open ambiguities A1-A32, and what's left to resolve by phase.
-- [Key design decisions](6.%20decisions.md): the numbered decision log, D1-D37.
+- [Risks and open questions](5.%20risks.md): the risk register, open ambiguities A1-A34, and what's left to resolve by phase.
+- [Key design decisions](6.%20decisions.md): the numbered decision log, D1-D41.
 - [Status per phase](7.%20status.md): status and outstanding items for each phase.
 
 ## Diagrams and designs by phase
@@ -25,7 +25,7 @@ Phase pages live under `docs/architecture/phases/`.
 | 3 | [Single-company enrichment agent](phases/phase-3-enrichment.md) |
 | 4 | [Observability](phases/phase-4-observability.md) |
 | 5 | [Evals and guardrails](phases/phase-5-evals-guardrails.md) |
-| 6 | [Multi-agent pipeline](phases/phase-6-multi-agent.md) |
+| 6 | [Multi-agent pipeline](phases/phase-6-multi-agent.md) (designed) |
 | 7 | [Dashboard](phases/phase-7-dashboard.md) |
 | 8 | [MCP server](phases/phase-8-mcp-server.md) |
 | 9 | [Automation, deployment, docs](phases/phase-9-automation.md) |

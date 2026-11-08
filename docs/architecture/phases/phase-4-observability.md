@@ -121,7 +121,7 @@ class FailureCategory(StrEnum):   # values as in the table
 def failure_category_for(stop: str) -> FailureCategory | None   # "submitted" -> None; an unknown stop -> INTERNAL_ERROR (visible, not silent)
 ```
 
-The column is `str | None`, not a SQL enum (the same reasoning as `company.category`, D10 and the [data model](../2.%20data-model.md): no CHECK constraint to fight `ALTER`). New categories in Phase 6 (for example a rate-limit category when the worker pool retries 429s) are code-only additions. The dashboard iterates the distinct values found, ordered by `FailureCategory` declaration order with unknown values last, so an old DB or a new value never breaks the page. **No index** on `failure_category`: `create_all` does not add indexes to an existing table, so `index=True` would exist on fresh DBs and not on migrated ones, and at a few hundred rows an index is pointless (the same call as `company.category`).
+The column is `str | None`, not a SQL enum (the same reasoning as `company.category`, D10 and the [data model](../2.%20data-model.md): no CHECK constraint to fight `ALTER`). A new category would be a code-only addition; Phase 6 adds none (a 429 stays `api_error`). The dashboard iterates the distinct values found, ordered by `FailureCategory` declaration order with unknown values last, so an old DB or a new value never breaks the page. **No index** on `failure_category`: `create_all` does not add indexes to an existing table, so `index=True` would exist on fresh DBs and not on migrated ones, and at a few hundred rows an index is pointless (the same call as `company.category`).
 
 **Error text and the model's response are drill-down only:** the full `run_log.error_message` and `run_log_step.response_text` are shown on the single-run view; no chart or `GROUP BY` uses them.
 
@@ -240,9 +240,10 @@ A new `render_observability` tab named **Observability**, placed after News and 
 
 Not measured: step logging's runtime overhead (argued from the design: no extra call, no I/O in the loop, one INSERT batch inside an existing commit).
 
-## What Phase 6 needs (hooks only, nothing built)
+## What Phase 6 uses from this phase
 
-- Each Phase 6 agent run (`classify`, `news`, `verify`) gets its own `run_log` row with its own `kind`, so `run_log_step` is reused unchanged and needs no agent column; `failure_category` is a free-text column, so worker-level categories (rate-limit, cancelled) are code additions.
-- Steps are written once per run by that worker's own session after `run_agent` returns, so concurrent workers never interleave rows in one run. SQLite's single writer still serialises commits; the orchestrator should keep commits short (this design makes each run's step insert one small batch).
-- Live per-worker progress (for example "worker 3 is on iteration 5") is not possible with end-of-run persistence. If Phase 6 wants it, add an optional `on_step` callback to `run_agent` (additive) and persist each step as it arrives; the table already supports it.
-- Per-company status is derived from `run_log` rather than stored in a new table (A23, D32): Phase 6 adds a nullable `run_log.company_id`, backfilled from `stats.company_id` (A11), as described in the [data model](../2.%20data-model.md#planned-additions-phase-6).
+- Each Phase 6 agent run (`classify`, `news`, `verify`) gets its own `run_log` row with its own `kind`, so `run_log_step` is reused unchanged and needs no agent column; `failure_category` is a free-text column, but Phase 6 adds no category (a 429 stays `api_error`, with `stats.error_type` carrying `RateLimitError`; the shared run-recording helper writes `error_type`).
+- Steps are written once per run by that worker's own session after `run_agent` returns, so concurrent workers never interleave rows in one run; the orchestrator keeps commits short (one small batch per run).
+- No `on_step` callback is added: per-company completion lines are the progress signal.
+- Per-company status is derived from `run_log` (A23, D32) over the built, indexed `run_log.company_id`, as described in the [data model](../2.%20data-model.md#per-company-status-derived-not-stored) and the [Phase 6 page](phase-6-multi-agent.md#selector-status-and-retry).
+- The Observability tab already groups by `kind` (`failure_rate_by_kind`, `cost_by_kind`) and filters the drill-down by kind. The trend, tool and daily-outcome queries stay enrich-only. The batch `pipeline_run` row keeps its spend in `stats.spent_usd` so `cost_by_kind` does not count it twice.
