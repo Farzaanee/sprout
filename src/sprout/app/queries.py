@@ -20,6 +20,7 @@ from sprout.db import (
     winning_facts,
 )
 from sprout.failures import FailureCategory
+from sprout.models import BusinessStatus
 from sprout.sources.companies_house import PUBLIC_COMPANY_URL
 
 
@@ -261,6 +262,12 @@ def status_options(session: Session) -> list[str]:
     return sorted(statuses)
 
 
+def business_status_options() -> list[str]:
+    """Researched business status values (see `BusinessStatus`), distinct from the Companies
+    House legal status in `status_options`."""
+    return [value.value for value in BusinessStatus]
+
+
 _AGE_BINS = [(0, 30, "<30"), (30, 40, "30-39"), (40, 50, "40-49"), (50, 60, "50-59")]
 
 
@@ -317,6 +324,7 @@ def search_companies(
     keyword: str | None = None,
     incorporated_from: date | None = None,
     status: str | None = None,
+    business_status: str | None = None,
     limit: int = 500,
 ) -> list[Company]:
     query = select(Company).where(Company.candidate_score >= min_score)
@@ -330,6 +338,9 @@ def search_companies(
     rows = session.exec(query).all()
     if keyword:
         rows = [row for row in rows if keyword in row.matched_keywords]
+    if business_status:
+        winning = _winning_values(session, "business_status")
+        rows = [row for row in rows if winning.get(row.id) == business_status]
     return list(rows[:limit])
 
 

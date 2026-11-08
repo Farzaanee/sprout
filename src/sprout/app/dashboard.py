@@ -390,9 +390,9 @@ def render_companies() -> None:
             format_func=lambda k: k or "any",
         )
         year = top[3].number_input("Incorporated from", 2012, date.today().year, 2012)
-        status = top[4].selectbox(
+        business_status = top[4].selectbox(
             "Business status",
-            [""] + queries.status_options(session),
+            [""] + queries.business_status_options(),
             format_func=lambda s: s or "any",
         )
         rows = queries.search_companies(
@@ -401,7 +401,7 @@ def render_companies() -> None:
             min_score=int(min_score),
             keyword=keyword or None,
             incorporated_from=date(int(year), 1, 1),
-            status=status or None,
+            business_status=business_status or None,
         )
         st.caption(f"{len(rows)} companies (max 500 shown). Candidates, not verified startups.")
         st.dataframe(
