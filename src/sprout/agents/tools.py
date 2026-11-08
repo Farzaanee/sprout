@@ -28,6 +28,15 @@ ALLOWED_ENRICHMENT_TOOLS = frozenset(
     {"web_search", "fetch_page", "lookup_companies_house", "submit_profile"}
 )
 
+
+def assert_tools_allowed(tools: list[Tool], allowed: frozenset[str], label: str) -> None:
+    """Fail closed if an agent is about to offer a tool outside its allow-list. Call it before
+    `logged_run` so a violation leaves no run row and costs nothing."""
+    unexpected = sorted({t.spec["name"] for t in tools} - allowed)
+    if unexpected:
+        raise RuntimeError(f"tools outside {label} offered: {unexpected}")
+
+
 # Tolerates case and whitespace inside the tag so `< /UNTRUSTED_CONTENT >` cannot close our block.
 _TAG = re.compile(r"<\s*(/?)\s*untrusted_content", re.IGNORECASE)
 

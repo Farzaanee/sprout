@@ -11,7 +11,7 @@ import re
 import sys
 from collections.abc import Sequence
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -19,31 +19,31 @@ from typing import Any
 from pydantic import ValidationError
 from sqlmodel import Session, func, select
 
+from sprout.agents.common import DEFAULT_EFFORT, AgentFailed, Deps, run_recorded
 from sprout.agents.loop import (
     Budget,
     LoopResult,
-    MessagesClient,
-    StepRecord,
     Tool,
     ToolOutcome,
     make_client,
-    run_agent,
 )
-from sprout.agents.tools import ALLOWED_ENRICHMENT_TOOLS, SourceLedger, build_tools
-from sprout.config import MissingConfigError, Settings, get_settings
+from sprout.agents.tools import (
+    ALLOWED_ENRICHMENT_TOOLS,
+    SourceLedger,
+    assert_tools_allowed,
+    build_tools,
+)
+from sprout.config import MissingConfigError, get_settings
 from sprout.costs import BatchBudget
 from sprout.db import (
     Company,
     RunKind,
-    RunLogStep,
     add_company_by_number,
     delete_profile,
     get_engine,
     init_db,
-    logged_run,
     save_profile,
 )
-from sprout.failures import failure_category_for
 from sprout.models import (
     BusinessStatus,
     Category,
@@ -59,7 +59,6 @@ from sprout.sources.http import FetchError
 from sprout.sources.web import WebFetcher
 
 DEFAULT_BUDGET = Budget(max_iterations=12, max_usd=Decimal("0.13"), max_repairs=2)
-DEFAULT_EFFORT = "low"
 MAX_OUTPUT_TOKENS = 6_000
 MAX_LISTED_URLS = 25
 FUNDING_FIELDS = ("total_raised_million_usd", "valuation_million_usd", "funding_rounds")
@@ -169,21 +168,8 @@ class SubmissionError(ValueError):
     """The submitted profile is not acceptable; the message is fed back to the model."""
 
 
-class EnrichmentFailed(RuntimeError):
-    def __init__(self, stop: str, cost_usd: Decimal, detail: str | None) -> None:
-        super().__init__(f"enrichment ended with stop={stop!r}" + (f": {detail}" if detail else ""))
-        self.stop = stop
-        self.cost_usd = cost_usd
-
-
-@dataclass(frozen=True)
-class Deps:
-    client: MessagesClient
-    fetcher: WebFetcher
-    ch: CompaniesHouseClient | None
-    settings: Settings
-    model: str
-    effort: str = DEFAULT_EFFORT
+class EnrichmentFailed(AgentFailed):
+    label = "enrichment"
 
 
 # ---- submit_profile schema and validation --------------------------------------------------
@@ -384,42 +370,6 @@ def _user_message(company: Company, extra_context: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def _stats(result: LoopResult, ledger: SourceLedger) -> dict[str, Any]:
-    """The thin, free-form remainder of a run's record; everything common to every run has its own
-    `run_log` column instead (company, model, budget, tool_calls, error_message, ...)."""
-    usage = result.usage
-    return {
-        "stop": result.stop,
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "cache_read_tokens": usage.cache_read_tokens,
-        "cache_write_tokens": usage.cache_write_tokens,
-        "web_searches": usage.web_searches,
-        "cost_usd": round(float(result.cost_usd), 6),
-        "sources": ledger.snapshot(),
-    }
-
-
-def _step_row(run_id: int, step: StepRecord) -> RunLogStep:
-    usage = step.usage
-    return RunLogStep(
-        run_log_id=run_id,
-        iteration=step.iteration,
-        created_at=step.at,
-        stop_reason=step.stop_reason,
-        tool_name=",".join(step.tool_names) or None,
-        tool_errors=step.tool_errors,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cache_read_tokens=usage.cache_read_tokens,
-        cache_write_tokens=usage.cache_write_tokens,
-        web_searches=usage.web_searches,
-        cost_usd=round(float(step.cost_usd), 6),
-        response_text=step.response_text,
-        tool_error_text=step.tool_error_text or None,
-    )
-
-
 def enrich_company(
     session: Session,
     company: Company,
@@ -447,42 +397,21 @@ def enrich_with_result(
     ch = deps.ch if company.company_number else None
     submit, accepted = _submit_tool(company, ledger)
     tools = [*build_tools(deps.fetcher, ch, ledger), submit]
-    # Before logged_run: a violation must leave no run row and cost nothing.
-    unexpected = sorted({t.spec["name"] for t in tools} - ALLOWED_ENRICHMENT_TOOLS)
-    if unexpected:
-        raise RuntimeError(f"tools outside ALLOWED_ENRICHMENT_TOOLS offered: {unexpected}")
-    with logged_run(session, RunKind.COMPANY_ENRICH.value) as run:
-        result = run_agent(
-            deps.client,
-            model=deps.model,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _user_message(company, extra_context)}],
-            tools=tools,
-            budget=budget,
-            max_tokens=MAX_OUTPUT_TOKENS,
-            effort=deps.effort,
-            on_search_urls=lambda urls: [ledger.add(u, fetched=False) for u in urls],
-        )
-        run.stats = _stats(result, ledger)
-        run.company_id = company.id
-        run.model = deps.model
-        run.effort = deps.effort
-        run.iterations = result.iterations
-        run.repairs = result.repairs
-        run.max_iterations = budget.max_iterations
-        run.max_usd = float(budget.max_usd)
-        run.tool_calls = result.tool_calls
-        run.error_message = result.error
-        failure = failure_category_for(result.stop)
-        run.failure_category = failure.value if failure else None
-        assert run.id is not None  # logged_run commits the row before yielding
-        session.add_all(_step_row(run.id, step) for step in result.steps)
-        # logged_run rolls back on exceptions, so commit stats, category and steps before
-        # raising: a failed run still cost money and that must stay on record.
-        session.commit()
-        if result.stop != "submitted" or not accepted:
-            raise EnrichmentFailed(result.stop, result.cost_usd, result.error)
-        save_profile(session, company, accepted[-1])
+    assert_tools_allowed(tools, ALLOWED_ENRICHMENT_TOOLS, "ALLOWED_ENRICHMENT_TOOLS")
+    result = run_recorded(
+        session,
+        company,
+        RunKind.COMPANY_ENRICH,
+        deps,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": _user_message(company, extra_context)}],
+        tools=tools,
+        budget=budget,
+        ledger=ledger,
+        max_tokens=MAX_OUTPUT_TOKENS,
+        persist=lambda profile: save_profile(session, company, profile),
+        failed=EnrichmentFailed,
+    )
     return accepted[-1], result
 
 
