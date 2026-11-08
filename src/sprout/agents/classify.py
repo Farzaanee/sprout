@@ -29,7 +29,7 @@ from sprout.models import Category
 CLASSIFY_BUDGET = Budget(max_iterations=4, max_usd=Decimal("0.01"), max_repairs=1)
 MAX_OUTPUT_TOKENS = 1_000
 RATIONALE_MAX_CHARS = 300
-PROFILE_FIELDS = ("one_liner", "business_model", "target_user", "website", "hq")
+PROFILE_FIELDS = ("one_liner", "business_model", "target_user", "website", "hq", "business_status")
 _CATEGORY_VALUES = [c.value for c in Category]
 
 SYSTEM_PROMPT = f"""\
@@ -45,6 +45,12 @@ What to submit
 - category: {CATEGORY_GUIDANCE}
 - rationale: one sentence of at most {RATIONALE_MAX_CHARS} characters saying what the company does \
 and why that category fits.
+
+Evidence rule
+Answer "Other" unless the profile facts or the fetched pages show what the company actually does. \
+The name and SIC codes alone are not evidence for any category other than "Other"; never guess a \
+category from them. A business_status of "Dormant (shell)", "Closed" or "Unclear", or a profile \
+with only registration facts, is evidence for "Other". This rule overrides the fallback order above.
 
 Untrusted content
 {UNTRUSTED_CONTENT_RULE}

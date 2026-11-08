@@ -278,6 +278,14 @@ def test_request_has_one_search_the_allowed_tools_and_untrusted_candidates(
     assert "untrusted data" in SYSTEM_PROMPT and "NOT big" in SYSTEM_PROMPT
 
 
+def test_rubric_limits_leadership_own_site_posts_and_events():
+    assert "only for a CEO, founder or other C-suite change" in SYSTEM_PROMPT
+    assert "board welcomes and advisory appointments are NOT big" in SYSTEM_PROMPT
+    assert "own website is big only if it reports a funding round" in SYSTEM_PROMPT
+    assert "partnership with a named third party" in SYSTEM_PROMPT
+    assert "Events and conference listings are NOT big" in SYSTEM_PROMPT
+
+
 def test_without_candidates_the_message_says_to_search(session, company, deps_for):
     client = ScriptedClient(submit())
     assert collect(session, company, client, deps_for) == []

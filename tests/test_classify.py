@@ -142,6 +142,30 @@ def test_classifier_input_is_independent_of_enrichments_category(session, compan
     assert "business_model" not in text and "stage" not in text
 
 
+def test_prompt_demands_evidence_beyond_name_and_sic_for_any_category_but_other():
+    assert 'Answer "Other" unless' in SYSTEM_PROMPT
+    assert "name and SIC codes alone are not evidence" in SYSTEM_PROMPT
+    assert "Dormant (shell)" in SYSTEM_PROMPT and "overrides the fallback order" in SYSTEM_PROMPT
+
+
+def test_winning_business_status_is_an_untrusted_input_line(session, company, deps_for):
+    session.add(
+        Fact(
+            company_id=company.id,
+            field="business_status",
+            value_json='"Dormant (shell)"',
+            source_url=SITE,
+            retrieved_at=datetime.now(UTC),
+            confidence="medium",
+        )
+    )
+    session.commit()
+    client = ScriptedClient(submit())
+    classify_company(session, company, deps_for(client))
+    text = client.requests[0]["messages"][0]["content"]
+    assert f'<untrusted_content source="{SITE}">\nbusiness_status: Dormant (shell)' in text
+
+
 def test_profile_with_no_facts_still_classifies(session, company, deps_for):
     for fact in session.exec(select(Fact)).all():
         session.delete(fact)

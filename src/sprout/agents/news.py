@@ -78,8 +78,12 @@ For each entry
 - url: the exact URL of a candidate or of a search or fetch result. Never write a URL from memory.
 - title: the article title. published: the date as YYYY-MM-DD, or null if unknown.
 - big: true only for news that changes the company's standing: a funding round, an acquisition \
-or merger, a major partnership or customer, a regulatory event, a leadership change. Product \
-updates, awards, opinion pieces, hiring and general mentions are NOT big.
+or merger, a major partnership or customer, a regulatory event, or a leadership change. \
+Leadership is big only for a CEO, founder or other C-suite change at the company; routine \
+hires, board welcomes and advisory appointments are NOT big. A post on the company's own website \
+is big only if it reports a funding round, an acquisition, or a partnership with a named third \
+party. Events and conference listings are NOT big. Product updates, awards, opinion pieces, \
+hiring and general mentions are NOT big.
 - kind: for big news one of {", ".join(k.value for k in NewsKind)}; otherwise null.
 - summary: one sentence of at most {SUMMARY_MAX_CHARS} characters saying what happened.
 
