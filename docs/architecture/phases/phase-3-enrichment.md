@@ -243,7 +243,7 @@ Each iteration: check the guards, call `messages.create`, add `usage` to the run
 
 Only a validated `submit_profile` carries facts, so on any non-`submitted` stop nothing is written to `fact` or `category`; the cost, `failure_category` (from `failures.failure_category_for(stop)`) and step rows are still recorded. The only per-run caps are iterations, USD, search `max_uses` (3) and the tool-result character cap.
 
-There is no per-run fetch cap beyond the iteration cap (the prompt's "at most 4 pages" is advice, not enforced), and no partial profile is ever written on a cap stop. The CLI enforces `--max-usd` per company; `--max-total-usd` (Phase 5, `BatchBudget`, D24; default no cap) caps a whole target list, and the Phase 6 orchestrator must reuse it.
+There is no per-run fetch cap beyond the iteration cap (the prompt's "at most 4 pages" is advice, not enforced), and no partial profile is ever written on a cap stop. The CLI enforces `--max-usd` per company; `--max-total-usd` (Phase 5, `BatchBudget`, D24; default no cap) caps a whole target list, and the Phase 6 orchestrator reuses it.
 
 ## Inside `loop.py`: the iteration state machine
 
@@ -325,7 +325,7 @@ valuation.
 - Agents receive a client through a `Deps` dataclass; tests inject a scripted fake client (see [Testing](../4.%20cross-cutting.md#4-testing)).
 - Tool handlers return error outcomes and never raise into the loop (`run_agent` also catches any handler exception and turns it into an error result).
 - `enrich_with_result` writes facts and the `company_enrich` run_log row in one session: it assigns `run.stats` and the run-level columns (`company_id`, `model`, `effort`, `iterations`, `repairs`, `max_iterations`, `max_usd`, `tool_calls`, `error_message`), sets `run.failure_category` and adds the `run_log_step` rows, then **commits before raising** on failure, because `logged_run` rolls back on exceptions and would otherwise discard the record of what a failed run cost; on success it then calls `save_profile`. On failure `logged_run` also marks the row `status="error"`, filling in `error_message` only if it is still null. The status therefore means "run did not produce a profile", and `stats.stop` and `failure_category` say why.
-- `agents/enrich.py` (about 640 lines: agent, schema, CLI, `resolve_company`) is split in Phase 6: `Deps`, the run-recording block and the failure base class move to `agents/common.py` so the three new agents reuse them (see the [Phase 6 page](phase-6-multi-agent.md#interfaces-proposals-the-implementer-follows-names-may-shift-contracts-should-not)).
+- `agents/enrich.py` was split in Phase 6: `Deps`, the run-recording block (`run_recorded`) and the failure base class (`AgentFailed`) moved to `agents/common.py`, reused by the three new agents (see the [Phase 6 page](phase-6-multi-agent.md#interfaces-as-built)).
 - Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 8 so MCP does not import from the UI package.
 
 ## Outstanding
@@ -345,4 +345,4 @@ Work that is not done or not verified, as of the end of Phase 4. Nothing here bl
 | Latent nit in `_simplify` | It drops any dict key named `title`, `default`, `minimum`, `format` and so on, including a `CompanyProfile` field with such a name inside `properties`. No current field collides |
 | Older facts under superseded field or stage names | Re-run `sprout.enrich <number> --reset` to refresh |
 
-Planned Phase 6/7 modules that build on this phase are on the [Phase 6 page](phase-6-multi-agent.md).
+The Phase 6 modules that build on this phase are on the [Phase 6 page](phase-6-multi-agent.md).
