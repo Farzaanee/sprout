@@ -1,7 +1,7 @@
 """SQLite schema (SQLModel) and the small set of write helpers ingestion needs.
 
 Tables: `company`, `fact` (provenance), `funding_round`, `officer`, `news_item`, `company_news`
-(schema only, unpopulated until a news-matching agent exists), `run_log`, `run_log_step`. All
+(written by the news agent), `run_log`, `run_log_step`. All
 timestamps are timezone-aware UTC.
 """
 
@@ -137,9 +137,7 @@ class NewsItemRow(SQLModel, table=True):
 
 
 class CompanyNewsRow(SQLModel, table=True):
-    """Links a news item to a company. Schema only: nothing writes this table yet (D33); a news
-    item and a company_id are both known the moment some future matcher decides they belong
-    together, so this is additive infrastructure, not a feature."""
+    """Links a news item to a company (D33). Written by `link_company_news`."""
 
     __tablename__ = "company_news"
     __table_args__ = {"extend_existing": True}
@@ -460,6 +458,25 @@ def add_news_items(session: Session, items: Iterable[NewsItem]) -> int:
         new += 1
     session.flush()
     return new
+
+
+def link_company_news(
+    session: Session,
+    company_id: int,
+    news_item_id: int,
+    *,
+    news_kind: str | None,
+    summary: str | None,
+) -> None:
+    """Link a news item to a company (D33). Upserts on the primary key and never deletes, so
+    re-running the news agent is idempotent; `news_kind` is set only for big news."""
+    link = session.get(CompanyNewsRow, (company_id, news_item_id))
+    if link is None:
+        link = CompanyNewsRow(company_id=company_id, news_item_id=news_item_id)
+    link.news_kind = news_kind
+    link.summary = summary
+    session.add(link)
+    session.flush()
 
 
 @contextmanager
