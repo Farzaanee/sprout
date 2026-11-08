@@ -211,6 +211,10 @@ def category_correct(observed: Observed, entry: GoldenEntry) -> bool:
     return observed.category in entry.categories
 
 
+def business_status_correct(observed: Observed, entry: GoldenEntry) -> bool:
+    return observed.value("business_status") == entry.status.value
+
+
 def stage_correct(observed: Observed, entry: GoldenEntry) -> bool:
     got = observed.value("stage")
     if entry.stage == Stage.UNKNOWN:
@@ -314,6 +318,7 @@ class EntryScore:
     api_error: bool
     repaired: bool
     category_ok: bool | None = None
+    business_status_ok: bool | None = None
     stage_ok: bool | None = None
     funding_exact: bool | None = None
     funding_within: bool | None = None
@@ -346,6 +351,7 @@ def score_entry(observed: Observed, entry: GoldenEntry, page_text: PageText) -> 
         api_error=observed.failure_category == "api_error",
         repaired=(observed.repairs or 0) > 0,
         category_ok=category_correct(observed, entry) if submitted else None,
+        business_status_ok=business_status_correct(observed, entry) if submitted else None,
         stage_ok=stage_correct(observed, entry) if submitted else None,
         funding_exact=None if funding is None else funding[0],
         funding_within=None if funding is None else funding[1],
@@ -400,6 +406,7 @@ def aggregate(scores: Sequence[EntryScore]) -> Scores:
         "infrastructure_errors": Ratio(sum(s.api_error for s in scores), total),
         "repair_rate": Ratio(sum(s.repaired for s in scores), total),
         "category_accuracy": _ratio(s.category_ok for s in scores),
+        "business_status_accuracy": _ratio(s.business_status_ok for s in scores),
         "stage_accuracy": _ratio(s.stage_ok for s in scores),
         "funding_exact": _ratio(s.funding_exact for s in scores),
         "funding_within_10pct": _ratio(s.funding_within for s in scores),

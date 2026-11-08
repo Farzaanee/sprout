@@ -316,7 +316,7 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 - `--max-total-usd` defaults to 1.50 in `run_evals` and to no cap in `sprout.enrich`.
 - `judge_field` returns `None` without a call when the batch is exhausted; its cost is charged even when it ends without a verdict. Unjudged calibration pairs count as misses.
 - `UrlPolicy.check` also strips a trailing dot from the host.
-- `GATES` holds only category accuracy and fabricated funding. Source-ledger membership, dead cited URLs and live injection failures are report-only (injection failures never change the exit code); gating them is your call when you set the baseline. The judge and calibration always use the strong model, even without `--strong` for enrichment.
+- `GATES` holds only category accuracy and fabricated funding. Business status accuracy, source-ledger membership, dead cited URLs and live injection failures are report-only (injection failures never change the exit code); gating them is your call when you set the baseline. The judge and calibration always use the strong model, even without `--strong` for enrichment.
 - A funding value's source must be fetched, not just seen in a search snippet: `validate_submission` rejects it otherwise (one repair attempt), rather than loosening `unverifiable_funding` to accept snippet evidence, since that would remove the ledger's only proof the agent read the page it cites. Chosen over loosening the metric because the per-call cost difference is small (`fetch_page` has no flat tool fee, unlike the $0.01/call `web_search`; see [learnings-ph-5.md](learnings/learnings-ph-5.md)).
 
 ### Things later phases must know

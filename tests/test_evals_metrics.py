@@ -12,6 +12,7 @@ from evals.metrics import (
     Ratio,
     aggregate,
     amount_supported,
+    business_status_correct,
     category_correct,
     check_claim,
     fetched_page_text,
@@ -261,6 +262,20 @@ def test_category_accuracy_single_and_list():
     assert not category_correct(Observed(category=None), golden())
 
 
+def test_business_status_correct():
+    from evals.metrics import ObservedFact
+
+    matching = Observed(
+        facts={"business_status": ObservedFact("business_status", "Active", URL, None)}
+    )
+    mismatching = Observed(
+        facts={"business_status": ObservedFact("business_status", "Closed", URL, None)}
+    )
+    assert business_status_correct(matching, golden())
+    assert not business_status_correct(mismatching, golden())
+    assert not business_status_correct(Observed(), golden())
+
+
 def test_stage_correct_unknown_matches_null_or_unknown():
     unknown = golden(stage="Unknown", last_round=None)
     assert stage_correct(Observed(), unknown)
@@ -456,6 +471,7 @@ def test_aggregate_denominators_and_counts(session):
     assert r["infrastructure_errors"] == Ratio(1, 5)
     assert r["repair_rate"] == Ratio(1, 5)
     assert r["category_accuracy"] == Ratio(2, 3)
+    assert r["business_status_accuracy"] == Ratio(0, 3)  # no profile sets business_status
     assert r["stage_accuracy"] == Ratio(1, 3)  # entry 5 expects Unknown, got Series A
     assert r["funding_exact"] == Ratio(1, 2)  # only entries 1 and 2 have a golden round
     assert r["funding_within_10pct"] == Ratio(1, 2)

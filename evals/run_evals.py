@@ -96,6 +96,7 @@ LABELS = {
     "infrastructure_errors": "Infrastructure errors",
     "repair_rate": "Repair rate",
     "category_accuracy": "Category accuracy",
+    "business_status_accuracy": "Business status accuracy",
     "stage_accuracy": "Stage accuracy",
     "funding_exact": "Funding exact",
     "funding_within_10pct": "Funding within 10%",
