@@ -68,6 +68,8 @@ FUNDING_FIELDS = ("total_raised_million_usd", "valuation_million_usd", "funding_
 _NOT_MODEL_OUTPUT = ("name", "news")
 _COMPANY_NUMBER = re.compile(r"^(\d{8}|[A-Za-z]{2}\d{6})$")
 _CATEGORY_VALUES = {c.value for c in Category}
+_DATA_AI_CATEGORY = Category.DATA_AI_INFRASTRUCTURE_AND_DEV_TOOLS.value
+_ENTERPRISE_CATEGORY = Category.ENTERPRISE_SOFTWARE_AND_CLOUD.value
 
 SYSTEM_PROMPT = f"""\
 You are a research analyst building a sourced profile of ONE UK company, using only the tools \
@@ -83,7 +85,12 @@ running low on turns or budget, submit what you have.
 
 What to submit
 - category: exactly one of: {"; ".join(c.value for c in Category)}. Judge by what the company \
-does, not by its name. Use "Other" if nothing fits.
+does, not by its name. Almost every company here works in AI and builds software, so \
+{_DATA_AI_CATEGORY!r} and {_ENTERPRISE_CATEGORY!r} loosely fit nearly all of them; prefer a \
+more specific industry or function category if one genuinely fits (e.g. a company selling \
+fraud detection to banks is "Fintech and payments", not {_DATA_AI_CATEGORY!r}). Only fall back \
+to {_ENTERPRISE_CATEGORY!r}, then {_DATA_AI_CATEGORY!r}, then "Other", in that order, when no \
+specific category applies.
 - website, hq (city and country, e.g. "London, UK"), founded (year), stage, business_status, \
 total_raised_million_usd, valuation_million_usd, funding_rounds, business_model, target_user, \
 one_liner (a factual description of at most 25 words).

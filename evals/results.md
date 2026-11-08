@@ -247,3 +247,43 @@ Calibration (human grade -> judge verdict): correct->correct 4, incorrect->incor
 None.
 
 <!-- sprout-eval-counts {"split": "all", "full": true, "scored": 32, "profiles_submitted": [31, 32], "infrastructure_errors": [0, 32], "repair_rate": [7, 32], "category_accuracy": [19, 31], "stage_accuracy": [25, 31], "funding_exact": [15, 21], "funding_within_10pct": [16, 21], "unexpected_disclosure": [0, 10], "fabricated_funding": [0, 47], "unverifiable_funding": [0, 47], "source_ledger": [246, 246], "thin_other": [4, 31], "ledger_unverifiable": 0, "cost_mean_usd": "0.0224319375", "cost_max_usd": "0.02825", "judge_business_model": [4, 25], "judge_target_user": [9, 26], "calibration": [12, 12], "urls_dead": [0, 86], "injection": [9, 9]} -->
+
+## 2026-11-08 | bc68c11 | claude-haiku-5-5 | effort low | prompt f6d5d33c | split all | scored 12 of 12
+
+Labels: verified, dated 2026-11-05. Judge model claude-sonnet-5-5. Eval database /tmp/eval_category_recheck2.db.
+
+| Metric | Result | Delta | Gate |
+|---|---|---|---|
+| Profiles submitted | 12/12 (100.0%) | n/a | report |
+| Infrastructure errors | 0/12 (0.0%) | n/a | report |
+| Repair rate | 7/12 (58.3%) | n/a | report |
+| Category accuracy | 10/12 (83.3%) | n/a | >= 79% not evaluated |
+| Stage accuracy | 9/12 (75.0%) | n/a | report |
+| Funding exact | 8/11 (72.7%) | n/a | report |
+| Funding within 10% | 9/11 (81.8%) | n/a | report |
+| Unexpected disclosure | 0/1 (0.0%) | n/a | report |
+| Fabricated funding | 0/38 (0.0%) | n/a | <= 2% not evaluated |
+| Unverifiable funding | 0/38 (0.0%) | n/a | report |
+| Source ledger membership | 126/126 (100.0%) | n/a | report |
+| Thin Other profiles | 0/12 (0.0%) | n/a | report |
+| Cost per company | mean USD 0.0249, max USD 0.0297 | n/a | report |
+| Total cost | USD 0.2984 (enrichment 0.2984, judge 0.0000) | n/a | report |
+
+Gates not evaluated: subset run (only a complete --split all run is gated).
+
+### Misses
+- Synthesia (10933652, Companies House: SYNTHESIA LIMITED)
+  - category: golden Sales, marketing and customer experience software or HR and people software; observed Other
+- Peak AI (09307701, Companies House: PEAK AI LIMITED)
+  - stage: golden Series C; observed None
+  - funding: golden US$75m; observed US$3m (off)
+- Builder.ai (10998363, Companies House: ENGINEER.AI GLOBAL LIMITED)
+  - category: golden Enterprise software and cloud; observed Consultancy and services
+  - stage: golden Series D; observed None
+  - funding: golden US$250m; observed unknown (off)
+- Satellite Vu (10163800, Companies House: GLOBAL SATELLITE VU LTD)
+  - funding: golden US$41m; observed US$40m (within 10%)
+- Adarga (09742902, Companies House: ADARGA LIMITED)
+  - stage: golden Series B; observed None
+
+<!-- sprout-eval-counts {"split": "all", "full": false, "scored": 12, "profiles_submitted": [12, 12], "infrastructure_errors": [0, 12], "repair_rate": [7, 12], "category_accuracy": [10, 12], "stage_accuracy": [9, 12], "funding_exact": [8, 11], "funding_within_10pct": [9, 11], "unexpected_disclosure": [0, 1], "fabricated_funding": [0, 38], "unverifiable_funding": [0, 38], "source_ledger": [126, 126], "thin_other": [0, 12], "ledger_unverifiable": 0, "cost_mean_usd": "0.02486858333333333333333333333", "cost_max_usd": "0.029743"} -->
