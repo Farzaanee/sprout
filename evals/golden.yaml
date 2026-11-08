@@ -901,7 +901,7 @@ entries:
       - https://www.nasdaq.com/press-release/accenture-completes-acquisition-faculty-2026-03-16
     last_round:
       stage: Growth
-      amount_million_usd: 43
+      amount_million_usd: 40
       announced: 2021-05-01
       note: "GBP 30M (~$42.5M) growth investment from Apax Digital, announced May 2021; acquired by Accenture, completed Mar 2026, for a reported ~$1B (terms not disclosed)."
       sources:

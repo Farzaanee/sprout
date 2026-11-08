@@ -171,6 +171,8 @@ tests/
 
 **Risks & caveats:** A 30-company golden set is small, so percentages are noisy (one company is about 3 points); report counts alongside percentages and avoid overfitting prompts to the set. Labels you create from the same web sources the agent uses can be wrong or stale, so record the label date and source. An LLM judge is biased toward fluent answers; use it only for free-text fields and calibrate it against your own judgement. Injection defences reduce risk but do not eliminate it, so also limit what a compromised run could do (no write tools, no secrets in context). Use exact-match checks where possible.
 
+**Future scope:** `evals/golden.yaml` already carries a golden `status` (business status) label per company, but it isn't scored or gated like category accuracy. Business status is as important a signal as category, so add a `business_status_accuracy` metric (and gate) alongside category accuracy once the eval harness is more mature.
+
 **Learnings:** evaluating LLM systems (golden sets, metrics, LLM-as-judge and its limits), regression testing prompts, prompt-injection and SSRF defences, treating model output as untrusted too.
 
 ---
