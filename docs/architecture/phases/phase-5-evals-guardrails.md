@@ -241,7 +241,7 @@ See [Phase 5 eval budget](../4.%20cross-cutting.md#8-phase-5-eval-budget) for th
 
 Flow: load verified entries; reset `data/eval.db` (unless `--only` or `--score-only`); for each entry `resolve_company(session, entry.company_number, ch)` (adds it from Companies House when absent), then one isolated per-company function (`_enrich_entry`, the seam Phase 6 swaps for the orchestrator) calling `enrich_with_result` under the clamped budget and catching `EnrichmentFailed` without retry; then `read_observed` and score; judge; optional liveness and injection; print the table and a "misses" list (golden vs observed per failing entry, with the resolved Companies House name); evaluate `GATES` (a dict constant in `run_evals.py` holding `category_accuracy >= 85` and `fabricated_funding <= 3`; edited by commit when the baseline is set); with `--record` append to `evals/results.md`. Companies House responses and fetched pages come from the shared disk cache, so repeat runs are cheap in requests, not in tokens.
 
-Output, one table, counts beside percentages and a delta against the latest recorded complete full run of the same split (n/a when the denominator differs; a change under 2 companies is marked as noise, since one company is about 3 points):
+Output, one table, counts beside percentages and a delta against the latest recorded complete full run of the same split (percentage points, comparing the two runs' percentages even when the denominator differs; a change under 3.5 points is marked as noise):
 
 ```
 | Metric | Result | Delta | Gate |

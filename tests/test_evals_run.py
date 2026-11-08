@@ -394,18 +394,18 @@ def test_check_urls_row_is_in_the_table(env, capsys):
 # ---- delta, noise and --record --------------------------------------------------------------
 
 
-def test_delta_marks_changes_under_two_companies_as_noise():
-    previous = {"category_accuracy": [28, 32]}
+def test_delta_compares_percentages_and_marks_small_moves_as_noise():
+    previous = {"category_accuracy": [28, 32]}  # 87.5%
 
     def delta(num, den=32):
         return _delta(previous, Metric("category_accuracy", "x", Ratio(num, den)))
 
-    assert delta(28) == "0"
-    assert delta(29) == "+1 (noise)"
-    assert delta(27) == "-1 (noise)"
-    assert delta(30) == "+2"
-    assert delta(24) == "-4"
-    assert delta(10, den=10) == "n/a"  # a different denominator is not comparable
+    assert delta(28) == "0.0pp"
+    assert delta(29) == "+3.1pp (noise)"
+    assert delta(27) == "-3.1pp (noise)"
+    assert delta(30) == "+6.2pp"
+    assert delta(24) == "-12.5pp"
+    assert delta(10, den=10) == "+12.5pp"  # a different denominator still compares the percentages
     assert _delta(None, Metric("category_accuracy", "x", Ratio(1, 1))) == "n/a"
     assert _delta(previous, Metric("stage_accuracy", "x", Ratio(1, 1))) == "n/a"
 
@@ -436,7 +436,7 @@ def test_next_run_reads_the_recorded_counts_for_its_delta_column(env, capsys):
     code, _ = full_run(env, *turns, extra=["--record"])
     out = capsys.readouterr().out
     assert code == 1
-    assert "| Category accuracy | 2/3 (66.7%) | -1 (noise) | >= 79% FAIL |" in out
+    assert "| Category accuracy | 2/3 (66.7%) | -33.3pp | >= 79% FAIL |" in out
     assert env.results.read_text(encoding="utf-8").count("# Eval results") == 1
     assert len(run_evals.COUNTS_COMMENT.findall(env.results.read_text(encoding="utf-8"))) == 2
 

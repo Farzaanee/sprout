@@ -64,7 +64,7 @@ from sprout.sources.web import WebFetcher
 DEFAULT_DB = DEFAULT_EVAL_DB_PATH
 DEFAULT_MAX_TOTAL_USD = Decimal("1.50")
 RESULTS_PATH = EVALS_DIR / "results.md"
-NOISE_COMPANIES = 2  # a change smaller than this is within run-to-run noise (one company ~3 points)
+NOISE_PP = 3.5  # a change smaller than this is within run-to-run noise (about one company's swing)
 JUDGED_FIELDS: tuple[Field, ...] = ("business_model", "target_user")
 COUNTS_COMMENT = re.compile(r"<!-- sprout-eval-counts (\{.*?\}) -->")
 
@@ -319,11 +319,11 @@ def _delta(previous: dict[str, Any] | None, metric: Metric) -> str:
     if previous is None or metric.key not in previous:
         return "n/a"
     prev_num, prev_den = previous[metric.key]
-    if prev_den != metric.ratio.den:
+    if prev_den == 0 or metric.ratio.den == 0:
         return "n/a"
-    change = metric.ratio.num - prev_num
-    text = f"{change:+d}" if change else "0"
-    return f"{text} (noise)" if 0 < abs(change) < NOISE_COMPANIES else text
+    change = metric.ratio.percent - (100 * prev_num / prev_den)
+    text = f"{change:+.1f}pp" if change else "0.0pp"
+    return f"{text} (noise)" if 0 < abs(change) < NOISE_PP else text
 
 
 def _gate_cell(metric: Metric, evaluate: bool) -> str:

@@ -310,7 +310,7 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 
 ### Decisions locked in
 - Evals write to `data/eval.db` (the runner refuses to reset the live DB); `--score-only` rescoring is free. A failed run persists only its `run_log` row; there is no retry and no partial-facts logic (Phase 6).
-- Gates apply to complete full-set runs only (no `--limit`, `--only`, subset `--split` or budget stop). The Delta column compares with the latest recorded complete full run of the same split; a change under 2 companies is marked noise.
+- Gates apply to complete full-set runs only (no `--limit`, `--only`, subset `--split` or budget stop). The Delta column compares percentages against the latest recorded complete full run of the same split, even when the denominators differ; a change under 3.5 percentage points is marked noise.
 - A `skipped_budget` entry, or a `--score-only` entry with no run, is unscored and makes the run incomplete (exit 2).
 - Funding match: a golden round with a null amount matches an observed null amount; unexpected disclosure counts any observed round with an amount; a currency marker without a unit (`$12,500,000`) is accepted by the number matcher.
 - `--max-total-usd` defaults to 1.50 in `run_evals` and to no cap in `sprout.enrich`.
