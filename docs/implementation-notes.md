@@ -239,7 +239,7 @@ Built as designed per D14-D17 in `docs/architecture/6. decisions.md` (run_log_st
 - `enrich_runs` with both a category and `failures_only=True` applies the category filter only.
 
 ### Things later phases must know
-- `RunLogStep.created_at` must be timezone-aware on insert (a naive value raises in SQLModel); `started_at` reads back naive UTC.
+- `RunLogStep.created_at` must be timezone-aware on insert (a naive value raises in SQLModel); `RunLog.started_at` reads back timezone-aware UTC in the current environment (checked in Phase 6), and `status.py` accepts naive values as UTC too.
 - `init_db` backfills `failure_category` from `stats.stop` for historic enrich rows, so a hand-seeded success row needs `stop: "submitted"`.
 - The Observability metrics and charts use the newest 200 runs (`enrich_runs` default limit); the failure-category chart covers all runs. Irrelevant at about 45 runs, relevant in Phase 6.
 - Steps are persisted at the end of a run, so a hard process kill loses that run's steps (as it already loses its stats). Live per-worker progress in Phase 6 needs the optional `on_step` callback described in the architecture (A29 notes).
@@ -321,3 +321,63 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 - Phase 9's eval job needs both API keys (so not for fork PRs); exit codes 0/1/2 map to job outcomes.
 - A page asking the model to fetch an attacker URL on a public host passes `UrlPolicy`; this is a documented residual risk, visible only in fixture runs.
 - `ruff format --check` flags `src/sprout/app/dashboard.py` and `tests/test_app_queries.py` (pre-existing; CI does not enforce format).
+
+---
+
+## Phase 6 - Multi-agent pipeline at scale
+
+**Status: done for the classifier, news agent, verifier and orchestrator; the discovery agent is intentionally deferred (not built, not wired in), so plan step 5 is not satisfied this phase.** `uv run pytest -q` passes (636 passed, 9 live tests skipped) and `uv run ruff check` is clean. The orchestrator ran live: a 12-company pilot, then `--limit 50` (49 of 50 `ok` on the first pass, 50 of 50 after one resume run). The per-agent Phase 5 eval checks (D28) were **not run**: paid `run_evals` runs need your confirmation and none was given, so no agent is yet shown to help (see "Open items").
+
+### What was built
+| Item | Where |
+|---|---|
+| WAL, 30 s busy timeout, `RunKind.PIPELINE_RUN`, `link_company_news`, `latest_round` (the D22 rule, shared with evals), `apply_verification` | [src/sprout/db.py](src/sprout/db.py) |
+| `BatchBudget` lock and atomic `try_slice(cap)` | [src/sprout/costs.py](src/sprout/costs.py) |
+| `make_client(max_retries=)`; `DiskCache.put` unique temp name; `build_tools(max_searches=)`; `ALLOWED_CLASSIFY/NEWS/VERIFY_TOOLS`; `assert_tools_allowed`; `NewsKind` | [loop.py](src/sprout/agents/loop.py), [http.py](src/sprout/sources/http.py), [tools.py](src/sprout/agents/tools.py), [models.py](src/sprout/models.py) |
+| `Deps`, `AgentFailed` (with `error_type`), `run_recorded` (lifted from `enrich_with_result`; `persist` may return extra stats) | [src/sprout/agents/common.py](src/sprout/agents/common.py) |
+| Derived per-step status, `reap_abandoned`, `profile_gaps` (reads `db` only) | [src/sprout/status.py](src/sprout/status.py) |
+| Classifier | [src/sprout/agents/classify.py](src/sprout/agents/classify.py) |
+| News agent (RSS name matcher, near-duplicate collapse, `company_news` writer) | [src/sprout/agents/news.py](src/sprout/agents/news.py) |
+| Verifier (second-source check, independence rules in code) | [src/sprout/agents/verify.py](src/sprout/agents/verify.py) |
+| Orchestrator (asyncio plus `to_thread`, one resource bundle per worker, 429 gate, dry run) and shim | [src/sprout/agents/orchestrator.py](src/sprout/agents/orchestrator.py), [src/sprout/orchestrator.py](src/sprout/orchestrator.py) |
+| `run_evals --agents classify,verify`, `--reuse-enrichment`, classifier and verifier rows, agent-set-aware history | [evals/run_evals.py](evals/run_evals.py), [evals/metrics.py](evals/metrics.py) |
+| Tests | `test_agent_common.py`, `test_status.py`, `test_classify.py`, `test_verify.py`, `test_news.py`, `test_orchestrator.py`; additions to `test_costs.py`, `test_http.py`, `test_db.py`, `test_agent_tools.py`, `test_models.py`, `test_evals_run.py`, `test_evals_metrics.py` |
+
+CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max-total-usd 5.00] [--steps ...] [--only ...] [--no-prescreen] [--force] [--dry-run]`. Design: [phase-6-multi-agent.md](architecture/phases/phase-6-multi-agent.md).
+
+### Acceptance criteria
+- [x] **`python -m sprout.orchestrator --limit 50` completes with >=85% `ok` and cost under ~US$5.** Live: 49 of 50 `ok` (98%) on the first pass; the one failure (ETHOS, `invalid_output`: the model cited a URL no tool had returned, so the ledger rejected it) was retried by the next invocation and ended `ok` (50 of 50). Full run US$1.3268 (enrich 0.884, news 0.410, verify 0.026, classify 0.006), 199 s at concurrency 4, 0 rate-limit trips. The 12-company pilot before it cost US$0.4445 (12 of 12 `ok`). Cumulative Phase 6 live spend, including a 5-company pre-screen control (US$0.1213), prompt-fix re-checks (US$0.0290) and the resume rerun (US$0.0796): **about US$2.00**.
+- [x] **Interrupting and restarting does not repeat completed work.** Verified by rerunning the same command: no (company, kind) pair that already had `run_log` rows gained any; only ETHOS's failed steps ran again, and the other 49 were `skipped_fresh`. The pilot rerun spent US$0.00. A live SIGINT mid-run was **not** performed (it cannot be staged once everything is fresh without spending outside the plan); resume after a simulated kill is covered by a unit test.
+- [~] **Each company has category, stage (or Unknown), funding (or "not disclosed"), business model, target user, >=1 news item where news exists, all with source URLs.** Met only in the "explicit not disclosed" sense. All 50 have a category, a stage fact, a funding fact or row, a business-model fact and a target-user fact, and every non-null value has a `source_url`. But only 2 stages carry a value, 3 companies have funding rounds, 24 have a business model, 19 a target user, and 34 of 50 end `Other`. Only 7 of 50 have a news item (24 items), 43 had none found. NULL ("not disclosed") facts carry no URL by design. The pool is shell-heavy (see D34 below), so thin profiles are the pool's property more than the pipeline's.
+- [x] **Written note explaining why this is multi-agent and the cost/quality trade-offs.** See "Why multi-agent" below.
+- [ ] **Discovery agent (plan step 5): deferred by decision**, not built. A26 stays open.
+
+### Why multi-agent (and where one agent would do)
+- A single enrichment call already produces category, stage, funding, business model and target user. Splitting buys three things: a separately capped and separately logged run per concern (failure isolation: a failed classify or news step leaves the profile intact, and each step has its own `run_log` row, cost and `failure_category`); model routing (classify and news on the cheap model, verify on the strong one); and prompts that can see evidence the extractor did not (the verifier must find a source the enricher did not use).
+- The cost is small at the measured prices. Per company, measured on the 50-run: enrich US$0.023 (ok runs), classify US$0.0002, news US$0.011, verify US$0.026 to 0.053 per run but run on only 3 of 50 companies (only companies with a stage or funding claim are verified; 47 had none). Per-company cost was about US$0.03 to 0.04, well below the US$0.077 planned. Enrichment is 67% of spend, news 31%.
+- Where one agent would suffice: the classifier is almost free but its measured value is unproven (below); the verifier cannot earn anything on this pool because there is little funding to check; the news agent runs one search per company and finds items for 7 of 50 shell-heavy companies. On the golden-set companies (real startups) the balance is likely different, which is exactly what the unrun D28 evals would show.
+
+### D34 pre-screen validation (A1)
+- **The pre-screen did not meet its target.** Of the 12 pilot companies, 5 ended `Other`, `Dormant (shell)` or `Unclear` (target: 2 or fewer); on the 50 working set, all 21 Dormant, Unclear or Stagnant companies are `Other`, and 34 of 50 are `Other` after classification (17 by enrichment alone). Only about 4 of the 12 pilot companies were plausibly real startups. All 12 tie at `candidate_score` 4 (name-keyword matches), so ranking falls back to `id`.
+- **The control found no false rejects.** The 5 highest-scored companies that fail the pre-screen (`active_officers < 2`) were enriched: 2 shells, 1 real business that is not a startup (acquired in 2022), 2 companies incorporated in July 2026 with no trading evidence. So the pre-screen does not wrongly reject real startups; it is too loose, not too strict.
+- The officer count is therefore a weak filter on name-matched Companies House candidates. Better sources for the working set (investor lists, the deferred discovery agent) or a stricter filter would help; not done this phase.
+
+### Open items (need you)
+1. **Run the D28 evals** (about US$0.1 for the classifier, more for the verifier; ask-first rule): `uv run python -m evals.run_evals --agents classify --reuse-enrichment --record`, then `--agents verify --reuse-enrichment`. Keep rules are in the Phase 6 page. Until run, the classifier, verifier and news agent are **not shown to improve quality**. Known risk: after the pilot-driven "answer `Other` unless there is evidence" rule, the classifier moved 23 of 50 categories and 18 of them to `Other` (enrichment alone had 17 `Other`, the classifier ends with 34); on real startups this may over-demote, which only the golden set can show.
+2. **Decide whether to tighten the candidate pool** (D34 miss above) before a larger run or Phase 9's weekly refresh.
+3. **Weak spots seen live, not fixed:** (a) the verifier once emitted two `web_search` calls and `submit_verification` in one turn; the loop dropped the orphaned searches, so the verdicts were `unverified` without any search being read (safe, but the check did not happen; a prompt or handler fix is small); (b) near-duplicate news from different outlets survives (3 groups in 24 items), and the big-news rubric still over-flags (16 of 24 items big; board appointments and routine hires); (c) `profile_gaps` and the console line treat an explicit "not disclosed" as incomplete (48 of 50 shown incomplete); (d) 9 of 24 news items have no published date; (e) a stale `running` `companies_ingest` row (id 68) is never reaped (batch kinds are not).
+4. 429 handling and the 5-trip stop were never exercised live (0 trips); they are covered by tests only.
+
+### Decisions locked in
+- Built as designed in D38 to D41 (see [decisions](architecture/6.%20decisions.md)): per-worker resource bundles with `asyncio.to_thread` (default 4 workers); status derived per step from `run_log`; at most one attempt per step per invocation and 3 failed attempts across runs (`api_error` rows excluded); `--limit` is a stable working set; the verifier never changes a value (it adjusts confidence and adds a `verification:<claim>` fact); the classifier is independent of enrichment's category and overwrites `company.category`.
+- Deviations from the design: `_enrich_entry` in the eval runner was **not** rerouted through `process_company` (it needs a `Worker` and `RunContext` and a cost-breakdown rework; the runner keeps its own path). `process_company` computes the needed steps itself. A verdict still invalid after its one repair is stored as `unverified` (reason in `observed`) rather than failing the run. No low-confidence-first ordering inside the partial group. An unresolvable `--only` target exits 2. `run_recorded`'s `persist` can return extra stats; two prompt constants were extracted from enrichment's `SYSTEM_PROMPT` (hash unchanged).
+- Pilot-driven prompt fixes (commit `implement phase 6 step 8`): the classifier answers `Other` unless the profile or fetched pages show what the company does (it also receives the winning `business_status`); the news rubric makes leadership big only for C-suite changes and own-site posts big only for funding, acquisition or a named-partner partnership. Re-check: the six shell companies then ended `Other`; the rubric change helped only a little (company 328: 5 of 5 big before, 3 of 4 after).
+- The `pipeline_run` stats key is `spent_usd`, not `cost_usd`, so the Observability cost sums do not double count the batch row.
+
+### Things later phases must know
+- WAL is on for every `get_engine` caller (including a read-only snapshot, which keeps its mode). Snapshots must use `VACUUM INTO` or the backup API; `*.db-wal` and `*.db-shm` are gitignored.
+- Phase 7: readers of all facts must skip `verification:*` fields (`VERIFICATION_PREFIX`); the verdict is `winning_facts()["verification:<claim>"]`. `app/queries.count_rows` and the company detail table currently include them. The news timeline needs a `company_news` join. Per-company status and cost come from `status.py`. The classifier rationale is on the classification run's `stats`, not a column.
+- Phase 8: `refresh_company` should call `process_company` (sync, non-raising, non-printing). A refresh can cost up to about US$0.29 at the per-run caps. Swapping `fetch_page` must update all four `ALLOWED_*` sets.
+- Phase 9: a second SIGINT hard-exits and leaves the `pipeline_run` row `running`, blocking a restart for 30 minutes unless `--force`. Exit codes: 0 at >=85% `ok`, 1 below that or stopped early, 2 for configuration or a run in progress. The dry-run estimate prices verify on every company, so it overstates spend (US$4.05 estimated, US$1.33 actual).
+- The first 50 pre-screen survivors by `candidate_score` then `id` are the ones that were run; rerunning with `--limit 50` completes that same set and never reaches further down the pool.
+- Enrichment cost on the current prompt is about US$0.023 to 0.026 per company (up from US$0.015 in Phases 3 and 4), and 32 repairs over 338 enrichment steps were mostly category-enum rejections.
