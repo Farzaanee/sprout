@@ -67,6 +67,7 @@ FUNDING_FIELDS = ("total_raised_million_usd", "valuation_million_usd", "funding_
 # and news arrives in Phase 5.
 _NOT_MODEL_OUTPUT = ("name", "news")
 _COMPANY_NUMBER = re.compile(r"^(\d{8}|[A-Za-z]{2}\d{6})$")
+_CATEGORY_VALUES = {c.value for c in Category}
 
 SYSTEM_PROMPT = f"""\
 You are a research analyst building a sourced profile of ONE UK company, using only the tools \
@@ -235,18 +236,21 @@ def _latest_round_stage(rounds: list[Sourced[FundingRound]]) -> Stage | None:
 
 
 def validate_submission(
-    raw: dict[str, Any], company_name: str, ledger: SourceLedger
+    raw: dict[str, Any],
+    company_name: str,
+    ledger: SourceLedger,
+    *,
+    allow_category_repair: bool = True,
 ) -> CompanyProfile:
     """Turn model output into a `CompanyProfile`, enforcing provenance in code.
 
-    Raises `SubmissionError` with a compact message the model can act on.
+    Raises `SubmissionError` with a compact message the model can act on. An unrecognized
+    category is normally left for Pydantic to reject, so one repair goes back to the model;
+    pass `allow_category_repair=False` to fall back to Other instead once that chance is used.
     """
     data = {k: v for k, v in raw.items() if k not in _NOT_MODEL_OUTPUT}
     data["name"] = company_name
-    # category is model judgement against a fixed taxonomy, not a sourced fact (see models.py),
-    # so an unrecognized value falls back to its own default instead of spending the one repair
-    # the schema guarantees (D13) on a field that already has a safe answer.
-    if data.get("category") not in {c.value for c in Category}:
+    if not allow_category_repair and data.get("category") not in _CATEGORY_VALUES:
         data["category"] = Category.OTHER.value
     now = datetime.now(UTC)
 
@@ -310,10 +314,17 @@ def validate_submission(
 
 def _submit_tool(company: Company, ledger: SourceLedger) -> tuple[Tool, list[CompanyProfile]]:
     accepted: list[CompanyProfile] = []
+    category_repair_given = False
 
     def handle(args: dict[str, Any]) -> ToolOutcome:
+        nonlocal category_repair_given
+        allow_category_repair = not category_repair_given
+        if args.get("category") not in _CATEGORY_VALUES:
+            category_repair_given = True
         try:
-            profile = validate_submission(args, company.name, ledger)
+            profile = validate_submission(
+                args, company.name, ledger, allow_category_repair=allow_category_repair
+            )
         except SubmissionError as exc:
             return ToolOutcome(
                 f"Profile rejected. Fix these and call submit_profile again:\n{exc}", is_error=True

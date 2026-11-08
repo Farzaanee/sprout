@@ -135,9 +135,17 @@ def test_valid_submission_gets_name_and_ledger_time_stamped():
     assert profile.category is Category.ENTERPRISE_SOFTWARE_AND_CLOUD
 
 
-def test_unrecognized_category_falls_back_to_other_instead_of_a_repair():
+def test_unrecognized_category_is_rejected_for_repair_by_default():
     raw = submission(category="Generative AI video")
-    profile = validate_submission(raw, "ACME", ledger_with(SEEN))
+    with pytest.raises(SubmissionError, match="category"):
+        validate_submission(raw, "ACME", ledger_with(SEEN))
+
+
+def test_unrecognized_category_falls_back_to_other_once_repair_is_declined():
+    raw = submission(category="Generative AI video")
+    profile = validate_submission(
+        raw, "ACME", ledger_with(SEEN), allow_category_repair=False
+    )
     assert profile.category is Category.OTHER
 
 
@@ -423,6 +431,19 @@ def test_invalid_after_repair_writes_nothing_but_records_the_cost(session, compa
     assert run.stats["stop"] == "invalid"
     assert run.stats["cost_usd"] > 0
     assert run.stats["input_tokens"] == 3000
+
+
+def test_unrecognized_category_gets_one_repair_then_falls_back_to_other(session, company, deps_for):
+    """The model gets one chance to pick a real category; if it still invents one, the profile
+    is accepted with Other rather than being rejected outright."""
+    invented = submission(category="Generative AI video")
+    client = ScriptedClient(
+        server_search_turn([SEEN], ("submit_profile", invented)),
+        tool_use_turn(("submit_profile", invented)),
+    )
+    enrich_company(session, company, deps_for(client))
+    session.refresh(company)
+    assert company.category == Category.OTHER.value
 
 
 def test_funding_without_note_goes_through_repair(session, company, make_http):
