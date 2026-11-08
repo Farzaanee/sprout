@@ -30,6 +30,7 @@ from sprout.config import Settings
 from sprout.sources.http import FetchError
 
 URL = "https://acme.example/news"
+SECOND = "https://other.example/acme-funding"  # an independent page for the verifier
 PAGE = "<title>Acme</title><p>Acme raised US$12 million in a Series A.</p>"
 NOT_DISCLOSED = {"value": None, "source_url": None, "confidence": "low", "note": None}
 NUMBERS = ("00000001", "00000002", "00000003")
@@ -128,7 +129,7 @@ def env(tmp_path, monkeypatch):
     golden.write_text(yaml.safe_dump({"version": 1, "entries": GOLDEN}), encoding="utf-8")
     monkeypatch.setattr(run_evals, "GOLDEN_PATH", golden)
     monkeypatch.setattr(run_evals, "RESULTS_PATH", tmp_path / "results.md")
-    fetcher, _ = fixture_fetcher({URL: PAGE})
+    fetcher, _ = fixture_fetcher({URL: PAGE, SECOND: PAGE})
     settings = Settings(
         "key", None, "claude-haiku-5-5", "claude-sonnet-5-5", tmp_path / "live.db", tmp_path / "c"
     )
@@ -637,3 +638,77 @@ def test_delta_is_not_shown_against_a_run_with_a_different_agent_set(env, capsys
     assert "| Category accuracy | 3/3 (100.0%) | n/a |" in out
     counts = previous_counts(env.results, "all", ["classify"])
     assert counts["agents"] == ["classify"] and counts["reuse_enrichment"] is False
+
+
+# ---- the verifier on top of enrichment (D28, D40) -------------------------------------------
+
+
+def verify_turns(stage="confirmed", latest_round="confirmed"):
+    def entry(claim, kind):
+        return {
+            "claim": claim,
+            "verdict": kind,
+            "second_source_url": SECOND,
+            "observed": "Series A, US$12m",
+            "quote": "raised US$12 million",
+        }
+
+    return [
+        tool_use_turn(("fetch_page", {"url": SECOND})),
+        tool_use_turn(
+            (
+                "submit_verification",
+                {"verdicts": [entry("stage", stage), entry("latest_round", latest_round)]},
+            ),
+            input=10_000,
+            output=500,
+        ),
+    ]
+
+
+def test_agents_verify_reports_flags_on_wrong_and_right_claims_and_skips_claimless_entries(
+    env, capsys
+):
+    # Alpha's funding is wrong (50 against 12) and flagged. Gamma's is right and wrongly flagged.
+    # Beta has no stage or round, so there is nothing to verify: no turns, no run.
+    turns = company_turns(amount=50) + verify_turns(latest_round="disagrees")
+    turns += company_turns(category="Other", funded=False, free_text=False)
+    turns += company_turns() + verify_turns(latest_round="disagrees")
+    code, client = full_run(env, *turns, extra=["--agents", "verify"])
+    out = capsys.readouterr().out
+    assert client.calls == 4 + 2 + 4
+    assert "| agents verify | split all" in out and "(verify " in out.splitlines()[0]
+    assert "| Verifier flagged wrong claims | 1/1 (100.0%) | n/a | report |" in out
+    assert "| Verifier confirmed right claims | 2/3 (66.7%) | n/a | report |" in out
+    assert "| Verifier wrongly flagged right claims | 1/3 (33.3%) | n/a | report |" in out
+    assert "| Verifier cost per verified company | mean USD 0." in out
+    assert ", verify 0." in out
+    assert "verifier flagged 1 correct claim(s) as disagrees" in out
+    verify_requests = [
+        r for r in client.requests if r["tools"][-1]["name"] == "submit_verification"
+    ]
+    assert len(verify_requests) == 4 and {r["model"] for r in verify_requests} == {
+        "claude-sonnet-5-5"
+    }  # the strong model, though enrichment ran on the bulk one
+    assert code == 1  # the fabricated-funding gate: Alpha's US$50m is not on its page
+
+
+def test_agents_verify_reuses_enrichment_and_a_default_run_has_no_verifier_rows(env, capsys):
+    full_run(env)
+    assert "Verifier" not in capsys.readouterr().out
+    client = ScriptedClient(*verify_turns(), *verify_turns())
+    code = env.run("--skip-judge", "--agents", "verify", "--reuse-enrichment", client=client,
+                   ch=env.ch)  # fmt: skip
+    out = capsys.readouterr().out
+    assert code == 0 and client.calls == 4  # Beta has no claims
+    assert "| Verifier confirmed right claims | 4/4 (100.0%)" in out
+    assert "(enrichment 0.0000, verify" in out
+
+
+def test_scoring_a_verified_database_without_the_agent_is_refused(env, capsys):
+    full_run(
+        env, *good_run()[:2] + verify_turns(), extra=["--only", NUMBERS[0], "--agents", "verify"]
+    )
+    capsys.readouterr()
+    assert env.run("--score-only", "--skip-judge", client=None, ch=None) == 2
+    assert "pass --agents verify" in capsys.readouterr().err

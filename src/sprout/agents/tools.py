@@ -28,6 +28,7 @@ ALLOWED_ENRICHMENT_TOOLS = frozenset(
     {"web_search", "fetch_page", "lookup_companies_house", "submit_profile"}
 )
 ALLOWED_CLASSIFY_TOOLS = frozenset({"fetch_page", "submit_classification"})
+ALLOWED_VERIFY_TOOLS = frozenset({"web_search", "fetch_page", "submit_verification"})
 
 
 def assert_tools_allowed(tools: list[Tool], allowed: frozenset[str], label: str) -> None:

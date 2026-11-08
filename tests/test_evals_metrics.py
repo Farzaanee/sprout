@@ -15,6 +15,7 @@ from evals.metrics import (
     business_status_correct,
     category_correct,
     check_claim,
+    cited_urls,
     fetched_page_text,
     funding_claims,
     funding_match,
@@ -29,6 +30,7 @@ from evals.metrics import (
 from sprout.candidates import assess
 from sprout.db import (
     RunKind,
+    apply_verification,
     init_db,
     logged_run,
     save_fact,
@@ -248,6 +250,76 @@ def test_read_observed_winning_fact_beats_null_fact(session):
     save_fact(session, company.id, "stage", sourced(Stage.SEED, url="https://example.com/b"))
     session.commit()
     assert read_observed(session, golden()).value("stage") == "Seed"
+
+
+def verify_run(session, company, verdicts, *, cost=0.04, status="ok", failure=None):
+    with logged_run(session, RunKind.COMPANY_VERIFICATION.value) as run:
+        run.stats = {
+            "cost_usd": cost,
+            "verdicts": [{"claim": c, "verdict": v} for c, v in verdicts],
+        }
+        run.company_id = company.id
+        run.status = status
+        run.failure_category = failure
+    session.commit()
+
+
+def test_verification_rows_and_dispute_notes_do_not_reach_the_funding_checks(session):
+    company = seed(session, profile=profile(funding_rounds=[round_(note="Reported as US$12m")]))
+    before = score_entry(read_observed(session, golden()), golden(), pages())
+    other = "https://other.example/acme"
+    apply_verification(session, company.id, "latest_round", verdict="disagrees", source_url=other,
+                       observed="raised US$99m", quote="US$99m")  # fmt: skip
+    apply_verification(session, company.id, "stage", verdict="confirmed", source_url=other,
+                       observed="Series A", quote="Series A")  # fmt: skip
+    session.commit()
+    observed = read_observed(session, golden())
+    assert not any(f.field.startswith("verification:") for f in observed.all_facts)
+    assert other not in cited_urls(observed)
+    assert observed.rounds[0].note == "Reported as US$12m"  # the dispute suffix is not a claim
+    after = score_entry(observed, golden(), pages())
+    assert (after.claims, after.ledger_hits, after.ledger_cited, after.thin_other) == (
+        before.claims,
+        before.ledger_hits,
+        before.ledger_cited,
+        before.thin_other,
+    )
+
+
+def test_read_observed_reads_verdicts_only_from_an_ok_run_after_the_enrichment(session):
+    company = seed(session, profile=profile())
+    verify_run(session, company, [("stage", "confirmed")], status="error", failure="invalid")
+    observed = read_observed(session, golden())
+    assert not observed.verified and observed.verdicts == ()
+    assert observed.verify_cost_usd == Decimal("0.04")  # a failed run still cost money
+    verify_run(session, company, [("stage", "confirmed"), ("latest_round", "disagrees")])
+    observed = read_observed(session, golden())
+    assert observed.verified
+    assert observed.verdicts == (("stage", "confirmed"), ("latest_round", "disagrees"))
+    seed(session, profile=profile())  # a re-enrichment makes the verdicts stale
+    assert read_observed(session, golden()).verdicts == ()
+
+
+def test_verifier_rows_count_verdicts_on_golden_right_and_wrong_claims(session):
+    # Right stage and right funding: confirmed and wrongly flagged. Wrong funding: flagged.
+    right = seed(session, profile=profile(), number="00000001")
+    wrong = seed(session, profile=profile(funding_rounds=[round_(amount=50)]), number="00000002")
+    verify_run(session, right, [("stage", "confirmed"), ("latest_round", "disagrees")])
+    verify_run(session, wrong, [("stage", "confirmed"), ("latest_round", "disagrees"),
+                                ("total_raised", "disagrees")])  # fmt: skip
+    entries = [golden(company_number=n) for n in ("00000001", "00000002")]
+    pairs = [(e, read_observed(session, e)) for e in entries]
+    scores = score_all(pairs, pages())
+    assert scores.ratios["verifier_flagged_wrong"] == Ratio(1, 1)
+    assert scores.ratios["verifier_confirmed_right"] == Ratio(2, 3)  # total_raised has no label
+    assert scores.ratios["verifier_flagged_right"] == Ratio(1, 3)
+    assert scores.verify_cost_mean == Decimal("0.04")
+
+
+def test_no_verifier_rows_without_a_verification_run(session):
+    scores = score_all([entry_pair(session, NUMBER, profile=profile())], pages())
+    assert not any(k.startswith("verifier_") for k in scores.ratios)
+    assert scores.verify_cost_mean is None
 
 
 # ---- category and stage ---------------------------------------------------------------------

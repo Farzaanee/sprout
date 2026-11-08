@@ -56,6 +56,8 @@ from sprout.agents.enrich import (
     resolve_company,
 )
 from sprout.agents.loop import Budget, MessagesClient, make_client
+from sprout.agents.verify import SYSTEM_PROMPT as VERIFY_PROMPT
+from sprout.agents.verify import VERIFY_BUDGET, build_claims, verify_with_result
 from sprout.config import DEFAULT_EVAL_DB_PATH, MissingConfigError, Settings, get_settings
 from sprout.costs import BatchBudget
 from sprout.db import Company, RunKind, RunLog, delete_profile, get_engine, init_db
@@ -69,7 +71,7 @@ DEFAULT_MAX_TOTAL_USD = Decimal("1.50")
 RESULTS_PATH = EVALS_DIR / "results.md"
 NOISE_PP = 3.5  # a change smaller than this is within run-to-run noise (about one company's swing)
 JUDGED_FIELDS: tuple[Field, ...] = ("business_model", "target_user")
-AGENTS = ("classify",)  # agents that can run on top of enrichment; news and verify come later
+AGENTS = ("classify", "verify")  # agents that can run on top of enrichment; news comes later
 COUNTS_COMMENT = re.compile(r"<!-- sprout-eval-counts (\{.*?\}) -->")
 
 
@@ -113,6 +115,9 @@ LABELS = {
     "category_before_classifier": "Category accuracy before classifier",
     "classifier_corrected": "Classifier corrected",
     "classifier_broken": "Classifier broken",
+    "verifier_flagged_wrong": "Verifier flagged wrong claims",
+    "verifier_confirmed_right": "Verifier confirmed right claims",
+    "verifier_flagged_right": "Verifier wrongly flagged right claims",
 }
 
 
@@ -226,16 +231,29 @@ def _classify_entry(session: Session, company: Company, deps: Deps, budget: Budg
         return exc.cost_usd
 
 
+def _verify_entry(session: Session, company: Company, deps: Deps, budget: Budget) -> Decimal:
+    """Verify with the strong model. A company with no claims costs nothing and leaves no run."""
+    claims = build_claims(session, company)
+    if not claims:
+        return Decimal(0)
+    strong = replace(deps, model=deps.settings.strong_model)
+    try:
+        return verify_with_result(session, company, strong, claims, budget)[1].cost_usd
+    except AgentFailed as exc:
+        return exc.cost_usd
+
+
 def _run_entry(
     session: Session,
     company: Company,
     deps: Deps,
     batch: BatchBudget,
     args: argparse.Namespace,
-) -> tuple[Decimal, Decimal]:
+) -> tuple[Decimal, Decimal, Decimal]:
     """Enrich (unless reusing an ok enrichment), then run the chosen agents; charge the batch.
-    Returns (enrichment USD, classifier USD) spent now. A failed enrichment skips the agents."""
-    enrich_usd = classify_usd = Decimal(0)
+    Returns (enrichment, classifier, verifier) USD spent now. A failed enrichment skips the
+    agents."""
+    enrich_usd = classify_usd = verify_usd = Decimal(0)
     if not (args.reuse_enrichment and _has_ok_enrichment(session, company)):
         budget = Budget(
             DEFAULT_BUDGET.max_iterations,
@@ -248,7 +266,11 @@ def _run_entry(
         budget = replace(CLASSIFY_BUDGET, max_usd=batch.clamp(CLASSIFY_BUDGET.max_usd))
         classify_usd = _classify_entry(session, company, deps, budget)
         batch.charge(classify_usd)
-    return enrich_usd, classify_usd
+    if "verify" in args.agents and not batch.exhausted and _has_ok_enrichment(session, company):
+        budget = replace(VERIFY_BUDGET, max_usd=batch.clamp(VERIFY_BUDGET.max_usd))
+        verify_usd = _verify_entry(session, company, deps, budget)
+        batch.charge(verify_usd)
+    return enrich_usd, classify_usd, verify_usd
 
 
 # ---- judge, liveness ------------------------------------------------------------------------
@@ -337,12 +359,19 @@ class Extras:
     injection: list[CaseResult] | None = None
     enrich_usd: Decimal = Decimal(0)
     classify_usd: Decimal = Decimal(0)
+    verify_usd: Decimal = Decimal(0)
     judge_usd: Decimal = Decimal(0)
     injection_usd: Decimal = Decimal(0)
 
     @property
     def total_usd(self) -> Decimal:
-        return self.enrich_usd + self.classify_usd + self.judge_usd + self.injection_usd
+        return (
+            self.enrich_usd
+            + self.classify_usd
+            + self.verify_usd
+            + self.judge_usd
+            + self.injection_usd
+        )
 
 
 @dataclass(frozen=True)
@@ -431,9 +460,15 @@ def render_table(
             f"| Classifier cost per company | mean USD {scores.classify_cost_mean:.4f}, "
             f"max USD {scores.classify_cost_max:.4f} | n/a | report |"
         )
+    if scores.verify_cost_mean is not None and scores.verify_cost_max is not None:
+        lines.append(
+            f"| Verifier cost per verified company | mean USD {scores.verify_cost_mean:.4f}, "
+            f"max USD {scores.verify_cost_max:.4f} | n/a | report |"
+        )
     breakdown = (
         f"enrichment {extras.enrich_usd:.4f}"
         + (f", classify {extras.classify_usd:.4f}" if extras.classify_usd else "")
+        + (f", verify {extras.verify_usd:.4f}" if extras.verify_usd else "")
         + f", judge {extras.judge_usd:.4f}"
         + (f", injection {extras.injection_usd:.4f}" if extras.injection is not None else "")
     )
@@ -473,6 +508,9 @@ def render_misses(
                 f"funding: golden {_amount(entry.last_round.amount_million_usd)}; "
                 f"observed {_amount(got)} ({kind})"
             )
+        flagged = sum(v == "disagrees" for ok, v in es.verdict_checks if ok)
+        if flagged:
+            problems.append(f"verifier flagged {flagged} correct claim(s) as disagrees")
         if es.unexpected_disclosure:
             amounts = [
                 _amount(r.amount_million_usd) for r in observed.rounds if r.amount_million_usd
@@ -505,13 +543,14 @@ def _git_short_sha() -> str:
 
 
 def _prompt_hash(agents: Sequence[str]) -> str:
-    """Enrichment prompt hash, plus the classifier's when it is in the agent set."""
+    """Enrichment prompt hash, plus those of the agents in the agent set."""
 
     def short(text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()[:8]
 
-    return short(SYSTEM_PROMPT) + (
-        f" (classify {short(CLASSIFY_PROMPT)})" if "classify" in agents else ""
+    prompts = {"classify": CLASSIFY_PROMPT, "verify": VERIFY_PROMPT}
+    return short(SYSTEM_PROMPT) + "".join(
+        f" ({name} {short(text)})" for name, text in prompts.items() if name in agents
     )
 
 
@@ -610,12 +649,12 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
                 if batch.exhausted:
                     skipped_numbers.add(entry.company_number)
                     continue
-                enrich_usd, classify_usd = _run_entry(
+                enrich_usd, *agent_usd = _run_entry(
                     session, companies[entry.company_number], deps, batch, args
                 )
                 spent_enriching += enrich_usd
                 print(
-                    f"[{i}/{len(entries)}] {entry.name}: USD {enrich_usd + classify_usd:.4f}",
+                    f"[{i}/{len(entries)}] {entry.name}: USD {enrich_usd + sum(agent_usd):.4f}",
                     file=sys.stderr,
                 )
 
@@ -636,9 +675,16 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
         extras.classify_usd = sum(
             (e.classify_cost_usd or Decimal(0) for e in scores.entries), Decimal(0)
         )
-        if not args.agents and any(o.classified for _, o in pairs):
+        extras.verify_usd = sum(
+            (e.verify_cost_usd or Decimal(0) for e in scores.entries), Decimal(0)
+        )
+        holds = {"classify": any(o.classified for _, o in pairs)}
+        holds["verify"] = any(o.verified for _, o in pairs)
+        unscored = [name for name, held in holds.items() if held and name not in args.agents]
+        if unscored:
             raise RunnerError(
-                "the eval database holds classifier runs; pass --agents classify to score them"
+                f"the eval database holds {', '.join(unscored)} runs; "
+                f"pass --agents {','.join(unscored)} to score them"
             )
         ch_names = {n: c.name for n, c in companies.items()}
 

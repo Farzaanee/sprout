@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic_core import to_json
 from sqlalchemy import JSON, Column, Engine, UniqueConstraint, event, inspect, text
@@ -19,7 +19,7 @@ from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from sprout.candidates import Assessment, assess
 from sprout.failures import FailureCategory, failure_category_for
-from sprout.models import CompanyProfile, Confidence, FundingRound, NewsItem, Sourced
+from sprout.models import CompanyProfile, Confidence, FundingRound, NewsItem, Sourced, Stage
 from sprout.sources.companies_house import CompanyHit, Officer, officer_category, parse_hit
 from sprout.sources.rss import normalise_url
 
@@ -414,6 +414,29 @@ def winning_facts(facts: Iterable[Fact]) -> dict[str, Fact]:
     return winners
 
 
+_STAGE_RANK = {stage.value: rank for rank, stage in enumerate(Stage)}
+_STAGE_RANK[Stage.UNKNOWN.value] = -1
+
+
+class _Round(Protocol):
+    @property
+    def stage(self) -> str: ...
+    @property
+    def announced(self) -> date | None: ...
+
+
+def latest_round[R: _Round](rounds: Iterable[R]) -> R | None:
+    """The D22 latest round: the latest announced; undated or tied rounds fall back to the highest
+    stage. A round with a null amount still wins: the agent said the latest amount is unknown,
+    which is a miss, not a reason to look at an older round. Shared by the evals and the verifier,
+    so both judge the same round."""
+    return max(
+        rounds,
+        key=lambda r: (r.announced or date.min, _STAGE_RANK.get(r.stage, -1)),
+        default=None,
+    )
+
+
 def add_news_items(session: Session, items: Iterable[NewsItem]) -> int:
     """Insert items whose URL is not stored yet (also within `items`). Returns the new count."""
     seen: set[str] = set()
@@ -584,4 +607,81 @@ def save_profile(session: Session, company: Company, profile: CompanyProfile) ->
     save_funding_rounds(session, company.id, profile.funding_rounds)
     company.category = profile.category.value
     session.add(company)
+    session.flush()
+
+
+# ---- verification (D40) ---------------------------------------------------------------------
+
+VERIFICATION_PREFIX = "verification:"
+DISPUTE_MARKER = "Disputed by "
+_LOWER_ONE_STEP = {"high": "medium", "medium": "low", "low": "low"}
+# The fact field behind each claim the verifier can check; `latest_round` is a funding_round row.
+CLAIM_FACT_FIELDS = {"stage": "stage", "total_raised": "total_raised_million_usd"}
+
+
+def claim_row(session: Session, company_id: int, claim: str) -> Fact | FundingRoundRow | None:
+    """The row a verification claim is about: the winning valued fact, or the D22 latest round."""
+    if claim == "latest_round":
+        rounds = session.exec(
+            select(FundingRoundRow).where(FundingRoundRow.company_id == company_id)
+        ).all()
+        return latest_round(rounds)
+    field = CLAIM_FACT_FIELDS[claim]
+    facts = session.exec(
+        select(Fact).where(Fact.company_id == company_id, Fact.field == field)
+    ).all()
+    winner = winning_facts(facts).get(field)
+    return winner if winner is not None and winner.value_json is not None else None
+
+
+def without_dispute(note: str | None) -> str | None:
+    """`note` as enrichment wrote it, before any `Disputed by <url>: ...` suffix."""
+    if note is None:
+        return None
+    return note.split(f" {DISPUTE_MARKER}", 1)[0].removeprefix(DISPUTE_MARKER).strip() or None
+
+
+def apply_verification(
+    session: Session,
+    company_id: int,
+    claim: str,
+    *,
+    verdict: str,
+    source_url: str | None,
+    observed: str | None,
+    quote: str | None,
+) -> None:
+    """Record a verifier verdict. Never changes a value (D40): `confirmed` raises the claim row's
+    confidence to high, `disagrees` lowers it one step and appends `Disputed by <url>: <observed>`
+    to its note, `unverified` leaves it alone. Every verdict also becomes the claim's one
+    `verification:<claim>` fact (NULL value for `unverified`). Re-applying a verdict is a no-op."""
+    row = claim_row(session, company_id, claim)
+    if row is not None and verdict == "confirmed":
+        row.confidence = Confidence.HIGH.value
+    elif row is not None and verdict == "disagrees":
+        marker = f"{DISPUTE_MARKER}{source_url}"
+        if marker not in (row.note or ""):
+            row.confidence = _LOWER_ONE_STEP[row.confidence]
+            dispute = f"{marker}: {observed}" if observed else marker
+            row.note = f"{row.note} {dispute}" if row.note else dispute
+    if row is not None:
+        session.add(row)
+
+    field = f"{VERIFICATION_PREFIX}{claim}"
+    for old in session.exec(select(Fact).where(Fact.company_id == company_id, Fact.field == field)):
+        session.delete(old)
+    session.flush()
+    session.add(
+        Fact(
+            company_id=company_id,
+            field=field,
+            value_json=None
+            if verdict == "unverified"
+            else to_json({"verdict": verdict, "observed": observed}).decode(),
+            source_url=source_url,
+            retrieved_at=utcnow(),
+            confidence=Confidence.LOW.value if verdict == "unverified" else Confidence.MEDIUM.value,
+            note=quote,
+        )
+    )
     session.flush()
