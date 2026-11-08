@@ -246,6 +246,43 @@ Runner support (built): `--agents classify,verify` (default none, which is the e
 
 No table or column changes (D10 is not triggered): the Phase 6 data lands in existing tables ([data model](../2.%20data-model.md)).
 
+## Key files
+
+`agents/orchestrator.py`
+
+| Aspect | Detail |
+| --- | --- |
+| Role | <ul><li>Supervisor: working-set selection, worker pool, `process_company`, 429 gate, interrupt handling, `pipeline_run` row</li></ul> |
+| Gotchas | <ul><li>`process_company` is sync, never raises and never prints, so Phase 8 can call it</li><li>Each worker owns its own session and HTTP clients; only the Anthropic client is shared</li><li>A second SIGINT hard-exits and leaves the `pipeline_run` row `running`</li></ul> |
+
+`status.py`
+
+| Aspect | Detail |
+| --- | --- |
+| Role | <ul><li>Derives per-step state from `run_log` in one query; `reap_abandoned` closes stale `running` rows</li></ul> |
+| Gotchas | <ul><li>`api_error` rows never count towards the 3-attempt cap</li><li>Reads `db` only, so Phases 7 and 8 can reuse it</li></ul> |
+
+`agents/common.py`
+
+| Aspect | Detail |
+| --- | --- |
+| Role | <ul><li>`run_recorded` is the shared run wrapper for all four agents; `AgentFailed` carries `error_type`</li></ul> |
+| Gotchas | <ul><li>The run row is committed before any failure is raised</li><li>`persist` runs inside the run block and may return extra stats</li></ul> |
+
+`agents/verify.py`
+
+| Aspect | Detail |
+| --- | --- |
+| Role | <ul><li>Second-source check on stage and funding claims; never changes a value</li></ul> |
+| Gotchas | <ul><li>Independence rules (fetched, different host, not an enrichment source) live in code, not the prompt</li><li>An invalid verdict after one repair is stored as `unverified`</li></ul> |
+
+`agents/news.py` and `agents/classify.py`
+
+| Aspect | Detail |
+| --- | --- |
+| Role | <ul><li>News: deterministic RSS name match, near-duplicate collapse, one search, writes `company_news`</li><li>Classify: cheap-model category from the profile, overwrites `company.category`</li></ul> |
+| Gotchas | <ul><li>`match_name` returns `None` for generic names, so only the search runs</li><li>Classifier rationale lives on the run's `stats`, not a column</li></ul> |
+
 ## Known weak spots and open items
 
 - **Pre-screen too loose (A1, D34):** validated live and found too loose, not too strict; details in [implementation-notes](../../implementation-notes.md#d34-pre-screen-validation-a1). Whether to tighten the pool is undecided.
