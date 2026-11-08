@@ -58,7 +58,7 @@ from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.http import FetchError
 from sprout.sources.web import WebFetcher
 
-DEFAULT_BUDGET = Budget(max_iterations=12, max_usd=Decimal("0.13"))
+DEFAULT_BUDGET = Budget(max_iterations=12, max_usd=Decimal("0.13"), max_repairs=2)
 DEFAULT_EFFORT = "low"
 MAX_OUTPUT_TOKENS = 6_000
 MAX_LISTED_URLS = 25
@@ -545,7 +545,11 @@ def _summary(profile: CompanyProfile, company: Company, result: LoopResult) -> s
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    budget = Budget(max_iterations=args.max_iterations, max_usd=args.max_usd)
+    budget = Budget(
+        max_iterations=args.max_iterations,
+        max_usd=args.max_usd,
+        max_repairs=DEFAULT_BUDGET.max_repairs,
+    )
     batch = BatchBudget(args.max_total_usd) if args.max_total_usd is not None else None
     settings = get_settings()
     model = settings.strong_model if args.strong else settings.bulk_model

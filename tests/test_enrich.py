@@ -338,6 +338,7 @@ def test_failed_run_still_records_sources(session, company, deps_for):
     client = ScriptedClient(
         server_search_turn([SEEN], ("submit_profile", bad)),
         tool_use_turn(("submit_profile", bad)),
+        tool_use_turn(("submit_profile", bad)),
     )
     with pytest.raises(EnrichmentFailed):
         enrich_company(session, company, deps_for(client))
@@ -409,6 +410,7 @@ def test_invalid_after_repair_writes_nothing_but_records_the_cost(session, compa
     client = ScriptedClient(
         server_search_turn([SEEN], ("submit_profile", bad), input=1000, output=100),
         tool_use_turn(("submit_profile", bad), input=1000, output=100),
+        tool_use_turn(("submit_profile", bad), input=1000, output=100),
     )
     with pytest.raises(EnrichmentFailed) as err:
         enrich_company(session, company, deps_for(client))
@@ -420,7 +422,7 @@ def test_invalid_after_repair_writes_nothing_but_records_the_cost(session, compa
     assert run.status == "error" and "rejected" in run.error_message
     assert run.stats["stop"] == "invalid"
     assert run.stats["cost_usd"] > 0
-    assert run.stats["input_tokens"] == 2000
+    assert run.stats["input_tokens"] == 3000
 
 
 def test_funding_without_note_goes_through_repair(session, company, make_http):

@@ -508,7 +508,11 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
                 if batch.exhausted:
                     skipped_numbers.add(entry.company_number)
                     continue
-                budget = Budget(DEFAULT_BUDGET.max_iterations, batch.clamp(args.max_usd))
+                budget = Budget(
+                    DEFAULT_BUDGET.max_iterations,
+                    batch.clamp(args.max_usd),
+                    max_repairs=DEFAULT_BUDGET.max_repairs,
+                )
                 cost = _enrich_entry(session, companies[entry.company_number], deps, budget)
                 batch.charge(cost)
                 print(f"[{i}/{len(entries)}] {entry.name}: USD {cost:.4f}", file=sys.stderr)
@@ -543,7 +547,11 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
             for case in load_cases():
                 if batch.exhausted:
                     break
-                case_budget = Budget(DEFAULT_BUDGET.max_iterations, batch.clamp(args.max_usd))
+                case_budget = Budget(
+                    DEFAULT_BUDGET.max_iterations,
+                    batch.clamp(args.max_usd),
+                    max_repairs=DEFAULT_BUDGET.max_repairs,
+                )
                 result = run_case(client, case, model=model, effort=args.effort, budget=case_budget)
                 batch.charge(result.cost_usd)
                 extras.injection.append(result)
