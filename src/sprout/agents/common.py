@@ -4,7 +4,7 @@
 `enrich.py`; the enrichment, classification, news and verification agents all call it.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -108,14 +108,15 @@ def run_recorded(
     budget: Budget,
     ledger: SourceLedger,
     max_tokens: int,
-    persist: Callable[[Any], None],
+    persist: Callable[[Any], Mapping[str, Any] | None],
     failed: type[AgentFailed] = AgentFailed,
 ) -> LoopResult:
     """Run one agent over `company` and record it in `run_log` and `run_log_step`.
 
     On a submitted payload, calls `persist(payload)` inside the run block (so a persist error
-    marks the run failed). Any other outcome raises `failed` (default `AgentFailed`) after the
-    run row is committed: a failed run still cost money and that must stay on record.
+    marks the run failed); a mapping it returns is merged into the run's `stats`. Any other
+    outcome raises `failed` (default `AgentFailed`) after the run row is committed: a failed run
+    still cost money and that must stay on record.
     """
     with logged_run(session, kind.value) as run:
         result = run_agent(
@@ -148,5 +149,7 @@ def run_recorded(
         session.commit()
         if result.stop != "submitted" or result.payload is None:
             raise failed(result.stop, result.cost_usd, result.error, result.error_type)
-        persist(result.payload)
+        extra_stats = persist(result.payload)
+        if extra_stats:
+            run.stats = {**run.stats, **extra_stats}
     return result

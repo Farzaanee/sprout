@@ -75,6 +75,13 @@ def test_success_records_run_steps_and_persists_inside_the_run(session, company)
     assert len(session.exec(select(RunLogStep)).all()) == 1
 
 
+def test_persist_can_add_to_the_run_stats(session, company):
+    client = ScriptedClient(tool_use_turn(("submit_x", {"answer": "A"})))
+    record(session, company, client, lambda payload: {"category": payload})
+    run = session.exec(select(RunLog)).one()
+    assert run.stats["category"] == "A" and run.stats["stop"] == "submitted"
+
+
 def test_failure_commits_the_run_before_raising_and_carries_error_type(session, company):
     error = anthropic.RateLimitError(
         "slow down",

@@ -25,7 +25,7 @@ from evals.run_evals import (
     main,
     previous_counts,
 )
-from fakes import ScriptedClient, tool_use_turn
+from fakes import ScriptedClient, text_turn, tool_use_turn
 from sprout.config import Settings
 from sprout.sources.http import FetchError
 
@@ -471,3 +471,169 @@ def test_total_cost_includes_judge_spend():
 def test_runner_never_writes_results_without_record(env):
     full_run(env)
     assert not Path(env.results).exists()
+
+
+# ---- agents on top of enrichment (D28, D41) -------------------------------------------------
+
+
+def classify_turn(category="Cybersecurity"):
+    return tool_use_turn(
+        ("submit_classification", {"category": category, "rationale": "Because."}),
+        input=1_000,
+        output=100,
+    )
+
+
+def classified_run(enriched, classified):
+    """Turns for the three companies: enrichment's category, then the classifier's."""
+    turns = []
+    for number, first, second in zip(NUMBERS, enriched, classified, strict=True):
+        funded = number != NUMBERS[1]
+        turns += company_turns(category=first, funded=funded, free_text=funded)
+        turns.append(classify_turn(second))
+    return turns
+
+
+def test_agents_classify_reports_before_after_and_the_agent_set(env, capsys):
+    # Alpha: wrong -> right (corrected). Beta: right -> wrong (broken). Gamma: right -> right.
+    turns = classified_run(
+        ["Other", "Other", "Cybersecurity"], ["Cybersecurity", "Cybersecurity", "Cybersecurity"]
+    )
+    code, client = full_run(env, *turns, extra=["--agents", "classify"])
+    out = capsys.readouterr().out
+    assert client.calls == 9
+    assert code == 1  # the gate reads the classifier's labels: 2/3 is below 80%
+    assert "| agents classify | split all" in out
+    assert "(classify " in out.splitlines()[0]  # classifier prompt hash beside enrichment's
+    assert "| Category accuracy | 2/3 (66.7%) | n/a | >= 80% FAIL |" in out
+    assert "| Category accuracy before classifier | 2/3 (66.7%) | n/a | report |" in out
+    assert "| Classifier corrected | 1/3 (33.3%) | n/a | report |" in out
+    assert "| Classifier broken | 1/3 (33.3%); net +0 | n/a | report |" in out
+    assert "| Classifier cost per company | mean USD 0.0002" in out
+    assert ", classify 0.000" in out
+
+
+def test_default_run_has_no_agents_and_no_classifier_rows(env, capsys):
+    full_run(env)
+    out = capsys.readouterr().out
+    assert "| agents none | split all" in out
+    assert "Classifier" not in out
+
+
+def test_classifier_failure_keeps_enrichments_category_and_counts_the_cost(env, capsys):
+    bad = [text_turn(input=2_000)] * 2  # never submits
+    turns = company_turns() + bad + company_turns(category="Other", funded=False, free_text=False)
+    turns += [classify_turn("Other")] + company_turns() + [classify_turn()]
+    code, client = full_run(env, *turns, extra=["--agents", "classify"])
+    out = capsys.readouterr().out
+    assert code == 0 and client.calls == 2 + 2 + 2 + 1 + 2 + 1
+    assert "| Category accuracy | 3/3 (100.0%)" in out  # Alpha keeps enrichment's right answer
+    assert "| Classifier corrected | 0/2 (0.0%)" in out  # only the two that were classified
+
+
+def test_reuse_enrichment_runs_only_the_agent_and_keeps_the_database(env, capsys):
+    turns = company_turns(category="Other")
+    turns += company_turns(category="Other", funded=False, free_text=False)
+    turns += company_turns()
+    full_run(env, *turns)
+    capsys.readouterr()
+    classified = [classify_turn(c) for c in ("Cybersecurity", "Other", "Cybersecurity")]
+    client = ScriptedClient(*classified)
+    code = env.run(
+        "--skip-judge", "--agents", "classify", "--reuse-enrichment", client=client, ch=env.ch
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert client.calls == 3
+    assert {r["tools"][-1]["name"] for r in client.requests} == {"submit_classification"}
+    assert "agents classify (reused enrichment)" in out
+    assert "| Category accuracy | 3/3 (100.0%) | n/a | >= 80% pass |" in out
+    assert "| Category accuracy before classifier | 2/3 (66.7%)" in out
+    assert "| Classifier corrected | 1/3 (33.3%)" in out
+    assert "(enrichment 0.0000, classify" in out  # reused enrichment is not spend of this run
+
+
+def test_reuse_enrichment_enriches_entries_that_have_no_ok_enrichment(env, capsys):
+    full_run(env, *company_turns(), extra=["--only", NUMBERS[0]])
+    capsys.readouterr()
+    turns = [classify_turn()]  # Alpha reused
+    turns += company_turns(category="Other", funded=False, free_text=False) + [
+        classify_turn("Other")
+    ]
+    turns += company_turns() + [classify_turn()]
+    client = ScriptedClient(*turns)
+    code = env.run("--skip-judge", "--agents", "classify", "--reuse-enrichment",
+                   client=client, ch=env.ch)  # fmt: skip
+    assert client.calls == 1 + 3 + 3
+    assert code == 0
+
+
+def test_a_second_classify_pass_still_scores_against_the_enrichment_category(env, capsys):
+    full_run(env, *company_turns(category="Other") + company_turns(category="Other", funded=False,
+             free_text=False) + company_turns())  # fmt: skip
+    args = ["--skip-judge", "--agents", "classify", "--reuse-enrichment"]
+    env.run(*args, client=ScriptedClient(*[classify_turn()] * 3), ch=env.ch)
+    capsys.readouterr()
+    env.run(*args, client=ScriptedClient(*[classify_turn()] * 3), ch=env.ch)
+    out = capsys.readouterr().out
+    assert "| Category accuracy before classifier | 2/3 (66.7%)" in out
+
+
+def test_reuse_enrichment_needs_agents_and_an_existing_database(env, capsys):
+    assert env.run("--skip-judge", "--reuse-enrichment", client=ScriptedClient(), ch=env.ch) == 2
+    assert "needs --agents" in capsys.readouterr().err
+    code = env.run("--skip-judge", "--agents", "classify", "--reuse-enrichment",
+                   client=ScriptedClient(), ch=env.ch)  # fmt: skip
+    assert code == 2
+    assert "existing eval database" in capsys.readouterr().err
+
+
+def test_unknown_agent_is_rejected(env):
+    with pytest.raises(SystemExit):
+        env.run("--agents", "news", client=ScriptedClient(), ch=env.ch)
+
+
+def test_scoring_a_classified_database_without_agents_is_refused(env, capsys):
+    full_run(
+        env, *classified_run(["Other"] * 3, ["Cybersecurity"] * 3), extra=["--agents", "classify"]
+    )
+    capsys.readouterr()
+    assert env.run("--score-only", "--skip-judge", client=None, ch=None) == 2
+    assert "pass --agents classify" in capsys.readouterr().err
+    scored = env.run("--score-only", "--skip-judge", "--agents", "classify", client=None, ch=None)
+    assert scored == 1  # scored, and the classifier's Beta label fails the gate
+
+
+def test_re_enriching_one_entry_drops_its_old_classification_from_the_scores(env, capsys):
+    full_run(
+        env, *classified_run(["Other"] * 3, ["Cybersecurity"] * 3), extra=["--agents", "classify"]
+    )
+    capsys.readouterr()
+    code = env.run("--skip-judge", "--only", NUMBERS[0], client=ScriptedClient(*company_turns()),
+                   ch=env.ch)  # fmt: skip
+    assert code == 0
+    assert "Classifier" not in capsys.readouterr().out
+
+
+def test_previous_counts_compares_only_the_same_agent_set(tmp_path):
+    path = tmp_path / "results.md"
+    for counts in (
+        {"split": "all", "full": True, "category_accuracy": [1, 2]},  # old record: no agents key
+        {"split": "all", "full": True, "agents": ["classify"], "category_accuracy": [5, 5]},
+        {"split": "all", "full": True, "agents": [], "category_accuracy": [3, 4]},
+    ):
+        append_record(path, "## run", counts)
+    assert previous_counts(path, "all")["category_accuracy"] == [3, 4]
+    assert previous_counts(path, "all", ["classify"])["category_accuracy"] == [5, 5]
+    assert previous_counts(path, "all", ["classify", "news"]) is None
+
+
+def test_delta_is_not_shown_against_a_run_with_a_different_agent_set(env, capsys):
+    full_run(env, extra=["--record"])
+    capsys.readouterr()
+    full_run(env, *classified_run(["Cybersecurity", "Other", "Cybersecurity"], ["Cybersecurity",
+             "Other", "Cybersecurity"]), extra=["--record", "--agents", "classify"])  # fmt: skip
+    out = capsys.readouterr().out
+    assert "| Category accuracy | 3/3 (100.0%) | n/a |" in out
+    counts = previous_counts(env.results, "all", ["classify"])
+    assert counts["agents"] == ["classify"] and counts["reuse_enrichment"] is False
