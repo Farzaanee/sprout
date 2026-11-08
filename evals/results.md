@@ -140,3 +140,110 @@ Labels: verified, dated 2026-11-05. Judge model claude-sonnet-5-5. Eval database
 Calibration (human grade -> judge verdict): correct->correct 4, incorrect->incorrect 4, partial->partial 4
 
 <!-- sprout-eval-counts {"split": "all", "full": true, "scored": 32, "profiles_submitted": [29, 32], "infrastructure_errors": [0, 32], "repair_rate": [24, 32], "category_accuracy": [24, 29], "stage_accuracy": [20, 29], "funding_exact": [12, 20], "funding_within_10pct": [13, 20], "unexpected_disclosure": [0, 9], "fabricated_funding": [0, 70], "unverifiable_funding": [69, 70], "source_ledger": [260, 260], "thin_other": [3, 29], "ledger_unverifiable": 0, "cost_mean_usd": "0.0230909375", "cost_max_usd": "0.027178", "calibration": [12, 12]} -->
+
+## 2026-11-08 | 93cd4a4 | claude-haiku-5-5 | effort low | prompt a4413535 | split all | scored 32 of 32
+
+Labels: verified, dated 2026-11-05. Judge model claude-sonnet-5-5 (judge calibrated). Eval database data/eval.db.
+
+| Metric | Result | Delta | Gate |
+|---|---|---|---|
+| Profiles submitted | 31/32 (96.9%) | +2 | report |
+| Infrastructure errors | 0/32 (0.0%) | 0 | report |
+| Repair rate | 7/32 (21.9%) | -17 | report |
+| Category accuracy | 19/31 (61.3%) | n/a | >= 79% FAIL |
+| Stage accuracy | 25/31 (80.6%) | n/a | report |
+| Funding exact | 15/21 (71.4%) | n/a | report |
+| Funding within 10% | 16/21 (76.2%) | n/a | report |
+| Unexpected disclosure | 0/10 (0.0%) | n/a | report |
+| Fabricated funding | 0/47 (0.0%) | n/a | <= 2% pass |
+| Unverifiable funding | 0/47 (0.0%) | n/a | report |
+| Source ledger membership | 246/246 (100.0%) | n/a | report |
+| Thin Other profiles | 4/31 (12.9%) | n/a | report |
+| Judge business_model correct | 4/25 (16.0%); partial 9, incorrect 9, unjudged 0, missing 3 | n/a | report |
+| Judge target_user correct | 9/26 (34.6%); partial 11, incorrect 0, unjudged 0, missing 6 | n/a | report |
+| Judge calibration | 12/12 (100.0%) | 0 | >= 80% calibrated |
+| Dead cited URLs | 0/86 (0.0%); 83 ok, 3 unchecked | n/a | report |
+| Injection cases passed | 9/9 (100.0%); 0 inconclusive | n/a | report |
+| Cost per company | mean USD 0.0224, max USD 0.0282 | n/a | report |
+| Total cost | USD 0.9273 (enrichment 0.7178, judge 0.1150, injection 0.0945) | n/a | report |
+
+Gates: FAIL (category_accuracy).
+
+### Misses
+- Synthesia (10933652, Companies House: SYNTHESIA LIMITED)
+  - category: golden Sales, marketing and customer experience software or HR and people software; observed Enterprise software and cloud
+- Tractable (09315523, Companies House: TRACTABLE LTD.)
+  - category: golden Fintech and payments; observed Other
+- Cleo AI (09864205, Companies House: CLEO AI LTD.)
+  - category: golden Fintech and payments; observed Other
+- Quantexa (10045407, Companies House: QUANTEXA LIMITED)
+  - category: golden Data, AI infrastructure and developer tools or Fintech and payments or Legal tech and compliance; observed Other
+  - stage: golden Series F; observed None
+  - funding: golden US$175m; observed unknown (off)
+- Peak AI (09307701, Companies House: PEAK AI LIMITED)
+  - category: golden Enterprise software and cloud or E-commerce and retail tech or Logistics and supply chain; observed Other
+  - stage: golden Series C; observed Series B
+  - funding: golden US$75m; observed US$21m (off)
+- Builder.ai (10998363, Companies House: ENGINEER.AI GLOBAL LIMITED)
+  - category: golden Enterprise software and cloud; observed Data, AI infrastructure and developer tools
+  - stage: golden Series D; observed None
+  - funding: golden US$250m; observed US$30m (off)
+- BenevolentAI (09781806, Companies House: BENEVOLENTAI LIMITED)
+  - not submitted (stop=invalid, failure=invalid_output)
+- Exscientia (13483814, Companies House: EXSCIENTIA LIMITED)
+  - stage: golden Series D; observed None
+- Satellite Vu (10163800, Companies House: GLOBAL SATELLITE VU LTD)
+  - category: golden Defense, aerospace and space or Climate, energy and cleantech; observed Other
+  - funding: golden US$41m; observed unknown (off)
+- Wayve Technologies (10924127, Companies House: WAYVE TECHNOLOGIES LTD)
+  - category: golden Robotics and automation; observed Other
+- Improbable (08070525, Companies House: IMPROBABLE WORLDS LIMITED)
+  - category: golden Consumer social, media and gaming; observed Other
+  - stage: golden Growth; observed None
+  - funding: golden US$112m; observed US$502m (off)
+- Riverlane (10260255, Companies House: RIVERLANE LTD)
+  - category: golden Deep tech and quantum; observed Other
+- Faculty (08873131, Companies House: FACULTY SCIENCE LIMITED)
+  - funding: golden US$43m; observed US$39m (within 10%)
+- Adarga (09742902, Companies House: ADARGA LIMITED)
+  - category: golden Enterprise software and cloud or Defense, aerospace and space; observed Data, AI infrastructure and developer tools
+  - stage: golden Series B; observed None
+- Oxford Centre for Artificial Intelligence (13617274, Companies House: OXFORD CENTRE FOR ARTIFICIAL INTELLIGENCE)
+  - category: golden Consultancy and services; observed Other
+- Judge:
+  - Synthesia business_model: incorrect (The candidate describes the product (AI video, avatars, dubbing, API) and not the business model. It omits the subscription SaaS structure, credit-based usage and tiered pricing (free, Starter, Pro, Enterprise), so it doesn't match the reference.)
+  - PolyAI business_model: partial (The candidate is vague about pricing. It omits the per-minute billing, the connected-minute plus text-token structure, and the custom quotes, so it drops the core of the reference.)
+  - Tractable business_model: partial (The candidate describes a B2B software product sold to insurers and automotive businesses, which fits enterprise sales. It leaves out the reference's pricing structure of per-claim or annual licence fees that are volume-based and negotiated.)
+  - Speechmatics business_model: partial (The candidate matches usage-based pricing and enterprise on-prem/on-device deployment. It omits TTS, the prepaid credit metering and the free credit, and it mentions only speech-to-text APIs.)
+  - Quantexa business_model: partial (The candidate matches the reference on enterprise software licensing. It leaves out the reference's growth drivers, which are new customers and licence expansion within existing ones.)
+  - Peak AI business_model: partial (The candidate correctly says it sells a cloud AI platform. It omits the subscription model, the three editions, the usage-based scaling and the demo-based sales. It also adds packaged applications that the reference doesn't mention.)
+  - Matillion business_model: incorrect (The candidate describes the product (cloud ETL platform with Maia) and says nothing about the consumption-based credit pricing, annual packages or plan tiers in the reference, so it describes something different.)
+  - Builder.ai business_model: incorrect (The candidate describes what the company sells but says nothing about the pricing model (no published price list, cost driven by features, OS and timeline, weekly or monthly payments), so it doesn't match the reference.)
+  - Exscientia business_model: incorrect (The candidate describes a generic AI drug discovery platform with partnered and internal pipelines. It omits the pharma collaborations paid through milestones and royalties and the Recursion acquisition, so it describes a different business model.)
+  - Babylon Health business_model: incorrect (The candidate says revenue comes largely from NHS and health-system contracts. The reference says revenue comes from private subscriptions, pay-as-you-go and insurers such as Bupa, and that NHS contract terms are unconfirmed.)
+  - Huma business_model: partial (The candidate matches the reference on the cloud platform and digital health apps, and it adds licensing customers beyond pharma. It leaves out that the reference says the model is not confirmed by the source, and it doesn't present pharma partnership as the typical pattern.)
+  - Graphcore business_model: incorrect (The reference says IPU products are bought through authorised cloud providers, with pricing on request via a contact form, and that the company is now a SoftBank subsidiary. The candidate describes direct sales plus distributors, resellers and OEMs. It mentions neither cloud providers nor SoftBank, so it describes a different channel model.)
+  - Wayve Technologies business_model: partial (The candidate correctly says the company licenses its AI driving software to automakers. It leaves out the robotaxi arrangement in which Uber owns and operates the fleet, and that arrangement is a material part of the reference.)
+  - Improbable business_model: incorrect (The candidate describes a venture builder in AI, Web3 and the metaverse. The reference describes a former defence arm that earned government contract revenue, plus a metaverse virtual-worlds business, so the two describe different business models.)
+  - Lyst business_model: incorrect (The candidate describes Lyst as an aggregator but never mentions the commission-on-sales model or its effect on ranking, and its claim that users buy through the platform may not match the reference's commission arrangement.)
+  - Ocado Technology business_model: partial (The candidate correctly says Ocado licenses its platform to retailers. It omits the fee structure the reference describes: recurring fees as a percentage of retail sales that scale with live modules, plus upfront fees.)
+  - Adarga business_model: partial (The candidate says the company sells AI software, which loosely fits licensing. It never says the model is licence-based and doesn't name a customer like bp, so it is vaguer than the reference.)
+  - Astroscale UK business_model: incorrect (The candidate describes corporate structure and technology focus, not the per-mission service contract model or the government agency clients (UKSA, ESA, JAXA) in the reference, so it describes something different.)
+  - Tractable target_user: partial (The candidate correctly names insurers (P&C) as users and adds repairers, recyclers and dealers, which is extra detail and not penalized. It omits the reference's tie to assessing vehicle and property damage, so it is vaguer about the use case.)
+  - Speechmatics target_user: partial (The candidate covers healthcare, voice agents, contact centres and captioning. It omits legal transcription, meeting assistants, EdTech and media as a named sector, so it drops several named use cases from the reference.)
+  - Quantexa target_user: partial (The candidate's list of banks, insurers, telecoms, healthcare and government fits "public and private sector organisations". However, it omits the reference's decision intelligence and financial crime focus.)
+  - Peak AI target_user: partial (The candidate matches retail and manufacturing but omits supply chain firms and the pricing and inventory decisions focus. It adds consumer goods, which the reference doesn't mention.)
+  - Matillion target_user: partial (The candidate matches on enterprise data teams but drops the reference's qualifier that they use cloud data warehouses.)
+  - Darktrace target_user: partial (The candidate is broader (organisations of all sizes, including governments) and doesn't specify enterprise security teams, so it is vaguer than the reference.)
+  - Babylon Health target_user: partial (The candidate correctly names patients using a primary-care service. It drops the NHS and private GP services the reference names. It also adds health systems and insurers, which the reference doesn't mention, so it is vaguer than the reference.)
+  - Lyst target_user: partial (The candidate covers fashion shoppers but omits the brands and retailers listed on the platform, which the reference names as a second user group.)
+  - Riverlane target_user: partial (The candidate matches "quantum computer makers" but never names governments. National labs and HPC centres are only loosely related to governments, so a named user group from the reference is missing.)
+  - Adarga target_user: partial (The candidate matches defence and security customers but omits intelligence. It also adds commercial customers, which the reference does not mention. The missing intelligence customers make it only partly correct.)
+  - China Britain Artificial Intelligence Association target_user: partial (The candidate matches UK-based AI professionals/researchers and UK-China collaboration, but it narrows the user base to people of Chinese background, which the reference doesn't state, so it risks being a mismatch; the core is still similar.)
+
+Calibration (human grade -> judge verdict): correct->correct 4, incorrect->incorrect 4, partial->partial 4
+
+### Injection failures
+None.
+
+<!-- sprout-eval-counts {"split": "all", "full": true, "scored": 32, "profiles_submitted": [31, 32], "infrastructure_errors": [0, 32], "repair_rate": [7, 32], "category_accuracy": [19, 31], "stage_accuracy": [25, 31], "funding_exact": [15, 21], "funding_within_10pct": [16, 21], "unexpected_disclosure": [0, 10], "fabricated_funding": [0, 47], "unverifiable_funding": [0, 47], "source_ledger": [246, 246], "thin_other": [4, 31], "ledger_unverifiable": 0, "cost_mean_usd": "0.0224319375", "cost_max_usd": "0.02825", "judge_business_model": [4, 25], "judge_target_user": [9, 26], "calibration": [12, 12], "urls_dead": [0, 86], "injection": [9, 9]} -->
