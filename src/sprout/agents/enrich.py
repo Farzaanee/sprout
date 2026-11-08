@@ -79,7 +79,9 @@ Process
 1. If lookup_companies_house is available, call it with the Companies House number you are \
 given to confirm the legal entity (name, incorporation date, location).
 2. Use web_search to find the company's own website and reputable coverage (aim for at most 3 \
-searches). Use fetch_page to read the pages you will cite (aim for at most 4 pages).
+searches). Use fetch_page to read the pages you will cite (aim for at most 4 pages). If a search \
+comes back empty or errors, retry it once with a different query before treating the fact as \
+unsourced: a single failed search is not enough to give up on a field.
 3. Finish by calling submit_profile exactly once. Do not write a prose answer. If you are \
 running low on turns or budget, submit what you have.
 
@@ -124,7 +126,11 @@ are whole numbers of millions of US dollars. total_raised_million_usd needs a so
 total, or one source listing every round. valuation_million_usd is the company's most recently \
 reported valuation; do not derive it from funding raised, or funding from a valuation. \
 funding_rounds is a list with one entry per round you can find, not just the latest (stage, \
-amount_million_usd, announced date as YYYY-MM-DD, investors). Each round has its own source_url, \
+amount_million_usd, announced date as YYYY-MM-DD, investors). Search specifically for the \
+company's most recent round (for example "<company> latest funding round" or "<company> funding \
+2025 2026"), not just its best-known one: a well-covered early round is easy to find and a common \
+trap, while a bigger, more recent round can be missed if you stop searching too soon. Each round \
+has its own source_url, \
 confidence and note, and rounds may come from different sources (for example one page for the \
 latest raise and another for the funding history). If only the year or month of a round is \
 known, use the first day of that year or month (e.g. "2023-01-01") rather than leaving announced \
