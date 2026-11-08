@@ -1,3 +1,4 @@
+import threading
 from decimal import Decimal
 
 import pytest
@@ -75,3 +76,27 @@ def test_batch_budget_clamp_is_the_smaller_of_item_cap_and_remaining():
     assert batch.clamp(Decimal("0.13")) == Decimal("0.13")
     batch.charge(Decimal("0.95"))
     assert batch.clamp(Decimal("0.13")) == Decimal("0.05")
+
+
+def test_batch_budget_charge_is_thread_safe():
+    budget = BatchBudget(max_usd=Decimal(1_000_000))
+
+    def hammer():
+        for _ in range(2000):
+            budget.charge(Decimal("0.01"))
+
+    threads = [threading.Thread(target=hammer) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert budget.spent == Decimal("160.00")
+
+
+def test_try_slice_is_the_smaller_of_cap_and_remaining_or_none_when_exhausted():
+    budget = BatchBudget(max_usd=Decimal("0.05"))
+    assert budget.try_slice(Decimal("0.03")) == Decimal("0.03")
+    budget.charge(Decimal("0.03"))
+    assert budget.try_slice(Decimal("0.03")) == Decimal("0.02")
+    budget.charge(Decimal("0.02"))
+    assert budget.try_slice(Decimal("0.03")) is None

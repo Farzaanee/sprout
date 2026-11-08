@@ -8,6 +8,7 @@ caching and politeness are implemented once. Credentials are passed to the under
 import hashlib
 import json
 import os
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -134,7 +135,8 @@ class DiskCache:
             "fetched_at": datetime.now(UTC).isoformat(),
         }
         path = self._path(key)
-        tmp = path.with_suffix(".tmp")
+        # Unique per writer so concurrent puts of one URL cannot race on the rename.
+        tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
         tmp.write_text(json.dumps(entry), encoding="utf-8")
         os.replace(tmp, path)
 

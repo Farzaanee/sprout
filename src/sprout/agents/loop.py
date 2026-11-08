@@ -45,9 +45,11 @@ class MessagesClient(Protocol):
     messages: Any
 
 
-def make_client(api_key: str) -> MessagesClient:
-    """Real client. The SDK retries 408/409/429/5xx and connection errors twice by default."""
-    return anthropic.Anthropic(api_key=api_key, timeout=REQUEST_TIMEOUT_SECONDS)
+def make_client(api_key: str, *, max_retries: int = 2) -> MessagesClient:
+    """Real client. The SDK retries 408/409/429/5xx and connection errors `max_retries` times."""
+    return anthropic.Anthropic(
+        api_key=api_key, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=max_retries
+    )
 
 
 @dataclass(frozen=True)

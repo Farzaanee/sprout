@@ -1,9 +1,16 @@
+import threading
 from datetime import timedelta
 
 import httpx
 import pytest
 
-from sprout.sources.http import DiskCache, FetchError, PerHostRateLimiter, RateLimiter
+from sprout.sources.http import (
+    DiskCache,
+    FetchError,
+    PerHostRateLimiter,
+    RateLimiter,
+    Response,
+)
 
 
 class FakeClock:
@@ -135,6 +142,32 @@ def test_corrupt_cache_entry_is_a_miss(tmp_path):
     key = DiskCache.key("https://example.com/")
     (tmp_path / f"{key}.json").write_text("{not json")
     assert cache.get(key) is None
+
+
+def test_concurrent_puts_of_one_key_do_not_collide(tmp_path):
+    cache = DiskCache(tmp_path)
+    key = DiskCache.key("https://example.com/")
+    response = Response(url="https://example.com/", status_code=200, text="ok")
+    errors: list[Exception] = []
+    barrier = threading.Barrier(8)
+
+    def writer():
+        barrier.wait()
+        try:
+            for _ in range(50):
+                cache.put(key, response)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    cached = cache.get(key)
+    assert cached is not None and cached.text == "ok"
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_rate_limiter_waits_for_the_window_to_clear():

@@ -1,4 +1,6 @@
 import json
+import sqlite3
+import threading
 from datetime import UTC, date, datetime
 
 import pytest
@@ -435,3 +437,50 @@ def test_run_log_step_is_unique_per_run_and_iteration(session):
     session.add(RunLogStep(run_log_id=run.id, iteration=2, created_at=now))
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_get_engine_enables_wal_busy_timeout_and_two_threads_can_write(tmp_path):
+    engine = get_engine(tmp_path / "wal.db")
+    init_db(engine)
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
+        assert conn.exec_driver_sql("PRAGMA synchronous").scalar() == 1  # NORMAL
+        assert conn.exec_driver_sql("PRAGMA busy_timeout").scalar() == 30_000
+
+    errors: list[Exception] = []
+
+    def write() -> None:
+        try:
+            for _ in range(25):
+                with Session(engine) as s:
+                    s.add(RunLog(kind=RunKind.PIPELINE_RUN.value))
+                    s.commit()
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=write) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    with Session(engine) as s:
+        assert len(s.exec(select(RunLog)).all()) == 50
+
+
+def test_get_engine_opens_a_read_only_database_without_changing_its_mode(tmp_path):
+    path = tmp_path / "snapshot.db"
+    raw = sqlite3.connect(path)
+    raw.execute("CREATE TABLE t (x INTEGER)")
+    raw.execute("INSERT INTO t VALUES (1)")
+    raw.commit()
+    raw.close()
+    path.chmod(0o444)
+    engine = get_engine(path)
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT x FROM t").scalar() == 1
+        assert conn.exec_driver_sql("PRAGMA journal_mode").scalar() == "delete"
+
+
+def test_pipeline_run_kind_value():
+    assert RunKind.PIPELINE_RUN == "pipeline_run"

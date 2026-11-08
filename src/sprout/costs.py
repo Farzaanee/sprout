@@ -4,7 +4,8 @@ Prices are code (reviewed, tested, reproducible from a commit), not env. An unpr
 closed so a typo in `SPROUT_BULK_MODEL` cannot silently bypass the spend caps.
 """
 
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 _MILLION = Decimal(1_000_000)
@@ -94,18 +95,22 @@ def cost_usd(model: str, usage: Usage) -> Decimal:
 class BatchBudget:
     """Shared USD cap over many runs. Soft by at most one response per run, like the per-run cap.
 
-    Not thread-safe: the Phase 5 orchestrator adds a lock around `charge`.
+    Thread-safe: the Phase 6 workers charge it concurrently.
     """
 
     max_usd: Decimal
     spent: Decimal = Decimal(0)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if self.max_usd <= 0:
             raise ValueError("max_usd must be positive")
 
     def charge(self, cost: Decimal) -> None:
-        self.spent += cost
+        with self._lock:
+            self.spent += cost
 
     @property
     def remaining(self) -> Decimal:
@@ -116,7 +121,14 @@ class BatchBudget:
         return self.spent >= self.max_usd
 
     def clamp(self, per_item_usd: Decimal) -> Decimal:
-        return min(per_item_usd, self.remaining)
+        with self._lock:
+            return min(per_item_usd, self.remaining)
+
+    def try_slice(self, cap: Decimal) -> Decimal | None:
+        """Atomically take `min(cap, remaining)` for one call; None when nothing remains."""
+        with self._lock:
+            remaining = max(self.max_usd - self.spent, Decimal(0))
+            return min(cap, remaining) if remaining > 0 else None
 
 
 def enrichment_batch_size(

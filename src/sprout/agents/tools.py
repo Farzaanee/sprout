@@ -195,22 +195,29 @@ def _lookup_ch_tool(ch: CompaniesHouseClient, ledger: SourceLedger) -> Tool:
 
 
 def build_tools(
-    fetcher: WebFetcher, ch: CompaniesHouseClient | None, ledger: SourceLedger
+    fetcher: WebFetcher,
+    ch: CompaniesHouseClient | None,
+    ledger: SourceLedger,
+    max_searches: int = WEB_SEARCH_MAX_USES,
 ) -> list[Tool]:
     """Everything except submit_profile. The single place to swap the search backend.
 
+    `max_searches=0` omits `web_search` for agents that must not search.
+
     The order is fixed because tool definitions sit at the start of the cached prefix.
     """
-    tools = [
-        Tool(
-            spec={
-                "type": WEB_SEARCH_TOOL_TYPE,
-                "name": "web_search",
-                "max_uses": WEB_SEARCH_MAX_USES,
-            }
-        ),
-        _fetch_page_tool(fetcher, ledger),
-    ]
+    tools: list[Tool] = []
+    if max_searches > 0:
+        tools.append(
+            Tool(
+                spec={
+                    "type": WEB_SEARCH_TOOL_TYPE,
+                    "name": "web_search",
+                    "max_uses": max_searches,
+                }
+            )
+        )
+    tools.append(_fetch_page_tool(fetcher, ledger))
     if ch is not None:
         tools.append(_lookup_ch_tool(ch, ledger))
     return tools

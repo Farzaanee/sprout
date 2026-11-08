@@ -183,3 +183,14 @@ def test_fetch_page_view_caps_once_and_handler_does_not_truncate_again(make_http
     assert view.endswith("[truncated]") and view.count("[truncated]") == 1
     assert len(view) <= TOOL_RESULT_MAX_CHARS + len("\n[truncated]")
     assert outcome.text.count("[truncated]") == 1 and view in outcome.text
+
+
+def test_max_searches_caps_or_omits_web_search(make_http):
+    fetcher = WebFetcher(make_http(lambda r: httpx.Response(404)), resolver=PUBLIC)
+    ledger = SourceLedger()
+    default = {t.spec["name"]: t for t in build_tools(fetcher, None, ledger)}
+    assert default["web_search"].spec["max_uses"] == 3
+    capped = {t.spec["name"]: t for t in build_tools(fetcher, None, ledger, max_searches=1)}
+    assert capped["web_search"].spec["max_uses"] == 1
+    omitted = [t.spec["name"] for t in build_tools(fetcher, None, ledger, max_searches=0)]
+    assert omitted == ["fetch_page"]

@@ -10,6 +10,7 @@ from sprout.models import (
     Confidence,
     FundingRound,
     NewsItem,
+    NewsKind,
     Sourced,
     Stage,
 )
@@ -161,3 +162,14 @@ def test_news_item_requires_title_and_http_url():
         NewsItem(title="", url=SRC)
     with pytest.raises(ValidationError):
         NewsItem(title="x", url="javascript:alert(1)")
+
+
+def test_news_kind_vocabulary():
+    assert [k.value for k in NewsKind] == [
+        "funding",
+        "acquisition",
+        "partnership",
+        "regulatory",
+        "leadership",
+        "other",
+    ]

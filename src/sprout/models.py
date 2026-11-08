@@ -61,6 +61,15 @@ class BusinessStatus(StrEnum):
     UNCLEAR = "Unclear"
 
 
+class NewsKind(StrEnum):
+    FUNDING = "funding"
+    ACQUISITION = "acquisition"
+    PARTNERSHIP = "partnership"
+    REGULATORY = "regulatory"
+    LEADERSHIP = "leadership"
+    OTHER = "other"
+
+
 class Confidence(StrEnum):
     LOW = "low"
     MEDIUM = "medium"

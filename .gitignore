@@ -17,6 +17,8 @@ CLAUDE.md
 .env
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 !data/sprout_snapshot.db
 !data/eval.db
 .cache/

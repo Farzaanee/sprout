@@ -5,6 +5,7 @@ Tables: `company`, `fact` (provenance), `funding_round`, `officer`, `news_item`,
 timestamps are timezone-aware UTC.
 """
 
+import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic_core import to_json
-from sqlalchemy import JSON, Column, Engine, UniqueConstraint, inspect, text
+from sqlalchemy import JSON, Column, Engine, UniqueConstraint, event, inspect, text
 from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from sprout.candidates import Assessment, assess
@@ -38,6 +39,7 @@ class RunKind(StrEnum):
     COMPANY_CLASSIFICATION = "company_classification"
     COMPANY_VERIFICATION = "company_verification"
     COMPANY_NEWS_MATCH = "company_news_match"
+    PIPELINE_RUN = "pipeline_run"
 
 
 class Company(SQLModel, table=True):
@@ -203,10 +205,28 @@ class RunLogStep(SQLModel, table=True):
     tool_error_text: str | None = None  # tool error message(s), capped; may contain a URL (A7)
 
 
+BUSY_TIMEOUT_SECONDS = 30
+
+
 def get_engine(path: Path | str) -> Engine:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(f"sqlite:///{path}")
+    engine = create_engine(f"sqlite:///{path}", connect_args={"timeout": BUSY_TIMEOUT_SECONDS})
+    event.listen(engine, "connect", _configure_connection)
+    return engine
+
+
+def _configure_connection(dbapi_connection: sqlite3.Connection, _record: object) -> None:
+    """WAL lets readers and short writers coexist (D38). A read-only file (the committed snapshot)
+    cannot change journal mode, so it keeps its own and the pragmas are skipped."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.OperationalError:
+        pass
+    finally:
+        cursor.close()
 
 
 def init_db(engine: Engine) -> None:
