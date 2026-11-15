@@ -243,7 +243,7 @@ Each iteration: check the guards, call `messages.create`, add `usage` to the run
 
 Only a validated `submit_profile` carries facts, so on any non-`submitted` stop nothing is written to `fact` or `category`; the cost, `failure_category` (from `failures.failure_category_for(stop)`) and step rows are still recorded. The only per-run caps are iterations, USD, search `max_uses` (3) and the tool-result character cap.
 
-There is no per-run fetch cap beyond the iteration cap (the prompt's "at most 4 pages" is advice, not enforced), and no partial profile is ever written on a cap stop. The CLI enforces `--max-usd` per company; `--max-total-usd` (Phase 5, `BatchBudget`, D24; default no cap) caps a whole target list, and the Phase 6 orchestrator reuses it.
+There is no per-run fetch cap beyond the iteration cap (the prompt's "at most 4 pages" is advice, not enforced), and no partial profile is ever written on a cap stop. The CLI screens for a website before enrichment, as described in [Phase 6](phase-6-multi-agent.md#website-screen). `--max-usd` caps each enrichment call and also bounds the separate screen; `--max-total-usd` (default no cap) covers both across the target list.
 
 ## Inside `loop.py`: the iteration state machine
 

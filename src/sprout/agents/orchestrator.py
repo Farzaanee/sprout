@@ -30,6 +30,7 @@ from sprout.agents.enrich import CompanyNotFound, enrich_with_result, resolve_co
 from sprout.agents.loop import Budget, LoopResult, MessagesClient, make_client
 from sprout.agents.news import NEWS_BUDGET, collect_with_result
 from sprout.agents.verify import VERIFY_BUDGET, build_claims, verify_with_result
+from sprout.agents.website import SCREEN_BUDGET, screen_website
 from sprout.candidates import passes_prescreen
 from sprout.config import MissingConfigError, Settings, get_settings
 from sprout.costs import BatchBudget
@@ -62,12 +63,16 @@ ESTIMATED_STEP_USD = {
     "classify": Decimal("0.002"),
     "news": Decimal("0.014"),
     "verify": Decimal("0.05"),
+    "website": Decimal("0.01"),
 }
 
 StepState = Literal[
-    "ok", "failed", "skipped_fresh", "skipped_no_claims", "skipped_budget", "stopped"
+    "ok", "failed", "skipped_fresh", "skipped_no_claims", "skipped_no_website",
+    "skipped_budget", "stopped"
 ]
-CompanyResult = Literal["ok", "partial", "failed", "gave_up", "skipped_budget", "stopped"]
+CompanyResult = Literal[
+    "ok", "partial", "failed", "gave_up", "skipped_budget", "skipped_no_website", "stopped"
+]
 
 
 @dataclass
@@ -155,6 +160,7 @@ def _verify(session: Session, company: Company, deps: Deps, budget: Budget) -> L
 
 # Per step: the default budget (each call's cap is clamped to the batch slice) and the call.
 AGENTS: dict[str, tuple[Budget, AgentCall]] = {
+    "website": (SCREEN_BUDGET, screen_website),
     "enrich": (ENRICH_BUDGET, lambda s, c, d, b: enrich_with_result(s, c, d, b)[1]),
     "classify": (CLASSIFY_BUDGET, lambda s, c, d, b: classify_with_result(s, c, d, b)[1]),
     "news": (NEWS_BUDGET, lambda s, c, d, b: collect_with_result(s, c, d, b)[1]),
@@ -194,6 +200,11 @@ def _run_step(step: str, worker: Worker, company: Company, ctx: RunContext) -> S
                 failure = category.value if category else None
                 return StepOutcome(step, "failed", cost, failure, str(exc)[:ERROR_TEXT_CHARS])
             ctx.batch.charge(result.cost_usd)
+            if step == "website" and not result.payload["url"]:
+                return StepOutcome(
+                    step, "skipped_no_website", cost + result.cost_usd,
+                    error=result.payload["reason"],
+                )
             return StepOutcome(step, "ok", cost + result.cost_usd)
     except Exception as exc:  # isolate: the run_log row (if any) is already committed
         session.rollback()
@@ -212,6 +223,10 @@ def _needed(
 def _result(outcomes: list[StepOutcome], *, exhausted: bool, no_profile: bool) -> CompanyResult:
     if exhausted:
         return "gave_up"
+    if outcomes and outcomes[0].step == "website":
+        state = outcomes[0].state
+        if state in ("failed", "stopped", "skipped_budget", "skipped_no_website"):
+            return state
     if no_profile:
         return "failed"
     states = {o.step: o.state for o in outcomes}
@@ -245,6 +260,9 @@ def process_company(
         exhausted = not force and any(status.steps[s].state == "exhausted" for s in wanted)
         no_profile = False
         if "enrich" in needed:
+            outcomes.append(_run_step("website", worker, company, ctx))
+            if outcomes[-1].state != "ok":
+                return _outcome(company_id, outcomes, exhausted=False, no_profile=False)
             outcomes.append(_run_step("enrich", worker, company, ctx))
             if outcomes[-1].state != "ok":
                 return _outcome(company_id, outcomes, exhausted=exhausted, no_profile=False)
@@ -261,7 +279,7 @@ def process_company(
             for s in wanted
             if s not in ran and status.steps[s].state == "fresh"
         ]
-        outcomes.sort(key=lambda o: STEPS.index(o.step))
+        outcomes.sort(key=lambda o: -1 if o.step == "website" else STEPS.index(o.step))
         return _outcome(company_id, outcomes, exhausted=exhausted, no_profile=no_profile)
     except Exception as exc:
         session.rollback()
@@ -347,6 +365,8 @@ def _company_line(name: str, outcome: CompanyOutcome) -> str:
         detail = f"{o.state}({o.cost_usd:.4f})" if o.cost_usd else o.state
         if o.state == "failed":
             detail += f"[{o.failure_category}: {o.error}]"
+        elif o.state == "skipped_no_website":
+            detail += f"[{o.error}]"
         parts.append(f"{o.step}={detail}")
     return f"{outcome.result:<14} {name}  cost=USD {outcome.cost_usd:.4f}  {' '.join(parts)}"
 
@@ -375,6 +395,8 @@ def _dry_run_text(
         status, company = statuses[company_id], rows[company_id]
         needed = [s for s in status.needs(force=args.force) if s in steps]
         estimate = sum((ESTIMATED_STEP_USD[s] for s in needed), Decimal(0))
+        if "enrich" in needed:
+            estimate += ESTIMATED_STEP_USD["website"]
         total += estimate
         working += bool(needed)
         states = " ".join(f"{s}={status.steps[s].state}" for s in steps)
@@ -523,7 +545,12 @@ async def run(
             by_kind: Counter[str] = Counter()
             for outcome in outcomes:
                 for o in outcome.steps:
-                    by_kind[STEP_KINDS[o.step].value] += float(o.cost_usd)
+                    kind = (
+                        RunKind.COMPANY_WEBSITE_SCREEN
+                        if o.step == "website"
+                        else STEP_KINDS[o.step]
+                    )
+                    by_kind[kind.value] += float(o.cost_usd)
             rate_limited = ctx.gate.trips >= MAX_RATE_LIMIT_TRIPS
             stopped_early = (
                 "interrupted"
@@ -547,7 +574,8 @@ async def run(
                 "stopped_early": stopped_early,
             }
             stats = pipeline_run.stats
-    ok_ratio = results.get("ok", 0) / len(ids) if ids else 1.0
+    eligible = len(ids) - results.get("skipped_no_website", 0)
+    ok_ratio = results.get("ok", 0) / eligible if eligible else 1.0
     exit_code = 0 if stopped_early is None and ok_ratio >= PASS_RATIO else 1
     return RunSummary(exit_code, _summary_text(stats), stats=stats)
 

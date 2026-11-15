@@ -194,12 +194,13 @@ def test_cost_sums_stats_over_all_pipeline_rows(session, company):
     add_run(session, company, ENRICH, cost=0.12)
     add_run(session, company, CLASSIFY, cost=0.004)
     add_run(session, company, NEWS)  # no cost recorded
+    add_run(session, company, RunKind.COMPANY_WEBSITE_SCREEN.value, cost=0.01)
     other = Company(company_number="87654321", name="OTHER LTD")
     session.add(other)
     session.commit()
     add_run(session, other, ENRICH, cost=1.0)
     statuses = company_statuses(session, [company.id, other.id], POLICY, NOW)
-    assert str(statuses[company.id].cost_usd) == "0.124"
+    assert str(statuses[company.id].cost_usd) == "0.134"
     assert str(statuses[other.id].cost_usd) == "1.0"
 
 

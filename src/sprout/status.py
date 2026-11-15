@@ -157,16 +157,20 @@ def company_statuses(
         RunLog.finished_at,
         RunLog.failure_category,
         cost,
-    ).where(col(RunLog.company_id).in_(ids), col(RunLog.kind).in_(kinds))
+    ).where(
+        col(RunLog.company_id).in_(ids),
+        col(RunLog.kind).in_([*kinds, RunKind.COMPANY_WEBSITE_SCREEN.value]),
+    )
 
     rows: dict[int, dict[str, list[_Row]]] = {i: {s: [] for s in STEPS} for i in ids}
     costs: dict[int, Decimal] = {i: Decimal(0) for i in ids}
     for run_id, company_id, kind, status, started, finished, category, run_cost in session.exec(
         query
     ):
-        rows[company_id][kinds[kind]].append(
-            _Row(run_id, status, _utc(started), _utc(finished) if finished else None, category)
-        )
+        if kind in kinds:
+            rows[company_id][kinds[kind]].append(
+                _Row(run_id, status, _utc(started), _utc(finished) if finished else None, category)
+            )
         if run_cost is not None:
             costs[company_id] += Decimal(str(run_cost))
 

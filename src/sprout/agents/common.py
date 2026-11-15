@@ -71,6 +71,8 @@ def _stats(result: LoopResult, ledger: SourceLedger) -> dict[str, Any]:
         "cache_read_tokens": usage.cache_read_tokens,
         "cache_write_tokens": usage.cache_write_tokens,
         "web_searches": usage.web_searches,
+        "search_results": result.search_results,
+        "search_errors": result.search_errors,
         "cost_usd": round(float(result.cost_usd), 6),
         "sources": ledger.snapshot(),
     }
@@ -110,6 +112,7 @@ def run_recorded(
     max_tokens: int,
     persist: Callable[[Any], Mapping[str, Any] | None],
     failed: type[AgentFailed] = AgentFailed,
+    validate_result: Callable[[LoopResult], None] | None = None,
 ) -> LoopResult:
     """Run one agent over `company` and record it in `run_log` and `run_log_step`.
 
@@ -149,6 +152,16 @@ def run_recorded(
         session.commit()
         if result.stop != "submitted" or result.payload is None:
             raise failed(result.stop, result.cost_usd, result.error, result.error_type)
+        if validate_result is not None:
+            try:
+                validate_result(result)
+            except AgentFailed as exc:
+                failure = failure_category_for(exc.stop)
+                run.failure_category = failure.value if failure else None
+                run.error_message = str(exc)
+                session.add(run)
+                session.commit()
+                raise
         extra_stats = persist(result.payload)
         if extra_stats:
             run.stats = {**run.stats, **extra_stats}

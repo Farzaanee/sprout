@@ -55,7 +55,10 @@ Per-company flow (one worker thread, steps run in this order; a step that is fre
 ```mermaid
 flowchart TB
     S["company_status: steps needed"] --> E{"enrich needed?"}
-    E -- yes --> RE["enrich"]
+    E -- yes --> WS["website screen"]
+    WS -- "website identified" --> RE["enrich"]
+    WS -- "no website established" --> SKIP["skip enrichment"]
+    WS -- "screen failed" --> F
     E -- no --> C
     RE -- "failed" --> F["status failed or gave_up; nothing else runs"]
     RE -- "ok" --> C["classify (overwrites company.category)"]
@@ -71,7 +74,7 @@ flowchart TB
 
 | # | Step | Run `kind` | Depends on | Runs when |
 |---|---|---|---|---|
-| 1 | enrich | `company_enrich` | nothing | never enriched, enrichment older than `stale_days`, or latest attempt failed |
+| 1 | enrich | `company_enrich` | website screen | never enriched, enrichment older than `stale_days`, or latest attempt failed |
 | 2 | classify | `company_classification` | an ok enrich | no ok classification newer than the newest ok enrich, or latest attempt failed |
 | 3 | news | `company_news_match` | an ok enrich (uses its website and one-liner to disambiguate) | no ok news run in `news_stale_days`, or latest attempt failed |
 | 4 | verify | `company_verification` | an ok enrich | no ok verification newer than the newest ok enrich and `build_claims` is non-empty, or latest attempt failed |
@@ -80,6 +83,14 @@ flowchart TB
 - Step failures are isolated: a failed classify does not skip news or verify. Only a failed, stopped or budget-skipped enrich stops the company (no profile to work from). A company that has no usable enrichment and whose enrich is not due (running elsewhere, or excluded by `--steps`) ends `failed`.
 - A successful enrich in the same invocation re-derives the needed steps, so classify and verify (which describe an enrichment) are due again.
 - Verify with no funding or stage claim is `skipped_no_claims`: no run row, no model call, counts as done.
+
+### Website screen
+
+Before each due enrichment, the orchestrator and single-company CLI search for the company's official website. A website is accepted only after fetching the page and matching a verbatim identity quote against its visible text. The model judges whether the page belongs to the legal entity, so identity is not guaranteed. The screen stores the website as a sourced fact and records its result and cost in `company_website_screen`. Enrichment receives the recorded website as untrusted context.
+
+An unconfirmed website produces `skipped_no_website`, without enrichment or downstream steps. A failed search or fetch cannot establish absence and produces a retryable failure instead. A skipped company remains in the ranked working set, is screened again on the next invocation and is excluded from the success-rate denominator. `--only`, `--no-prescreen` and `--force` do not bypass the website screen. `--dry-run` does not screen and its estimate includes the screen for each due enrichment. Screen budgets and model routing are in [cross-cutting](../4.%20cross-cutting.md#9-phase-6-agent-caps-and-run-budget).
+
+The low-level enrichment functions remain available for controlled evals, which intentionally include non-startup controls and do not use the production screen.
 
 ## Interfaces (as built)
 
@@ -137,8 +148,8 @@ profile_gaps(session, company_id) -> list[str]     # missing: category, stage, f
 Worker(session, fetcher, ch); open_worker(settings, engine, stack) -> Worker
 RateLimitGate(pause_seconds): trip(), wait(stop), trips
 RunContext(client, settings, batch: BatchBudget, gate, stop: threading.Event, policy, now)
-StepOutcome(step, state: ok|failed|skipped_fresh|skipped_no_claims|skipped_budget|stopped, cost_usd, failure_category, error)
-CompanyOutcome(company_id, result: ok|partial|failed|gave_up|skipped_budget|stopped, steps, cost_usd)
+StepOutcome(step, state: ok|failed|skipped_fresh|skipped_no_claims|skipped_no_website|skipped_budget|stopped, cost_usd, failure_category, error)
+CompanyOutcome(company_id, result: ok|partial|failed|gave_up|skipped_budget|skipped_no_website|stopped, steps, cost_usd)
 process_company(worker, company_id, steps, ctx, *, force=False) -> CompanyOutcome   # sync, never raises, never prints
 select_working_set(session, *, limit, only, prescreen, ch) -> list[int]
 order_for_work(ids, statuses, steps, *, force) -> list[int]
@@ -166,7 +177,7 @@ Verifier effects (D40): `confirmed` raises the claim's confidence to `high`; `di
 
 Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-company-status-derived-not-stored)). Constants live in `StatusPolicy`. Decisions: D39.
 
-**Working set.** Candidates are companies with `passes_prescreen(active_officers)` (D34), ranked by `candidate_score` descending then `id`. `--limit N` takes the first N: it bounds the working set, not the amount of new work, so rerunning with the same N completes the same set instead of growing it, and a pilot of 12 is a prefix of the full 50. `--only NAME_OR_NUMBER...` bypasses the pre-screen and the limit (companies not yet in the DB are added through `resolve_company`; an unresolvable target exits 2); `--no-prescreen` disables the pre-screen.
+**Working set.** Candidates are companies with `passes_prescreen(active_officers)` (D34), ranked by `candidate_score` descending then `id`. `--limit N` takes the first N: it bounds the working set, not the amount of new work, so rerunning with the same N completes the same set instead of growing it, and a pilot of 12 is a prefix of the full 50. `--only NAME_OR_NUMBER...` bypasses the officer pre-screen and the limit (companies not yet in the DB are added through `resolve_company`; an unresolvable target exits 2); `--no-prescreen` disables the officer pre-screen.
 
 **Per step.** `StepStatus.state` for a step with kind K:
 
@@ -214,7 +225,7 @@ Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-co
 - `--force` ignores freshness and the 3-attempt cap for the selected companies, and the single-run lock; it never takes over a step another process is running.
 - `--max-total-usd` is the single cap over enrichment, classify, news and verify spend. The default US$5.00 is the acceptance ceiling.
 - Output: one stderr line per finished company (result, per-step state and cost), a final summary on stdout, and one batch `run_log` row, kind `pipeline_run`, `company_id` NULL, `stats`: `limit`, `concurrency`, `max_total_usd`, `selected`, `results` (counts per company result), `spent_usd`, `by_kind`, `rate_limit_trips`, `incomplete_profiles` (company id to missing parts, ok companies only), `stopped_early` (`interrupted`, `rate_limited`, `budget` or null). The spend key is `spent_usd`, **not** `cost_usd`, because the Observability queries sum `stats.cost_usd` over every kind and would count the batch twice.
-- Exit codes: 0 when not stopped early and `ok / working set >= 0.85`; 1 below that or stopped early (budget, rate limit, interrupt); 2 for configuration (no Anthropic key, another run in progress, unresolvable `--only` target). Phase 9 maps these to job outcomes.
+- Exit codes: 0 when not stopped early and `ok / eligible working set >= 0.85` (or no companies are eligible); 1 below that or stopped early (budget, rate limit, interrupt); 2 for configuration (no Anthropic key, another run in progress, unresolvable `--only` target). Phase 9 maps these to job outcomes.
 
 ## Evaluating each agent (D28, D41)
 

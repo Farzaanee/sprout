@@ -7,6 +7,7 @@ from `CompanyProfile`), provenance checks, persistence and the `enrich` run_log 
 
 import argparse
 import copy
+import json
 import re
 import sys
 from collections.abc import Sequence
@@ -32,17 +33,22 @@ from sprout.agents.tools import (
     SourceLedger,
     assert_tools_allowed,
     build_tools,
+    wrap_untrusted,
 )
+from sprout.agents.website import SCREEN_BUDGET, WebsiteScreenFailed, screen_website
 from sprout.config import MissingConfigError, get_settings
 from sprout.costs import BatchBudget
 from sprout.db import (
     Company,
+    Fact,
     RunKind,
     add_company_by_number,
     delete_profile,
     get_engine,
     init_db,
+    save_fact,
     save_profile,
+    winning_facts,
 )
 from sprout.models import (
     BusinessStatus,
@@ -404,6 +410,15 @@ def enrich_with_result(
     submit, accepted = _submit_tool(company, ledger)
     tools = [*build_tools(deps.fetcher, ch, ledger), submit]
     assert_tools_allowed(tools, ALLOWED_ENRICHMENT_TOOLS, "ALLOWED_ENRICHMENT_TOOLS")
+    facts = session.exec(
+        select(Fact).where(Fact.company_id == company.id, Fact.field == "website")
+    ).all()
+    website = winning_facts(facts).get("website")
+    if website is not None and website.value_json is not None:
+        known = json.loads(website.value_json)
+        if isinstance(known, str):
+            context = wrap_untrusted("previously recorded website", known)
+            extra_context = f"{extra_context}\n{context}" if extra_context else context
     result = run_recorded(
         session,
         company,
@@ -545,8 +560,47 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"skip {target}: {exc}", file=sys.stderr)
                 exit_code = 1
                 continue
+            screen_budget = replace(
+                SCREEN_BUDGET, max_usd=min(SCREEN_BUDGET.max_usd, budget.max_usd)
+            )
+            if batch is not None:
+                screen_budget = replace(screen_budget, max_usd=batch.clamp(screen_budget.max_usd))
+            try:
+                screened = screen_website(session, company, deps, screen_budget)
+            except WebsiteScreenFailed as exc:
+                total_usd += exc.cost_usd
+                if batch is not None:
+                    batch.charge(exc.cost_usd)
+                print(f"FAIL website screen {company.name}: {exc}", file=sys.stderr)
+                exit_code = 1
+                continue
+            total_usd += screened.cost_usd
+            if batch is not None:
+                batch.charge(screened.cost_usd)
+            if not screened.payload["url"]:
+                print(
+                    f"skip {company.name}: website not established: {screened.payload['reason']}",
+                    file=sys.stderr,
+                )
+                continue
+            if batch is not None and batch.exhausted:
+                print(f"skip {company.name}: batch budget is used up", file=sys.stderr)
+                exit_code = 1
+                continue
             if args.reset:
                 deleted = delete_profile(session, company)
+                assert company.id is not None
+                url = screened.payload["url"]
+                note = screened.payload["reason"]
+                if screened.payload.get("quote"):
+                    note += f' Quote: {screened.payload["quote"]}'
+                save_fact(
+                    session, company.id, "website",
+                    Sourced[str](
+                        value=url, source_url=url, confidence=Confidence.MEDIUM,
+                        note=note,
+                    ),
+                )
                 session.commit()
                 print(f"reset {company.name}: deleted {deleted} facts", file=sys.stderr)
             run_budget = budget

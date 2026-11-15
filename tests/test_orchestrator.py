@@ -11,6 +11,7 @@ from sqlmodel import Session, col, select
 
 from fakes import response, server_search_turn, tool_use_turn
 from sprout.agents import orchestrator as orch
+from sprout.agents.loop import LoopResult
 from sprout.agents.orchestrator import (
     RateLimitGate,
     RunContext,
@@ -23,6 +24,7 @@ from sprout.config import Settings
 from sprout.costs import BatchBudget
 from sprout.db import Company, RunKind, RunLog, get_engine, init_db
 from sprout.models import Category
+from sprout.sources.web import WebFetcher
 from sprout.status import STEPS, CompanyStatus, StatusPolicy, StepStatus
 
 BULK, STRONG = "claude-haiku-5-5", "claude-sonnet-5-5"
@@ -34,6 +36,7 @@ ALL_KINDS = [
     RunKind.COMPANY_VERIFICATION,
 ]
 SUBMIT_TOOLS = {
+    "website": "submit_website",
     "enrich": "submit_profile",
     "classify": "submit_classification",
     "news": "submit_news",
@@ -140,6 +143,10 @@ def engine(settings):
 @pytest.fixture(autouse=True)
 def no_pause(monkeypatch):
     monkeypatch.setattr(orch, "RATE_LIMIT_PAUSE_SECONDS", 0.0)
+    monkeypatch.setitem(
+        orch.AGENTS, "website",
+        (orch.SCREEN_BUDGET, lambda *_: LoopResult(payload={"url": "https://example.com"})),
+    )
 
 
 def add_companies(engine, *names, officers=2):
@@ -207,7 +214,9 @@ def test_every_step_runs_and_writes_its_rows_with_three_workers(settings, engine
     assert stats["max_total_usd"] == 5.0 and stats["rate_limit_trips"] == 0
     per_run = sum(r.stats["cost_usd"] for r in runs(engine) if r.company_id is not None)
     assert stats["spent_usd"] == pytest.approx(per_run)
-    assert set(stats["by_kind"]) == {k.value for k in ALL_KINDS}
+    assert set(stats["by_kind"]) == {k.value for k in ALL_KINDS} | {
+        RunKind.COMPANY_WEBSITE_SCREEN.value
+    }
     assert "funding" in stats["incomplete_profiles"][str(ids[0])]  # no funding round was found
 
 
@@ -270,6 +279,56 @@ def test_enrich_failure_stops_the_company(settings, engine):
     summary = invoke(settings, client, "--limit", "1")
     assert summary.stats["results"] == {"failed": 1}
     assert [c[0] for c in client.calls] == ["enrich"]
+
+
+def test_website_screen_skips_enrichment_even_for_explicit_forced_target(
+    settings, engine, monkeypatch
+):
+    add_companies(engine, "ACME AI LTD")
+    monkeypatch.setitem(
+        orch.AGENTS, "website",
+        (orch.SCREEN_BUDGET, lambda *_: LoopResult(
+            payload={"url": "", "reason": "No official website found"},
+            cost_usd=Decimal("0.001"),
+        )),
+    )
+    client = RoutingClient()
+    summary = invoke(settings, client, "--only", "ACME AI LTD", "--force")
+    assert summary.exit_code == 0
+    assert summary.stats["results"] == {"skipped_no_website": 1}
+    assert summary.stats["spent_usd"] == pytest.approx(0.001)
+    assert summary.stats["by_kind"][RunKind.COMPANY_WEBSITE_SCREEN.value] == 0.001
+    assert client.calls == []
+    assert not runs(engine, kind=RunKind.COMPANY_ENRICH.value)
+
+
+def test_real_website_screen_precedes_enrichment(settings, engine, monkeypatch, make_http):
+    (company_id,) = add_companies(engine, "ACME AI LTD")
+    url = "https://acme.example/about"
+    quote = "ACME AI LTD is registered in England"
+    client = RoutingClient()
+    client.script[("website", "ACME AI LTD")] = [
+        server_search_turn([url], ("fetch_page", {"url": url})),
+        tool_use_turn(("submit_website", {"url": url, "quote": quote, "reason": "Official site"})),
+    ]
+
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return httpx.Response(200, text=quote, headers={"content-type": "text/html"})
+
+    from sprout.agents.website import screen_website
+
+    monkeypatch.setitem(orch.AGENTS, "website", (orch.SCREEN_BUDGET, screen_website))
+    with Session(engine) as session:
+        fetcher = WebFetcher(make_http(handler), resolver=lambda _: ["1.1.1.1"])
+        worker = Worker(session, fetcher, None)
+        outcome = process_company(worker, company_id, STEPS, context(settings, client))
+    assert outcome.result == "ok"
+    assert [call[0] for call in client.calls] == [
+        "website", "website", "enrich", "classify", "news", "verify"
+    ]
+    assert len(runs(engine, kind=RunKind.COMPANY_WEBSITE_SCREEN.value)) == 1
 
 
 def test_three_failed_attempts_give_up_until_forced(settings, engine):
@@ -486,7 +545,7 @@ def test_dry_run_prints_the_plan_and_spends_nothing(settings, engine):
     summary = asyncio.run(orch.run(settings, args))  # no client, no key: none is needed
     assert summary.exit_code == 0
     assert "ACME AI LTD" in summary.text and "needs: enrich,classify,news,verify" in summary.text
-    assert "estimated USD 0.18" in summary.text and "nothing was spent" in summary.text
+    assert "estimated USD 0.20" in summary.text and "nothing was spent" in summary.text
     assert runs(engine) == []
 
 

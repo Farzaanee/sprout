@@ -19,7 +19,7 @@ from sprout.agents.enrich import (
     submit_profile_schema,
     validate_submission,
 )
-from sprout.agents.loop import Budget
+from sprout.agents.loop import Budget, LoopResult
 from sprout.agents.tools import SourceLedger
 from sprout.config import Settings
 from sprout.db import Company, Fact, RunKind, RunLog, RunLogStep, get_engine, init_db
@@ -701,6 +701,10 @@ def cli_env(tmp_path, monkeypatch):
         cache_dir=tmp_path / "cache",
     )
     monkeypatch.setattr(enrich_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        enrich_mod, "screen_website",
+        lambda *_: LoopResult(payload={"url": "https://acme.example", "reason": "verified"}),
+    )
     engine = get_engine(settings.db_path)
     init_db(engine)
     with Session(engine) as s:
@@ -717,6 +721,55 @@ def test_cli_enriches_and_prints_a_summary(cli_env, monkeypatch, capsys):
     assert "ok   ACME AI LTD" in out and "category='Enterprise software and cloud'" in out
     assert "sourced_facts=3" in out and "cost=USD" in out
     assert "total cost USD" in out
+
+
+def test_cli_skips_unverified_website_without_resetting_profile(cli_env, monkeypatch, capsys):
+    engine = get_engine(cli_env.db_path)
+    with Session(engine) as session:
+        company = session.exec(select(Company)).one()
+        company.category = Category.OTHER.value
+        session.commit()
+    client = ScriptedClient()
+    monkeypatch.setattr(enrich_mod, "make_client", lambda key: client)
+    monkeypatch.setattr(
+        enrich_mod, "screen_website",
+        lambda *_: LoopResult(payload={"url": "", "reason": "No official site found"}),
+    )
+    assert enrich_cli.main(["12345678", "--reset"]) == 0
+    assert "website not established" in capsys.readouterr().err
+    assert client.calls == 0
+    with Session(engine) as session:
+        assert session.exec(select(Company)).one().category == Category.OTHER.value
+
+
+def test_cli_screens_before_enrichment_and_preserves_website_on_reset(
+    cli_env, monkeypatch, make_http
+):
+    from sprout.agents.website import screen_website
+
+    quote = "ACME AI LTD is registered in England"
+    client = ScriptedClient(
+        server_search_turn([SEEN], ("fetch_page", {"url": SEEN})),
+        tool_use_turn(("submit_website", {"url": SEEN, "quote": quote, "reason": "Official site"})),
+        server_search_turn([SEEN], ("submit_profile", empty_submission())),
+    )
+
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return httpx.Response(200, text=quote, headers={"content-type": "text/html"})
+
+    monkeypatch.setattr(enrich_mod, "screen_website", screen_website)
+    monkeypatch.setattr(enrich_mod, "make_client", lambda key: client)
+    monkeypatch.setattr(enrich_mod.web, "make_http_client", lambda *_: make_http(handler))
+    monkeypatch.setattr(
+        enrich_mod, "WebFetcher", lambda http: WebFetcher(http, resolver=lambda _: ["1.1.1.1"])
+    )
+    assert enrich_cli.main(["12345678", "--reset"]) == 0
+    assert SEEN in client.requests[-1]["messages"][0]["content"]
+    with Session(get_engine(cli_env.db_path)) as session:
+        website = session.exec(select(Fact).where(Fact.field == "website")).all()
+        assert any(f.value_json == f'"{SEEN}"' and quote in f.note for f in website)
 
 
 def test_cli_uses_the_strong_model_and_reports_failures(cli_env, monkeypatch, capsys):

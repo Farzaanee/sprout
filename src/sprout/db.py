@@ -36,6 +36,7 @@ class RunKind(StrEnum):
     NEWS_INGEST = "news_ingest"
     COMPANIES_INGEST = "companies_ingest"
     COMPANY_ENRICH = "company_enrich"
+    COMPANY_WEBSITE_SCREEN = "company_website_screen"
     COMPANY_CLASSIFICATION = "company_classification"
     COMPANY_VERIFICATION = "company_verification"
     COMPANY_NEWS_MATCH = "company_news_match"

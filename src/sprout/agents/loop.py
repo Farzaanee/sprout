@@ -108,6 +108,8 @@ class LoopResult:
     error: str | None = None
     error_type: str | None = None
     steps: list[StepRecord] = field(default_factory=list)
+    search_results: int = 0
+    search_errors: int = 0
 
 
 def _usage_of(response: Any) -> Usage:
@@ -261,6 +263,12 @@ def run_agent(
         result.usage = result.usage + _usage_of(response)
         result.cost_usd = cost_usd(model, result.usage)
         content = list(response.content)
+        for block in content:
+            if getattr(block, "type", None) == "web_search_tool_result":
+                if isinstance(block.content, list):
+                    result.search_results += 1
+                else:
+                    result.search_errors += 1
         step = _step_of(model, result.iterations, response, content)
         result.steps.append(step)
         if content:
