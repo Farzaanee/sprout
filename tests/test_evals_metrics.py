@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -7,7 +8,9 @@ from sqlmodel import Session, create_engine
 
 from evals.golden import GoldenEntry
 from evals.metrics import (
+    VALUATION,
     Observed,
+    ObservedFact,
     ObservedRound,
     Ratio,
     aggregate,
@@ -359,9 +362,90 @@ def test_stage_correct_unknown_matches_null_or_unknown():
 
 
 def _with_stage(value):
-    from evals.metrics import ObservedFact
-
     return Observed(facts={"stage": ObservedFact("stage", value, URL, None)})
+
+
+def _with_valuation(value):
+    return Observed(facts={VALUATION: ObservedFact(VALUATION, value, URL, None)})
+
+
+UNKNOWN_GOLD = {"stage": "Unknown", "last_round": None}
+
+
+def _scored(observed, entry):
+    return score_entry(replace(observed, stop="submitted"), entry, no_pages)
+
+
+def test_known_stage_and_populated_stage_outcomes():
+    unknown = golden(**UNKNOWN_GOLD)
+    abstained = _scored(Observed(), unknown)
+    assert abstained.known_stage_ok is None and abstained.stage_populated is False
+    guessed = _scored(_with_stage("Seed"), unknown)
+    assert guessed.known_stage_ok is None and guessed.stage_populated is True
+
+    missed = _scored(Observed(), golden())
+    assert missed.known_stage_ok is False and missed.stage_populated is False
+    wrong = _scored(_with_stage("Seed"), golden())
+    assert wrong.known_stage_ok is False and wrong.stage_populated is True
+    right = _scored(_with_stage("Series A"), golden())
+    assert right.known_stage_ok is True and right.stage_populated is True
+
+
+def test_valuation_outcomes_and_tolerance():
+    gold = golden(valuation={"amount_million_usd": 100})
+    assert _scored(_with_valuation(100), gold).valuation_ok is True
+    assert _scored(_with_valuation(101), gold).valuation_ok is True  # within 1%
+    wrong = _scored(_with_valuation(150), gold)
+    assert wrong.valuation_ok is False and wrong.valuation_populated is True
+    null = _scored(Observed(), gold)
+    assert null.valuation_ok is False and null.valuation_populated is False
+
+    for no_reference in (golden(), golden(valuation={"amount_million_usd": None})):
+        score = _scored(_with_valuation(50), no_reference)
+        assert score.valuation_ok is None and score.valuation_populated is True
+
+
+def test_coverage_metrics_skip_entries_not_submitted():
+    score = score_entry(
+        Observed(stop="budget"), golden(valuation={"amount_million_usd": 1}), no_pages
+    )
+    assert score.known_stage_ok is None and score.stage_populated is None
+    assert score.valuation_ok is None and score.valuation_populated is None
+
+
+def test_aggregate_known_stage_and_valuation_ratios():
+    gold = golden(valuation={"amount_million_usd": 100})
+    unknown = golden(**UNKNOWN_GOLD)
+    right_both = Observed(
+        facts={
+            "stage": ObservedFact("stage", "Series A", URL, None),
+            VALUATION: ObservedFact(VALUATION, 100, URL, None),
+        }
+    )
+    scores = [
+        _scored(right_both, gold),  # right stage, right valuation
+        _scored(_with_stage("Seed"), gold),  # wrong stage
+        _scored(Observed(), gold),  # missed known stage
+        _scored(Observed(), unknown),  # correct abstention
+        _scored(_with_stage("Seed"), unknown),  # guessed where unknown
+        score_entry(Observed(stop="budget"), gold, no_pages),  # not submitted
+    ]
+    r = aggregate(scores).ratios
+    assert r["stage_accuracy"] == Ratio(2, 5)
+    assert r["known_stage_accuracy"] == Ratio(1, 3)
+    assert r["stage_coverage"] == Ratio(3, 5)
+    assert r["valuation_accuracy"] == Ratio(1, 3)
+    assert r["valuation_coverage"] == Ratio(1, 5)
+
+
+def test_known_stage_and_valuation_ratios_with_empty_denominators():
+    only_unknown = [_scored(Observed(), golden(**UNKNOWN_GOLD))]
+    r = aggregate(only_unknown).ratios
+    assert r["known_stage_accuracy"] == Ratio(0, 0)
+    assert r["valuation_accuracy"] == Ratio(0, 0)
+    assert r["stage_coverage"] == Ratio(0, 1)
+    assert r["valuation_coverage"] == Ratio(0, 1)
+    assert str(r["known_stage_accuracy"]) == "0/0 (n/a)"
 
 
 # ---- funding --------------------------------------------------------------------------------

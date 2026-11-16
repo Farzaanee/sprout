@@ -266,6 +266,31 @@ def stage_correct(observed: Observed, entry: GoldenEntry) -> bool:
     return got == entry.stage.value
 
 
+def known_stage_correct(observed: Observed, entry: GoldenEntry) -> bool | None:
+    """None where the reference stage is Unknown: abstaining there is not a measurable hit."""
+    if entry.stage == Stage.UNKNOWN:
+        return None
+    return stage_correct(observed, entry)
+
+
+def stage_populated(observed: Observed) -> bool:
+    return observed.value("stage") is not None
+
+
+def valuation_correct(observed: Observed, entry: GoldenEntry) -> bool | None:
+    """None without a reference valuation; a null submitted valuation is a miss."""
+    if entry.valuation is None or entry.valuation.amount_million_usd is None:
+        return None
+    got = observed.value(VALUATION)
+    if got is None:
+        return False
+    return _close(Decimal(got), Decimal(entry.valuation.amount_million_usd))
+
+
+def valuation_populated(observed: Observed) -> bool:
+    return observed.value(VALUATION) is not None
+
+
 def funding_match(observed: Observed, entry: GoldenEntry) -> tuple[bool, bool] | None:
     """(exact, within 10 percent) of the observed last round against the golden one.
 
@@ -367,6 +392,10 @@ class EntryScore:
     classifier_broken: bool | None = None
     business_status_ok: bool | None = None
     stage_ok: bool | None = None
+    known_stage_ok: bool | None = None
+    stage_populated: bool | None = None
+    valuation_ok: bool | None = None
+    valuation_populated: bool | None = None
     funding_exact: bool | None = None
     funding_within: bool | None = None
     unexpected_disclosure: bool | None = None
@@ -426,6 +455,10 @@ def score_entry(observed: Observed, entry: GoldenEntry, page_text: PageText) -> 
         classifier_broken=None if change is None else change[1],
         business_status_ok=business_status_correct(observed, entry) if submitted else None,
         stage_ok=stage_correct(observed, entry) if submitted else None,
+        known_stage_ok=known_stage_correct(observed, entry) if submitted else None,
+        stage_populated=stage_populated(observed) if submitted else None,
+        valuation_ok=valuation_correct(observed, entry) if submitted else None,
+        valuation_populated=valuation_populated(observed) if submitted else None,
         funding_exact=None if funding is None else funding[0],
         funding_within=None if funding is None else funding[1],
         unexpected_disclosure=unexpected_disclosure(observed, entry) if submitted else None,
@@ -494,6 +527,10 @@ def aggregate(scores: Sequence[EntryScore]) -> Scores:
         "category_accuracy": _ratio(s.category_ok for s in scores),
         "business_status_accuracy": _ratio(s.business_status_ok for s in scores),
         "stage_accuracy": _ratio(s.stage_ok for s in scores),
+        "known_stage_accuracy": _ratio(s.known_stage_ok for s in scores),
+        "stage_coverage": _ratio(s.stage_populated for s in scores),
+        "valuation_accuracy": _ratio(s.valuation_ok for s in scores),
+        "valuation_coverage": _ratio(s.valuation_populated for s in scores),
         "funding_exact": _ratio(s.funding_exact for s in scores),
         "funding_within_10pct": _ratio(s.funding_within for s in scores),
         "unexpected_disclosure": _ratio(s.unexpected_disclosure for s in scores),
