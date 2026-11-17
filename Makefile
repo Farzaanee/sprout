@@ -1,4 +1,6 @@
-.PHONY: run ingest test lint hooks snapshot amend-push
+KEEP_BRANCH ?= $(shell git branch --show-current)
+
+.PHONY: run ingest test lint hooks snapshot amend-push del-branch
 
 run:
 	uv run streamlit run streamlit_app.py
@@ -28,3 +30,6 @@ eval-rec:
 
 eval-all:
 	uv run python -m evals.run_evals --split all --injection --check-urls --calibrate --record
+
+del-branch:
+	@git switch "$(KEEP_BRANCH)" && git for-each-ref --format='%(refname:short)' refs/heads | grep -vFx "$(KEEP_BRANCH)" | while IFS= read -r branch; do git branch -D "$$branch"; done

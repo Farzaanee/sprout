@@ -242,7 +242,7 @@ Not measured: step logging's runtime overhead (argued from the design: no extra 
 
 ## What Phase 6 uses from this phase
 
-- Each Phase 6 agent run (`classify`, `news`, `verify`) gets its own `run_log` row with its own `kind`, so `run_log_step` is reused unchanged and needs no agent column; `failure_category` is a free-text column, but Phase 6 adds no category (a 429 stays `api_error`, with `stats.error_type` carrying `RateLimitError`; the shared run-recording helper writes `error_type`).
+- Each Phase 6 news agent run gets its own `run_log` row with its own `kind`, so `run_log_step` is reused unchanged and needs no agent column; `failure_category` is a free-text column, but Phase 6 adds no category (a 429 stays `api_error`, with `stats.error_type` carrying `RateLimitError`; the shared run-recording helper writes `error_type`).
 - Steps are written once per run by that worker's own session after `run_agent` returns, so concurrent workers never interleave rows in one run; the orchestrator keeps commits short (one small batch per run).
 - No `on_step` callback is added: per-company completion lines are the progress signal.
 - Per-company status is derived from `run_log` (A23, D32) over the built, indexed `run_log.company_id`, as described in the [data model](../2.%20data-model.md#per-company-status-derived-not-stored) and the [Phase 6 page](phase-6-multi-agent.md#selector-status-and-retry).

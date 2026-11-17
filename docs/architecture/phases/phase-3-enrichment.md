@@ -340,7 +340,7 @@ Work that is not done or not verified, as of the end of Phase 4. Nothing here bl
 | No per-run fetch cap | Bounded only by the iteration cap (the batch-level USD cap is `BatchBudget`, Phase 5, D24) |
 | No winning-value rule | A re-run can leave both a valued and a NULL-value fact for a field, and stale facts from URLs no longer cited remain (A6). Must exist before Phase 7 reads facts. `--reset` is the manual workaround |
 | Non-USD funding amounts sometimes left null | Safe (null, not a guess) but understates funding coverage; the note carries the original figure |
-| Snippet-only claims cannot be audited | Search results arrive encrypted; the code caps them at `medium` and requires a note; the Phase 6 verifier is the real check |
+| Snippet-only claims cannot be audited | Search results arrive encrypted; the code caps them at `medium` and requires a note |
 | Claimed website can be wrong | Stored at medium confidence with a caveat in the note (Airborne Robotics returned another company's content) |
 | Latent nit in `_simplify` | It drops any dict key named `title`, `default`, `minimum`, `format` and so on, including a `CompanyProfile` field with such a name inside `properties`. No current field collides |
 | Older facts under superseded field or stage names | Re-run `sprout.enrich <number> --reset` to refresh |

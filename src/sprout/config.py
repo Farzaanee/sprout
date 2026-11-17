@@ -11,8 +11,8 @@ DEFAULT_SNAPSHOT_DB_PATH = "data/sprout_snapshot.db"
 DEFAULT_EVAL_DB_PATH = "data/eval.db"
 DEFAULT_CACHE_DIR = ".cache/http"
 
-# Cheap model for bulk extraction/classification; stronger one for orchestration,
-# verification and synthesis. IDs are exact strings from the Anthropic model table.
+# Cheap model for bulk extraction; stronger one for the eval judge and `--strong` runs.
+# IDs are exact strings from the Anthropic model table.
 DEFAULT_BULK_MODEL = "claude-haiku-5-5"
 DEFAULT_STRONG_MODEL = "claude-sonnet-5-5"
 

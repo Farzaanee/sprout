@@ -14,7 +14,7 @@
 | Timezone-naive datetimes | Rejected outright by this SQLModel version, so "UTC everywhere" has to be enforced from the first write. |
 | Web-scraping etiquette as security | Resolving every host, and every redirect hop, to a public IP blocks SSRF via DNS rebinding to loopback/private/metadata addresses, on top of honouring `robots.txt`. |
 | Paginating without a total count | `/advanced-search/companies` never reports a total result count, so paginating it has to treat "a page came back shorter than requested" as the only end-of-results signal, rather than computing how many pages are left. |
-| Taxonomy locked, left unwired | The `Category` taxonomy is deliberately locked in Phase 1 but left unwired through all of Phase 2: `ingest.py`/`candidates.py`/`db.py` never reference it, since the heuristic filter only produces uncategorised candidates by design. Assigning a category is Phase 6's job (a dedicated classifier agent), not something to bolt onto discovery early. |
+| Taxonomy locked, left unwired | The `Category` taxonomy is deliberately locked in Phase 1 but left unwired through all of Phase 2: `ingest.py`/`candidates.py`/`db.py` never reference it, since the heuristic filter only produces uncategorised candidates by design. Assigning a category is enrichment's job, not something to bolt onto candidate sourcing early. |
 
 Key files for this phase (`ingest.py`, `candidates.py`, `sources/*.py`) are documented in [architecture/phase-2-data-foundations.md](architecture/phase-2-data-foundations.md).
 

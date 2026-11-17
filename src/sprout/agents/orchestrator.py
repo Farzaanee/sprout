@@ -1,8 +1,8 @@
 """Pipeline orchestrator: `uv run python -m sprout.orchestrator`.
 
 Deterministic scheduling code (D27), not an LLM supervisor. It picks a working set of companies,
-works out which steps each needs from `run_log` (status.py), and runs enrich, classify, news and
-verify per company across a pool of workers (D38). `process_company` is the per-company seam: it
+works out which steps each needs from `run_log` (status.py), and runs enrich and news per
+company across a pool of workers (D38). `process_company` is the per-company seam: it
 never raises and never prints, so the eval runner and a later MCP server can call it.
 """
 
@@ -23,13 +23,11 @@ from typing import Any, Literal
 
 from sqlmodel import Session, col, select
 
-from sprout.agents.classify import CLASSIFY_BUDGET, classify_with_result
 from sprout.agents.common import AgentFailed, Deps
 from sprout.agents.enrich import DEFAULT_BUDGET as ENRICH_BUDGET
 from sprout.agents.enrich import CompanyNotFound, enrich_with_result, resolve_company
 from sprout.agents.loop import Budget, LoopResult, MessagesClient, make_client
 from sprout.agents.news import NEWS_BUDGET, collect_with_result
-from sprout.agents.verify import VERIFY_BUDGET, build_claims, verify_with_result
 from sprout.agents.website import SCREEN_BUDGET, screen_website
 from sprout.candidates import passes_prescreen
 from sprout.config import MissingConfigError, Settings, get_settings
@@ -60,14 +58,12 @@ ERROR_TEXT_CHARS = 200
 # Expected mean cost per step (cross-cutting 9), used only by --dry-run.
 ESTIMATED_STEP_USD = {
     "enrich": Decimal("0.026"),
-    "classify": Decimal("0.002"),
     "news": Decimal("0.014"),
-    "verify": Decimal("0.05"),
     "website": Decimal("0.01"),
 }
 
 StepState = Literal[
-    "ok", "failed", "skipped_fresh", "skipped_no_claims", "skipped_no_website",
+    "ok", "failed", "skipped_fresh", "skipped_no_website",
     "skipped_budget", "stopped"
 ]
 CompanyResult = Literal[
@@ -154,17 +150,11 @@ class CompanyOutcome:
 AgentCall = Callable[[Session, Company, Deps, Budget], LoopResult]
 
 
-def _verify(session: Session, company: Company, deps: Deps, budget: Budget) -> LoopResult:
-    return verify_with_result(session, company, deps, build_claims(session, company), budget)[1]
-
-
 # Per step: the default budget (each call's cap is clamped to the batch slice) and the call.
 AGENTS: dict[str, tuple[Budget, AgentCall]] = {
     "website": (SCREEN_BUDGET, screen_website),
     "enrich": (ENRICH_BUDGET, lambda s, c, d, b: enrich_with_result(s, c, d, b)[1]),
-    "classify": (CLASSIFY_BUDGET, lambda s, c, d, b: classify_with_result(s, c, d, b)[1]),
     "news": (NEWS_BUDGET, lambda s, c, d, b: collect_with_result(s, c, d, b)[1]),
-    "verify": (VERIFY_BUDGET, _verify),
 }
 
 
@@ -175,11 +165,8 @@ def _run_step(step: str, worker: Worker, company: Company, ctx: RunContext) -> S
     try:
         if ctx.stop.is_set():
             return StepOutcome(step, "stopped")
-        if step == "verify" and not build_claims(session, company):
-            return StepOutcome(step, "skipped_no_claims")
         budget, call = AGENTS[step]
-        model = ctx.settings.strong_model if step == "verify" else ctx.settings.bulk_model
-        deps = Deps(ctx.client, worker.fetcher, worker.ch, ctx.settings, model)
+        deps = Deps(ctx.client, worker.fetcher, worker.ch, ctx.settings, ctx.settings.bulk_model)
         for attempt in (1, 2):
             ctx.gate.wait(ctx.stop)
             if ctx.stop.is_set():
@@ -266,8 +253,6 @@ def process_company(
             outcomes.append(_run_step("enrich", worker, company, ctx))
             if outcomes[-1].state != "ok":
                 return _outcome(company_id, outcomes, exhausted=exhausted, no_profile=False)
-            # classify and verify describe an enrichment, so a new one makes them due again.
-            status, needed = _needed(session, company_id, wanted, ctx, force)
             needed = [s for s in needed if s != "enrich"]
         elif status.steps["enrich"].state not in ("fresh", "stale"):
             needed, no_profile = [], True
@@ -599,7 +584,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--max-total-usd",
         type=Decimal,
         default=Decimal("5.00"),
-        help="one cap over all enrich, classify, news and verify spend (default 5.00)",
+        help="one cap over all enrich and news spend (default 5.00)",
     )
     parser.add_argument("--stale-days", type=int, default=30, help="re-enrich after this many days")
     parser.add_argument("--news-stale-days", type=int, default=7)

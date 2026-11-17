@@ -29,20 +29,12 @@ from sprout.status import STEPS, CompanyStatus, StatusPolicy, StepStatus
 
 BULK, STRONG = "claude-haiku-5-5", "claude-sonnet-5-5"
 NOT_DISCLOSED = {"value": None, "source_url": None, "confidence": "low", "note": None}
-ALL_KINDS = [
-    RunKind.COMPANY_ENRICH,
-    RunKind.COMPANY_CLASSIFICATION,
-    RunKind.COMPANY_NEWS_MATCH,
-    RunKind.COMPANY_VERIFICATION,
-]
+ALL_KINDS = [RunKind.COMPANY_ENRICH, RunKind.COMPANY_NEWS_MATCH]
 SUBMIT_TOOLS = {
     "website": "submit_website",
     "enrich": "submit_profile",
-    "classify": "submit_classification",
     "news": "submit_news",
-    "verify": "submit_verification",
 }
-NO_CLAIMS = "NOCLAIMS AI LTD"
 
 
 def rate_limit_error():
@@ -84,9 +76,7 @@ class RoutingClient:
         slug = re.sub(r"\W+", "-", company.lower())
         url = f"https://news.example/{slug}"
         if agent == "enrich":
-            stage = NOT_DISCLOSED
-            if company != NO_CLAIMS:
-                stage = {"value": "Seed", "source_url": url, "confidence": "medium", "note": None}
+            stage = {"value": "Seed", "source_url": url, "confidence": "medium", "note": None}
             profile = {
                 "website": NOT_DISCLOSED,
                 "hq": NOT_DISCLOSED,
@@ -102,27 +92,15 @@ class RoutingClient:
                 "one_liner": NOT_DISCLOSED,
             }
             return server_search_turn([url], ("submit_profile", profile), input=1_000)
-        if agent == "classify":
-            args = {"category": Category.OTHER.value, "rationale": "Builds software."}
-            return tool_use_turn(("submit_classification", args), input=1_000)
-        if agent == "news":
-            entry = {
-                "url": url,
-                "title": f"{company} news",
-                "published": "2026-10-20",
-                "big": False,
-                "kind": None,
-                "summary": "Something happened.",
-            }
-            return server_search_turn([url], ("submit_news", {"entries": [entry]}), input=1_000)
-        verdict = {
-            "claim": "stage",
-            "verdict": "unverified",
-            "second_source_url": None,
-            "observed": "nothing found",
-            "quote": None,
+        entry = {
+            "url": url,
+            "title": f"{company} news",
+            "published": "2026-10-20",
+            "big": False,
+            "kind": None,
+            "summary": "Something happened.",
         }
-        return tool_use_turn(("submit_verification", {"verdicts": [verdict]}), input=1_000)
+        return server_search_turn([url], ("submit_news", {"entries": [entry]}), input=1_000)
 
     def agent_calls(self, agent, company=None):
         return [c for c in self.calls if c[0] == agent and company in (None, c[1])]
@@ -192,20 +170,18 @@ def ok_counts(engine):
 
 
 def test_every_step_runs_and_writes_its_rows_with_three_workers(settings, engine):
-    ids = add_companies(engine, "ACME AI LTD", "BETA AI LTD", NO_CLAIMS)
+    ids = add_companies(engine, "ACME AI LTD", "BETA AI LTD", "GAMMA AI LTD")
     client = RoutingClient()
     summary = invoke(settings, client, "--limit", "3", "--concurrency", "3")
 
     assert summary.exit_code == 0 and summary.stats["results"] == {"ok": 3}
     expected = {(i, k.value): 1 for i in ids for k in ALL_KINDS}
-    del expected[(ids[2], RunKind.COMPANY_VERIFICATION.value)]  # no claim, no run row, no cost
     assert ok_counts(engine) == expected
     models = {(agent, model) for agent, _, model in client.calls}
-    assert models == {
-        ("enrich", BULK), ("classify", BULK), ("news", BULK), ("verify", STRONG)
-    }  # fmt: skip
+    assert models == {("enrich", BULK), ("news", BULK)}
     with Session(engine) as session:
-        assert {c.category for c in session.exec(select(Company))} == {Category.OTHER.value}
+        categories = {c.category for c in session.exec(select(Company))}
+        assert categories == {Category.ENTERPRISE_SOFTWARE_AND_CLOUD.value}
 
     (batch,) = runs(engine, kind=RunKind.PIPELINE_RUN.value)
     stats = batch.stats
@@ -236,36 +212,36 @@ def test_resume_after_an_interrupt_repeats_no_completed_work(settings, engine):
     ids = add_companies(engine, "ACME AI LTD", "BETA AI LTD", "GAMMA AI LTD")
     stop = threading.Event()
     first = RoutingClient()
-    first.on_call = lambda n: stop.set() if n == 2 else None  # Ctrl-C during the second call
+    first.on_call = lambda n: stop.set() if n == 1 else None  # Ctrl-C during the first call
     summary = invoke(settings, first, "--limit", "3", "--concurrency", "1", stop=stop)
 
     assert summary.exit_code == 1 and summary.stats["stopped_early"] == "interrupted"
     assert summary.stats["results"] == {"partial": 1, "stopped": 2}
-    assert [c[0] for c in first.calls] == ["enrich", "classify"]  # both finished in flight
+    assert [c[0] for c in first.calls] == ["enrich"]  # finished in flight; news never started
 
     second = RoutingClient()
     resumed = invoke(settings, second, "--limit", "3", "--concurrency", "1")
     assert resumed.exit_code == 0 and resumed.stats["results"] == {"ok": 3}
     assert ok_counts(engine) == {(i, k.value): 1 for i in ids for k in ALL_KINDS}
-    assert len(first.calls) + len(second.calls) == 12  # every step exactly once
-    # the interrupted company's remaining steps ran second; its enrich and classify did not
-    assert [c[0] for c in second.calls if c[1] == "ACME AI LTD"] == ["news", "verify"]
+    assert len(first.calls) + len(second.calls) == 6  # every step exactly once
+    # the interrupted company's remaining step ran second; its enrich did not
+    assert [c[0] for c in second.calls if c[1] == "ACME AI LTD"] == ["news"]
 
 
 def test_a_failed_step_is_retried_by_the_next_invocation(settings, engine):
     (acme,) = add_companies(engine, "ACME AI LTD")
     first = RoutingClient()
-    first.script[("classify", "ACME AI LTD")] = [response([], "refusal")]
+    first.script[("news", "ACME AI LTD")] = [response([], "refusal")]
     summary = invoke(settings, first, "--limit", "1")
     assert summary.stats["results"] == {"partial": 1} and summary.exit_code == 1
-    classify = runs(engine, kind=RunKind.COMPANY_CLASSIFICATION.value)
-    assert [r.status for r in classify] == ["error"]
-    assert [c[0] for c in first.calls] == ["enrich", "classify", "news", "verify"]  # isolated
+    news = runs(engine, kind=RunKind.COMPANY_NEWS_MATCH.value)
+    assert [r.status for r in news] == ["error"]
+    assert [c[0] for c in first.calls] == ["enrich", "news"]
 
     second = RoutingClient()
     resumed = invoke(settings, second, "--limit", "1")
-    assert resumed.exit_code == 0 and [c[0] for c in second.calls] == ["classify"]
-    assert [r.status for r in runs(engine, kind=RunKind.COMPANY_CLASSIFICATION.value)] == [
+    assert resumed.exit_code == 0 and [c[0] for c in second.calls] == ["news"]
+    assert [r.status for r in runs(engine, kind=RunKind.COMPANY_NEWS_MATCH.value)] == [
         "error",
         "ok",
     ]
@@ -325,36 +301,34 @@ def test_real_website_screen_precedes_enrichment(settings, engine, monkeypatch, 
         worker = Worker(session, fetcher, None)
         outcome = process_company(worker, company_id, STEPS, context(settings, client))
     assert outcome.result == "ok"
-    assert [call[0] for call in client.calls] == [
-        "website", "website", "enrich", "classify", "news", "verify"
-    ]
+    assert [call[0] for call in client.calls] == ["website", "website", "enrich", "news"]
     assert len(runs(engine, kind=RunKind.COMPANY_WEBSITE_SCREEN.value)) == 1
 
 
 def test_three_failed_attempts_give_up_until_forced(settings, engine):
     add_companies(engine, "ACME AI LTD")
     client = RoutingClient()
-    client.script[("classify", "ACME AI LTD")] = [response([], "refusal")] * 3
+    client.script[("news", "ACME AI LTD")] = [response([], "refusal")] * 3
     for _ in range(3):
         assert invoke(settings, client, "--limit", "1").stats["results"] == {"partial": 1}
-    assert len(client.agent_calls("classify")) == 3
+    assert len(client.agent_calls("news")) == 3
 
     fourth = invoke(settings, client, "--limit", "1")
     assert fourth.stats["results"] == {"gave_up": 1} and fourth.exit_code == 1
-    assert len(client.agent_calls("classify")) == 3  # no attempt was made
+    assert len(client.agent_calls("news")) == 3  # no attempt was made
 
     forced = invoke(settings, client, "--limit", "1", "--force")
-    assert len(client.agent_calls("classify")) == 4 and forced.stats["results"] == {"ok": 1}
+    assert len(client.agent_calls("news")) == 4 and forced.stats["results"] == {"ok": 1}
 
 
 def test_an_api_error_never_exhausts_a_company(settings, engine):
     add_companies(engine, "ACME AI LTD")
     client = RoutingClient()
     error = anthropic.APIConnectionError(request=httpx.Request("POST", "https://x.example"))
-    client.script[("classify", "ACME AI LTD")] = [error] * 4
+    client.script[("news", "ACME AI LTD")] = [error] * 4
     for _ in range(4):
         assert invoke(settings, client, "--limit", "1").stats["results"] == {"partial": 1}
-    assert len(client.agent_calls("classify")) == 4
+    assert len(client.agent_calls("news")) == 4
 
 
 # ---- budget, 429, interrupt -------------------------------------------------------------------
@@ -444,33 +418,23 @@ def test_an_unexpected_exception_in_a_step_is_an_internal_error_outcome(
     def boom(*_args):
         raise RuntimeError("boom")
 
-    budget, _ = orch.AGENTS["classify"]
-    monkeypatch.setitem(orch.AGENTS, "classify", (budget, boom))
+    budget, _ = orch.AGENTS["news"]
+    monkeypatch.setitem(orch.AGENTS, "news", (budget, boom))
     outcome = process_company(
         worker_for(engine, settings), acme, STEPS, context(settings, RoutingClient())
     )
     assert outcome.result == "partial"
     by_step = {o.step: o for o in outcome.steps}
-    assert by_step["classify"].state == "failed"
-    assert by_step["classify"].failure_category == "internal_error"
-    assert by_step["news"].state == "ok"  # the failure was isolated
-
-
-def test_a_company_with_no_claims_skips_verify_without_a_run_row(settings, engine):
-    (acme,) = add_companies(engine, NO_CLAIMS)
-    outcome = process_company(
-        worker_for(engine, settings), acme, STEPS, context(settings, RoutingClient())
-    )
-    states = {o.step: o.state for o in outcome.steps}
-    assert outcome.result == "ok" and states["verify"] == "skipped_no_claims"
-    assert not runs(engine, kind=RunKind.COMPANY_VERIFICATION.value)
+    assert by_step["news"].state == "failed"
+    assert by_step["news"].failure_category == "internal_error"
+    assert by_step["enrich"].state == "ok"  # the failure was isolated
 
 
 def test_steps_restricts_what_may_run(settings, engine):
     add_companies(engine, "ACME AI LTD")
     client = RoutingClient()
-    invoke(settings, client, "--limit", "1", "--steps", "enrich,classify")
-    assert [c[0] for c in client.calls] == ["enrich", "classify"]
+    invoke(settings, client, "--limit", "1", "--steps", "enrich")
+    assert [c[0] for c in client.calls] == ["enrich"]
 
 
 # ---- startup: reaper, lock, config ------------------------------------------------------------
@@ -544,8 +508,8 @@ def test_dry_run_prints_the_plan_and_spends_nothing(settings, engine):
     args = orch._parse_args(["--limit", "2", "--dry-run"])
     summary = asyncio.run(orch.run(settings, args))  # no client, no key: none is needed
     assert summary.exit_code == 0
-    assert "ACME AI LTD" in summary.text and "needs: enrich,classify,news,verify" in summary.text
-    assert "estimated USD 0.20" in summary.text and "nothing was spent" in summary.text
+    assert "ACME AI LTD" in summary.text and "needs: enrich,news" in summary.text
+    assert "estimated USD 0.10" in summary.text and "nothing was spent" in summary.text
     assert runs(engine) == []
 
 
@@ -590,13 +554,13 @@ def status_of(company_id, **states):
 
 def test_order_of_work_is_failed_then_partial_then_never_then_stale(engine):
     statuses = {
-        1: status_of(1, enrich="fresh", classify="fresh", news="fresh", verify="fresh"),
-        2: status_of(2, enrich="stale", classify="stale"),
+        1: status_of(1, enrich="fresh", news="fresh"),
+        2: status_of(2, enrich="stale", news="stale"),
         3: status_of(3),
         4: status_of(4, enrich="fresh"),
-        5: status_of(5, enrich="fresh", classify="failed", news="fresh", verify="fresh"),
+        5: status_of(5, enrich="fresh", news="failed"),
         6: status_of(6, enrich="never"),
     }
     assert order_for_work([1, 2, 3, 4, 5, 6], statuses, STEPS) == [5, 4, 3, 6, 2, 1]
-    # outside the allowed steps, a failed classify no longer jumps the queue
-    assert order_for_work([4, 5], statuses, ("enrich", "news")) == [4, 5]
+    # outside the allowed steps, a failed news no longer jumps the queue
+    assert order_for_work([4, 5], statuses, ("enrich",)) == [4, 5]

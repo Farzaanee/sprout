@@ -1,7 +1,7 @@
 """What every agent shares: dependencies, the failure type and the recorded run.
 
 `run_recorded` is the logged_run + run_agent + stats + run_log_step block that used to live in
-`enrich.py`; the enrichment, classification, news and verification agents all call it.
+`enrich.py`; the enrichment and news agents both call it.
 """
 
 from collections.abc import Callable, Mapping

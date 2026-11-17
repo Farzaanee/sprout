@@ -19,7 +19,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import Session, col, select
+from sqlmodel import Session, select
 
 from evals.golden import EVALS_DIR, GOLDEN_PATH, GoldenEntry, GoldenError, load_golden
 from evals.injection import CaseResult, load_cases, run_case
@@ -42,9 +42,6 @@ from evals.metrics import (
     rebuild_ledger,
     score_all,
 )
-from sprout.agents.classify import CLASSIFY_BUDGET, classify_with_result
-from sprout.agents.classify import SYSTEM_PROMPT as CLASSIFY_PROMPT
-from sprout.agents.common import AgentFailed
 from sprout.agents.enrich import (
     DEFAULT_BUDGET,
     DEFAULT_EFFORT,
@@ -56,11 +53,9 @@ from sprout.agents.enrich import (
     resolve_company,
 )
 from sprout.agents.loop import Budget, MessagesClient, make_client
-from sprout.agents.verify import SYSTEM_PROMPT as VERIFY_PROMPT
-from sprout.agents.verify import VERIFY_BUDGET, build_claims, verify_with_result
 from sprout.config import DEFAULT_EVAL_DB_PATH, MissingConfigError, Settings, get_settings
 from sprout.costs import BatchBudget
-from sprout.db import Company, RunKind, RunLog, delete_profile, get_engine, init_db
+from sprout.db import Company, delete_profile, get_engine, init_db
 from sprout.sources import companies_house, web
 from sprout.sources.companies_house import CompaniesHouseClient
 from sprout.sources.http import FetchError
@@ -71,7 +66,6 @@ DEFAULT_MAX_TOTAL_USD = Decimal("1.50")
 RESULTS_PATH = EVALS_DIR / "results.md"
 NOISE_PP = 3.5  # a change smaller than this is within run-to-run noise (about one company's swing)
 JUDGED_FIELDS: tuple[Field, ...] = ("business_model", "target_user")
-AGENTS = ("classify", "verify")  # agents that can run on top of enrichment; news comes later
 COUNTS_COMMENT = re.compile(r"<!-- sprout-eval-counts (\{.*?\}) -->")
 
 
@@ -116,12 +110,6 @@ LABELS = {
     "unverifiable_funding": "Unverifiable funding",
     "source_ledger": "Source ledger membership",
     "thin_other": "Thin Other profiles",
-    "category_before_classifier": "Category accuracy before classifier",
-    "classifier_corrected": "Classifier corrected",
-    "classifier_broken": "Classifier broken",
-    "verifier_flagged_wrong": "Verifier flagged wrong claims",
-    "verifier_confirmed_right": "Verifier confirmed right claims",
-    "verifier_flagged_right": "Verifier wrongly flagged right claims",
 }
 
 
@@ -151,30 +139,10 @@ def open_services(settings: Settings, stack: ExitStack) -> Services:
 # ---- selection and enrichment ---------------------------------------------------------------
 
 
-def _agent_list(text: str) -> tuple[str, ...]:
-    names = tuple(n.strip() for n in text.split(",") if n.strip())
-    unknown = sorted(set(names) - set(AGENTS))
-    if unknown:
-        raise argparse.ArgumentTypeError(f"unknown agent {unknown}; choose from {list(AGENTS)}")
-    return names
-
-
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="evals.run_evals", description=__doc__)
     p.add_argument("--db", default=DEFAULT_DB, help="eval database (reset per run)")
     p.add_argument("--split", choices=["dev", "holdout", "all"], default="all")
-    p.add_argument(
-        "--agents",
-        type=_agent_list,
-        default=(),
-        help=f"comma-separated agents to run after enrichment ({', '.join(AGENTS)}); default none",
-    )
-    p.add_argument(
-        "--reuse-enrichment",
-        action="store_true",
-        help="keep the eval database and skip enrichment for entries that already have an ok "
-        "one; run only --agents on top",
-    )
     p.add_argument("--only", nargs="+", metavar="NAME_OR_NUMBER", help="re-run just these")
     p.add_argument("--limit", type=int, help="first N selected entries")
     p.add_argument("--strong", action="store_true", help="generate with the strong model")
@@ -217,64 +185,6 @@ def _enrich_entry(session: Session, company: Company, deps: Deps, budget: Budget
     except EnrichmentFailed as exc:
         return exc.cost_usd
     return result.cost_usd
-
-
-def _has_ok_enrichment(session: Session, company: Company) -> bool:
-    run = session.exec(
-        select(RunLog)
-        .where(RunLog.kind == RunKind.COMPANY_ENRICH.value, RunLog.company_id == company.id)
-        .order_by(col(RunLog.id).desc())
-    ).first()
-    return run is not None and run.status == "ok" and run.failure_category is None
-
-
-def _classify_entry(session: Session, company: Company, deps: Deps, budget: Budget) -> Decimal:
-    try:
-        return classify_with_result(session, company, deps, budget)[1].cost_usd
-    except AgentFailed as exc:
-        return exc.cost_usd
-
-
-def _verify_entry(session: Session, company: Company, deps: Deps, budget: Budget) -> Decimal:
-    """Verify with the strong model. A company with no claims costs nothing and leaves no run."""
-    claims = build_claims(session, company)
-    if not claims:
-        return Decimal(0)
-    strong = replace(deps, model=deps.settings.strong_model)
-    try:
-        return verify_with_result(session, company, strong, claims, budget)[1].cost_usd
-    except AgentFailed as exc:
-        return exc.cost_usd
-
-
-def _run_entry(
-    session: Session,
-    company: Company,
-    deps: Deps,
-    batch: BatchBudget,
-    args: argparse.Namespace,
-) -> tuple[Decimal, Decimal, Decimal]:
-    """Enrich (unless reusing an ok enrichment), then run the chosen agents; charge the batch.
-    Returns (enrichment, classifier, verifier) USD spent now. A failed enrichment skips the
-    agents."""
-    enrich_usd = classify_usd = verify_usd = Decimal(0)
-    if not (args.reuse_enrichment and _has_ok_enrichment(session, company)):
-        budget = Budget(
-            DEFAULT_BUDGET.max_iterations,
-            batch.clamp(args.max_usd),
-            max_repairs=DEFAULT_BUDGET.max_repairs,
-        )
-        enrich_usd = _enrich_entry(session, company, deps, budget)
-        batch.charge(enrich_usd)
-    if "classify" in args.agents and not batch.exhausted and _has_ok_enrichment(session, company):
-        budget = replace(CLASSIFY_BUDGET, max_usd=batch.clamp(CLASSIFY_BUDGET.max_usd))
-        classify_usd = _classify_entry(session, company, deps, budget)
-        batch.charge(classify_usd)
-    if "verify" in args.agents and not batch.exhausted and _has_ok_enrichment(session, company):
-        budget = replace(VERIFY_BUDGET, max_usd=batch.clamp(VERIFY_BUDGET.max_usd))
-        verify_usd = _verify_entry(session, company, deps, budget)
-        batch.charge(verify_usd)
-    return enrich_usd, classify_usd, verify_usd
 
 
 # ---- judge, liveness ------------------------------------------------------------------------
@@ -362,20 +272,12 @@ class Extras:
     liveness: Liveness | None = None
     injection: list[CaseResult] | None = None
     enrich_usd: Decimal = Decimal(0)
-    classify_usd: Decimal = Decimal(0)
-    verify_usd: Decimal = Decimal(0)
     judge_usd: Decimal = Decimal(0)
     injection_usd: Decimal = Decimal(0)
 
     @property
     def total_usd(self) -> Decimal:
-        return (
-            self.enrich_usd
-            + self.classify_usd
-            + self.verify_usd
-            + self.judge_usd
-            + self.injection_usd
-        )
+        return self.enrich_usd + self.judge_usd + self.injection_usd
 
 
 @dataclass(frozen=True)
@@ -388,10 +290,6 @@ class Metric:
 
 def _metrics(scores: Scores, extras: Extras) -> list[Metric]:
     rows = [Metric(k, LABELS[k], r) for k, r in scores.ratios.items()]
-    if "classifier_broken" in scores.ratios:
-        net = scores.ratios["classifier_corrected"].num - scores.ratios["classifier_broken"].num
-        broken = next(m for m in rows if m.key == "classifier_broken")
-        rows[rows.index(broken)] = replace(broken, note=f"; net {net:+d}")
     if scores.ledger_unverifiable:  # runs from before stats["sources"] existed
         ledger = next(m for m in rows if m.key == "source_ledger")
         rows[rows.index(ledger)] = replace(
@@ -459,20 +357,8 @@ def render_table(
         lines.append(
             f"| Cost per company | mean USD {mean:.4f}, max USD {worst:.4f} | n/a | report |"
         )
-    if scores.classify_cost_mean is not None and scores.classify_cost_max is not None:
-        lines.append(
-            f"| Classifier cost per company | mean USD {scores.classify_cost_mean:.4f}, "
-            f"max USD {scores.classify_cost_max:.4f} | n/a | report |"
-        )
-    if scores.verify_cost_mean is not None and scores.verify_cost_max is not None:
-        lines.append(
-            f"| Verifier cost per verified company | mean USD {scores.verify_cost_mean:.4f}, "
-            f"max USD {scores.verify_cost_max:.4f} | n/a | report |"
-        )
     breakdown = (
         f"enrichment {extras.enrich_usd:.4f}"
-        + (f", classify {extras.classify_usd:.4f}" if extras.classify_usd else "")
-        + (f", verify {extras.verify_usd:.4f}" if extras.verify_usd else "")
         + f", judge {extras.judge_usd:.4f}"
         + (f", injection {extras.injection_usd:.4f}" if extras.injection is not None else "")
     )
@@ -512,9 +398,6 @@ def render_misses(
                 f"funding: golden {_amount(entry.last_round.amount_million_usd)}; "
                 f"observed {_amount(got)} ({kind})"
             )
-        flagged = sum(v == "disagrees" for ok, v in es.verdict_checks if ok)
-        if flagged:
-            problems.append(f"verifier flagged {flagged} correct claim(s) as disagrees")
         if es.unexpected_disclosure:
             amounts = [
                 _amount(r.amount_million_usd) for r in observed.rounds if r.amount_million_usd
@@ -546,16 +429,8 @@ def _git_short_sha() -> str:
     return out.stdout.strip() or "unknown"
 
 
-def _prompt_hash(agents: Sequence[str]) -> str:
-    """Enrichment prompt hash, plus those of the agents in the agent set."""
-
-    def short(text: str) -> str:
-        return hashlib.sha256(text.encode()).hexdigest()[:8]
-
-    prompts = {"classify": CLASSIFY_PROMPT, "verify": VERIFY_PROMPT}
-    return short(SYSTEM_PROMPT) + "".join(
-        f" ({name} {short(text)})" for name, text in prompts.items() if name in agents
-    )
+def _prompt_hash() -> str:
+    return hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()[:8]
 
 
 def _label_dates(entries: Sequence[GoldenEntry]) -> str:
@@ -563,9 +438,8 @@ def _label_dates(entries: Sequence[GoldenEntry]) -> str:
     return dates[0] if len(dates) == 1 else f"{dates[0]} to {dates[-1]}"
 
 
-def previous_counts(path: Path, split: str, agents: Sequence[str] = ()) -> dict[str, Any] | None:
-    """Counts of the latest recorded full run on the same split and agent set (the baseline for
-    deltas). Runs recorded before `agents` existed were enrichment-only."""
+def previous_counts(path: Path, split: str) -> dict[str, Any] | None:
+    """Counts of the latest recorded full run on the same split (the baseline for deltas)."""
     if not path.exists():
         return None
     found = None
@@ -574,8 +448,7 @@ def previous_counts(path: Path, split: str, agents: Sequence[str] = ()) -> dict[
             counts = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        same_agents = list(counts.get("agents", [])) == list(agents)
-        if counts.get("full") and counts.get("split") == split and same_agents:
+        if counts.get("full") and counts.get("split") == split:
             found = counts
     return found
 
@@ -612,9 +485,6 @@ def _prepare_db(args: argparse.Namespace, settings: Settings) -> Path:
     if args.score_only:
         if not db.exists():
             raise RunnerError(f"--score-only needs an existing eval database, none at {db}")
-    elif args.reuse_enrichment:
-        if not db.exists():
-            raise RunnerError(f"--reuse-enrichment needs an existing eval database, none at {db}")
     elif not args.only:
         if db.resolve() == settings.db_path.resolve():
             raise RunnerError(f"refusing to reset the live database {db}; pass a separate --db")
@@ -624,8 +494,6 @@ def _prepare_db(args: argparse.Namespace, settings: Settings) -> Path:
 
 
 def run(args: argparse.Namespace, settings: Settings, services: Services) -> int:
-    if args.reuse_enrichment and not args.agents:
-        raise RunnerError("--reuse-enrichment needs --agents: there is nothing else to run")
     entries = select_entries(load_golden(GOLDEN_PATH), args)
     needs_llm = not args.score_only or not args.skip_judge or args.calibrate or args.injection
     if needs_llm:
@@ -637,7 +505,6 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
     init_db(engine)
     extras = Extras()
     skipped_numbers: set[str] = set()
-    spent_enriching = Decimal(0)
     client = services.client
 
     with Session(engine) as session:
@@ -653,14 +520,14 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
                 if batch.exhausted:
                     skipped_numbers.add(entry.company_number)
                     continue
-                enrich_usd, *agent_usd = _run_entry(
-                    session, companies[entry.company_number], deps, batch, args
+                budget = Budget(
+                    DEFAULT_BUDGET.max_iterations,
+                    batch.clamp(args.max_usd),
+                    max_repairs=DEFAULT_BUDGET.max_repairs,
                 )
-                spent_enriching += enrich_usd
-                print(
-                    f"[{i}/{len(entries)}] {entry.name}: USD {enrich_usd + sum(agent_usd):.4f}",
-                    file=sys.stderr,
-                )
+                enrich_usd = _enrich_entry(session, companies[entry.company_number], deps, budget)
+                batch.charge(enrich_usd)
+                print(f"[{i}/{len(entries)}] {entry.name}: USD {enrich_usd:.4f}", file=sys.stderr)
 
         pairs = [
             (e, o)
@@ -670,26 +537,7 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
         scored_numbers = {e.company_number for e, _ in pairs}
         not_run = [e for e in entries if e.company_number not in scored_numbers]
         scores = score_all(pairs, fetched_page_text(services.fetcher))
-        # Reused enrichments were paid for in an earlier run, so only count what was spent now.
-        extras.enrich_usd = (
-            spent_enriching
-            if args.reuse_enrichment
-            else sum((e.cost_usd or Decimal(0) for e in scores.entries), Decimal(0))
-        )
-        extras.classify_usd = sum(
-            (e.classify_cost_usd or Decimal(0) for e in scores.entries), Decimal(0)
-        )
-        extras.verify_usd = sum(
-            (e.verify_cost_usd or Decimal(0) for e in scores.entries), Decimal(0)
-        )
-        holds = {"classify": any(o.classified for _, o in pairs)}
-        holds["verify"] = any(o.verified for _, o in pairs)
-        unscored = [name for name, held in holds.items() if held and name not in args.agents]
-        if unscored:
-            raise RunnerError(
-                f"the eval database holds {', '.join(unscored)} runs; "
-                f"pass --agents {','.join(unscored)} to score them"
-            )
+        extras.enrich_usd = sum((e.cost_usd or Decimal(0) for e in scores.entries), Decimal(0))
         ch_names = {n: c.name for n, c in companies.items()}
 
         spent_before = batch.spent
@@ -725,7 +573,7 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
     subset = bool(args.only) or args.limit is not None
     full = complete and not subset
     evaluate = full and args.split == "all"
-    previous = previous_counts(RESULTS_PATH, args.split, args.agents)
+    previous = previous_counts(RESULTS_PATH, args.split)
     table = render_table(scores, extras, previous, evaluate)
     failed = [k for k, g in GATES.items() if evaluate and not g.passes(scores.ratios[k])]
 
@@ -745,8 +593,7 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
     calibration_only = args.calibrate and args.skip_judge
     sections = [
         f"## {datetime.now(UTC):%Y-%m-%d} | {_git_short_sha()} | {model} | effort {args.effort} "
-        f"| prompt {_prompt_hash(args.agents)} | agents {','.join(args.agents) or 'none'}"
-        f"{' (reused enrichment)' if args.reuse_enrichment else ''} | split {args.split} "
+        f"| prompt {_prompt_hash()} | split {args.split} "
         f"| scored {scores.scored} of {len(entries)}",
         f"Labels: verified, dated {_label_dates(entries)}. Judge model {settings.strong_model}"
         f"{judge_note}. Eval database {db}.",
@@ -780,8 +627,6 @@ def run(args: argparse.Namespace, settings: Settings, services: Services) -> int
     if args.record:
         counts = {
             "split": args.split,
-            "agents": list(args.agents),
-            "reuse_enrichment": args.reuse_enrichment,
             "full": full,
             **scores.counts(),
         }

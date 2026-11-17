@@ -27,9 +27,7 @@ from sprout.status import (
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
 POLICY = StatusPolicy()
 ENRICH = RunKind.COMPANY_ENRICH.value
-CLASSIFY = RunKind.COMPANY_CLASSIFICATION.value
 NEWS = RunKind.COMPANY_NEWS_MATCH.value
-VERIFY = RunKind.COMPANY_VERIFICATION.value
 
 
 @pytest.fixture
@@ -163,37 +161,9 @@ def test_ok_after_failures_is_fresh(session, company):
     assert got.failed_attempts == 0
 
 
-@pytest.mark.parametrize("kind,name", [(CLASSIFY, "classify"), (VERIFY, "verify")])
-def test_classify_and_verify_freshness_follows_newest_ok_enrich(session, company, kind, name):
-    add_run(session, company, ENRICH, days_ago=10)
-    add_run(session, company, kind, days_ago=9)
-    assert step(session, company, name).state == "fresh"
-    # no TTL of their own: still fresh long after, as long as the enrichment did not change
-    add_run(session, company, ENRICH, days_ago=0.5)  # re-enrich after the step ran
-    assert step(session, company, name).state == "stale"
-    add_run(session, company, kind, days_ago=0.4)
-    assert step(session, company, name).state == "fresh"
-
-
-def test_classify_without_ttl_stays_fresh_when_enrich_is_stale(session, company):
-    add_run(session, company, ENRICH, days_ago=40)
-    add_run(session, company, CLASSIFY, days_ago=39)
-    status = company_statuses(session, [company.id], POLICY, NOW)[company.id]
-    assert status.steps["enrich"].state == "stale"
-    assert status.steps["classify"].state == "fresh"
-
-
-def test_failed_enrich_attempt_does_not_make_classify_stale(session, company):
-    add_run(session, company, ENRICH, days_ago=10)
-    add_run(session, company, CLASSIFY, days_ago=9)
-    add_run(session, company, ENRICH, days_ago=1, category="invalid_output", status="error")
-    assert step(session, company, "classify").state == "fresh"
-
-
 def test_cost_sums_stats_over_all_pipeline_rows(session, company):
     add_run(session, company, ENRICH, cost=0.12)
-    add_run(session, company, CLASSIFY, cost=0.004)
-    add_run(session, company, NEWS)  # no cost recorded
+    add_run(session, company, NEWS, cost=0.004)
     add_run(session, company, RunKind.COMPANY_WEBSITE_SCREEN.value, cost=0.01)
     other = Company(company_number="87654321", name="OTHER LTD")
     session.add(other)
@@ -210,7 +180,7 @@ def test_empty_ids(session):
 
 def test_reaper_marks_old_running_rows_and_spares_young_and_batch(session, company):
     old = add_run(session, company, ENRICH, days_ago=1, status="running")
-    young = add_run(session, company, CLASSIFY, days_ago=0.01, status="running")
+    young = add_run(session, company, NEWS, days_ago=0.01, status="running")
     batch = RunLog(
         kind=RunKind.NEWS_INGEST.value, started_at=NOW - timedelta(days=2), status="running"
     )

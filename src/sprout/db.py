@@ -37,8 +37,6 @@ class RunKind(StrEnum):
     COMPANIES_INGEST = "companies_ingest"
     COMPANY_ENRICH = "company_enrich"
     COMPANY_WEBSITE_SCREEN = "company_website_screen"
-    COMPANY_CLASSIFICATION = "company_classification"
-    COMPANY_VERIFICATION = "company_verification"
     COMPANY_NEWS_MATCH = "company_news_match"
     PIPELINE_RUN = "pipeline_run"
 
@@ -55,7 +53,7 @@ class Company(SQLModel, table=True):
     incorporated: date | None = None
     sic_codes: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     locality: str | None = None
-    # A models.Category value; NULL means not yet classified (distinct from "Other").
+    # A models.Category value; NULL means no enrichment has set one yet (distinct from "Other").
     category: str | None = None
     candidate_score: int = 0
     matched_keywords: list[str] = Field(
@@ -427,8 +425,7 @@ class _Round(Protocol):
 def latest_round[R: _Round](rounds: Iterable[R]) -> R | None:
     """The D22 latest round: the latest announced; undated or tied rounds fall back to the highest
     stage. A round with a null amount still wins: the agent said the latest amount is unknown,
-    which is a miss, not a reason to look at an older round. Shared by the evals and the verifier,
-    so both judge the same round."""
+    which is a miss, not a reason to look at an older round. Shared with the evals."""
     return max(
         rounds,
         key=lambda r: (r.announced or date.min, _STAGE_RANK.get(r.stage, -1)),
@@ -625,81 +622,4 @@ def save_profile(session: Session, company: Company, profile: CompanyProfile) ->
     save_funding_rounds(session, company.id, profile.funding_rounds)
     company.category = profile.category.value
     session.add(company)
-    session.flush()
-
-
-# ---- verification (D40) ---------------------------------------------------------------------
-
-VERIFICATION_PREFIX = "verification:"
-DISPUTE_MARKER = "Disputed by "
-_LOWER_ONE_STEP = {"high": "medium", "medium": "low", "low": "low"}
-# The fact field behind each claim the verifier can check; `latest_round` is a funding_round row.
-CLAIM_FACT_FIELDS = {"stage": "stage", "total_raised": "total_raised_million_usd"}
-
-
-def claim_row(session: Session, company_id: int, claim: str) -> Fact | FundingRoundRow | None:
-    """The row a verification claim is about: the winning valued fact, or the D22 latest round."""
-    if claim == "latest_round":
-        rounds = session.exec(
-            select(FundingRoundRow).where(FundingRoundRow.company_id == company_id)
-        ).all()
-        return latest_round(rounds)
-    field = CLAIM_FACT_FIELDS[claim]
-    facts = session.exec(
-        select(Fact).where(Fact.company_id == company_id, Fact.field == field)
-    ).all()
-    winner = winning_facts(facts).get(field)
-    return winner if winner is not None and winner.value_json is not None else None
-
-
-def without_dispute(note: str | None) -> str | None:
-    """`note` as enrichment wrote it, before any `Disputed by <url>: ...` suffix."""
-    if note is None:
-        return None
-    return note.split(f" {DISPUTE_MARKER}", 1)[0].removeprefix(DISPUTE_MARKER).strip() or None
-
-
-def apply_verification(
-    session: Session,
-    company_id: int,
-    claim: str,
-    *,
-    verdict: str,
-    source_url: str | None,
-    observed: str | None,
-    quote: str | None,
-) -> None:
-    """Record a verifier verdict. Never changes a value (D40): `confirmed` raises the claim row's
-    confidence to high, `disagrees` lowers it one step and appends `Disputed by <url>: <observed>`
-    to its note, `unverified` leaves it alone. Every verdict also becomes the claim's one
-    `verification:<claim>` fact (NULL value for `unverified`). Re-applying a verdict is a no-op."""
-    row = claim_row(session, company_id, claim)
-    if row is not None and verdict == "confirmed":
-        row.confidence = Confidence.HIGH.value
-    elif row is not None and verdict == "disagrees":
-        marker = f"{DISPUTE_MARKER}{source_url}"
-        if marker not in (row.note or ""):
-            row.confidence = _LOWER_ONE_STEP[row.confidence]
-            dispute = f"{marker}: {observed}" if observed else marker
-            row.note = f"{row.note} {dispute}" if row.note else dispute
-    if row is not None:
-        session.add(row)
-
-    field = f"{VERIFICATION_PREFIX}{claim}"
-    for old in session.exec(select(Fact).where(Fact.company_id == company_id, Fact.field == field)):
-        session.delete(old)
-    session.flush()
-    session.add(
-        Fact(
-            company_id=company_id,
-            field=field,
-            value_json=None
-            if verdict == "unverified"
-            else to_json({"verdict": verdict, "observed": observed}).decode(),
-            source_url=source_url,
-            retrieved_at=utcnow(),
-            confidence=Confidence.LOW.value if verdict == "unverified" else Confidence.MEDIUM.value,
-            note=quote,
-        )
-    )
     session.flush()

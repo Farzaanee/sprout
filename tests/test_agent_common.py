@@ -50,7 +50,7 @@ def record(session, company, client, persist, accept=True, **kwargs):
     return run_recorded(
         session,
         company,
-        RunKind.COMPANY_CLASSIFICATION,
+        RunKind.COMPANY_NEWS_MATCH,
         deps,
         system="sys",
         messages=[{"role": "user", "content": "go"}],
@@ -69,7 +69,7 @@ def test_success_records_run_steps_and_persists_inside_the_run(session, company)
     result = record(session, company, client, seen.append)
     assert seen == ["A"] and result.payload == "A"
     run = session.exec(select(RunLog)).one()
-    assert run.kind == "company_classification" and run.status == "ok"
+    assert run.kind == "company_news_match" and run.status == "ok"
     assert run.company_id == company.id and run.model == MODEL and run.iterations == 1
     assert run.stats["stop"] == "submitted" and run.stats["error_type"] is None
     assert len(session.exec(select(RunLogStep)).all()) == 1

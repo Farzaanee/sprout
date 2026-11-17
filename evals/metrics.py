@@ -18,7 +18,6 @@ from sqlmodel import Session, col, select
 from evals.golden import GoldenEntry
 from sprout.agents.tools import SourceLedger, fetch_page_view
 from sprout.db import (
-    VERIFICATION_PREFIX,
     Company,
     Fact,
     FundingRoundRow,
@@ -26,7 +25,6 @@ from sprout.db import (
     RunLog,
     latest_round,
     winning_facts,
-    without_dispute,
 )
 from sprout.models import Stage
 from sprout.sources.http import FetchError
@@ -132,15 +130,6 @@ class Observed:
     # None: the run predates `stats["sources"]`, so ledger and fabrication checks cannot run.
     sources: tuple[tuple[str, bool], ...] | None = None
     category: str | None = None
-    # Set when a classification run came after the latest enrichment: `category` is then the
-    # classifier's label and `previous_category` the one enrichment chose.
-    classified: bool = False
-    previous_category: str | None = None
-    classify_cost_usd: Decimal | None = None
-    # Set when an ok verification run came after the latest enrichment: (claim, verdict) pairs.
-    verified: bool = False
-    verdicts: tuple[tuple[str, str], ...] = ()
-    verify_cost_usd: Decimal | None = None
     facts: dict[str, ObservedFact] = field(default_factory=dict)  # winning fact per field
     all_facts: tuple[ObservedFact, ...] = ()
     rounds: tuple[ObservedRound, ...] = ()
@@ -152,7 +141,7 @@ class Observed:
 
 def _observed_fact(row: Fact) -> ObservedFact:
     value = None if row.value_json is None else json.loads(row.value_json)
-    return ObservedFact(row.field, value, row.source_url, without_dispute(row.note))
+    return ObservedFact(row.field, value, row.source_url, row.note)
 
 
 def _sources_of(stats: dict[str, Any]) -> tuple[tuple[str, bool], ...] | None:
@@ -177,12 +166,7 @@ def read_observed(session: Session, entry: GoldenEntry) -> Observed:
     ).first()
     if company is None or company.id is None:
         return Observed()
-    # Verification facts carry the second source, not the profile's: they are not cited facts.
-    rows = [
-        r
-        for r in session.exec(select(Fact).where(Fact.company_id == company.id)).all()
-        if not r.field.startswith(VERIFICATION_PREFIX)
-    ]
+    rows = session.exec(select(Fact).where(Fact.company_id == company.id)).all()
     winners = winning_facts(rows)
     rounds = session.exec(
         select(FundingRoundRow).where(FundingRoundRow.company_id == company.id)
@@ -192,33 +176,13 @@ def read_observed(session: Session, entry: GoldenEntry) -> Observed:
         "facts": {name: _observed_fact(row) for name, row in winners.items()},
         "all_facts": tuple(_observed_fact(row) for row in rows),
         "rounds": tuple(
-            ObservedRound(
-                r.stage, r.amount_million_usd, r.announced, r.source_url, without_dispute(r.note)
-            )
+            ObservedRound(r.stage, r.amount_million_usd, r.announced, r.source_url, r.note)
             for r in rounds
         ),
     }
     run = _latest_run(session, company, RunKind.COMPANY_ENRICH)
     if run is None:
         return Observed(**common)
-    classification = _latest_run(session, company, RunKind.COMPANY_CLASSIFICATION)
-    if classification is not None and classification.id > run.id:  # type: ignore[operator]
-        stats = classification.stats or {}
-        cost = stats.get("cost_usd")
-        common["classify_cost_usd"] = None if cost is None else Decimal(str(cost))
-        if classification.status == "ok" and classification.failure_category is None:
-            common["classified"] = True
-            common["previous_category"] = stats.get("previous_category")
-    verification = _latest_run(session, company, RunKind.COMPANY_VERIFICATION)
-    if verification is not None and verification.id > run.id:  # type: ignore[operator]
-        stats = verification.stats or {}
-        cost = stats.get("cost_usd")
-        common["verify_cost_usd"] = None if cost is None else Decimal(str(cost))
-        if verification.status == "ok" and verification.failure_category is None:
-            common["verified"] = True
-            common["verdicts"] = tuple(
-                (v["claim"], v["verdict"]) for v in stats.get("verdicts", [])
-            )
     stats = run.stats or {}
     cost = stats.get("cost_usd")
     return Observed(
@@ -235,7 +199,7 @@ def read_observed(session: Session, entry: GoldenEntry) -> Observed:
 
 # ---- last round (D22) -----------------------------------------------------------------------
 
-last_round = latest_round  # the D22 rule lives in db.py, shared with the verifier
+last_round = latest_round  # the D22 rule lives in db.py
 
 
 # ---- per-entry scoring ----------------------------------------------------------------------
@@ -243,16 +207,6 @@ last_round = latest_round  # the D22 rule lives in db.py, shared with the verifi
 
 def category_correct(observed: Observed, entry: GoldenEntry) -> bool:
     return observed.category in entry.categories
-
-
-def classifier_change(observed: Observed, entry: GoldenEntry) -> tuple[bool, bool] | None:
-    """(corrected, broken) by the classifier: wrong before and right after, and the reverse.
-    None unless the entry was classified, so the metric applies only where a before exists."""
-    if not observed.classified or observed.previous_category is None:
-        return None
-    before = observed.previous_category in entry.categories
-    after = category_correct(observed, entry)
-    return (after and not before, before and not after)
 
 
 def business_status_correct(observed: Observed, entry: GoldenEntry) -> bool:
@@ -387,9 +341,6 @@ class EntryScore:
     api_error: bool
     repaired: bool
     category_ok: bool | None = None
-    category_before_ok: bool | None = None  # enrichment's label, for classified entries
-    classifier_corrected: bool | None = None
-    classifier_broken: bool | None = None
     business_status_ok: bool | None = None
     stage_ok: bool | None = None
     known_stage_ok: bool | None = None
@@ -405,26 +356,6 @@ class EntryScore:
     ledger_cited: int = 0
     ledger_unverifiable: int = 0  # cited URLs of a run with no recorded sources
     cost_usd: Decimal | None = None
-    classify_cost_usd: Decimal | None = None
-    # (claim was golden-right, verdict) for each verified claim that has a golden label
-    verdict_checks: tuple[tuple[bool, str], ...] = ()
-    verify_cost_usd: Decimal | None = None
-
-
-def claim_correct(claim: str, observed: Observed, entry: GoldenEntry) -> bool | None:
-    """Whether the profile's `claim` matches the golden entry; None where no label exists
-    (total raised, or a golden entry with no round). Funding is right within 10 percent (D22)."""
-    if claim == "stage":
-        return stage_correct(observed, entry)
-    if claim == "latest_round":
-        funding = funding_match(observed, entry)
-        return None if funding is None else funding[1]
-    return None
-
-
-def verdict_checks(observed: Observed, entry: GoldenEntry) -> tuple[tuple[bool, str], ...]:
-    checks = ((claim_correct(c, observed, entry), v) for c, v in observed.verdicts)
-    return tuple((right, verdict) for right, verdict in checks if right is not None)
 
 
 def score_entry(observed: Observed, entry: GoldenEntry, page_text: PageText) -> EntryScore:
@@ -432,7 +363,6 @@ def score_entry(observed: Observed, entry: GoldenEntry, page_text: PageText) -> 
     ledger = None if observed.sources is None else rebuild_ledger(observed.sources)
     urls = cited_urls(observed)
     funding = funding_match(observed, entry) if submitted else None
-    change = classifier_change(observed, entry) if submitted else None
     cache: dict[str, str | None] = {}
 
     def cached_text(url: str) -> str | None:
@@ -448,11 +378,6 @@ def score_entry(observed: Observed, entry: GoldenEntry, page_text: PageText) -> 
         api_error=observed.failure_category == "api_error",
         repaired=(observed.repairs or 0) > 0,
         category_ok=category_correct(observed, entry) if submitted else None,
-        category_before_ok=None
-        if change is None
-        else observed.previous_category in entry.categories,
-        classifier_corrected=None if change is None else change[0],
-        classifier_broken=None if change is None else change[1],
         business_status_ok=business_status_correct(observed, entry) if submitted else None,
         stage_ok=stage_correct(observed, entry) if submitted else None,
         known_stage_ok=known_stage_correct(observed, entry) if submitted else None,
@@ -468,9 +393,6 @@ def score_entry(observed: Observed, entry: GoldenEntry, page_text: PageText) -> 
         ledger_cited=0 if ledger is None else len(urls),
         ledger_unverifiable=len(urls) if ledger is None else 0,
         cost_usd=observed.cost_usd,
-        classify_cost_usd=observed.classify_cost_usd,
-        verdict_checks=verdict_checks(observed, entry) if submitted else (),
-        verify_cost_usd=observed.verify_cost_usd,
     )
 
 
@@ -488,10 +410,6 @@ class Scores:
     cost_mean: Decimal | None
     cost_max: Decimal | None
     entries: tuple[EntryScore, ...] = ()
-    classify_cost_mean: Decimal | None = None
-    classify_cost_max: Decimal | None = None
-    verify_cost_mean: Decimal | None = None
-    verify_cost_max: Decimal | None = None
 
     def counts(self) -> dict[str, Any]:
         out: dict[str, Any] = {"scored": self.scored}
@@ -499,12 +417,6 @@ class Scores:
         out["ledger_unverifiable"] = self.ledger_unverifiable
         out["cost_mean_usd"] = None if self.cost_mean is None else str(self.cost_mean)
         out["cost_max_usd"] = None if self.cost_max is None else str(self.cost_max)
-        if self.classify_cost_mean is not None:
-            out["classify_cost_mean_usd"] = str(self.classify_cost_mean)
-            out["classify_cost_max_usd"] = str(self.classify_cost_max)
-        if self.verify_cost_mean is not None:
-            out["verify_cost_mean_usd"] = str(self.verify_cost_mean)
-            out["verify_cost_max_usd"] = str(self.verify_cost_max)
         return out
 
 
@@ -541,19 +453,6 @@ def aggregate(scores: Sequence[EntryScore]) -> Scores:
         ),
         "thin_other": Ratio(sum(bool(s.thin_other) for s in submitted), len(submitted)),
     }
-    classify_costs = [s.classify_cost_usd for s in scores if s.classify_cost_usd is not None]
-    if classify_costs:  # a classifier ran: report its before/after next to the (final) accuracy
-        ratios["category_before_classifier"] = _ratio(s.category_before_ok for s in scores)
-        ratios["classifier_corrected"] = _ratio(s.classifier_corrected for s in scores)
-        ratios["classifier_broken"] = _ratio(s.classifier_broken for s in scores)
-    verify_costs = [s.verify_cost_usd for s in scores if s.verify_cost_usd is not None]
-    if verify_costs:  # a verifier ran: how it judged claims the golden set calls right or wrong
-        checks = [c for s in scores for c in s.verdict_checks]
-        wrong = [verdict for ok, verdict in checks if not ok]
-        right = [verdict for ok, verdict in checks if ok]
-        ratios["verifier_flagged_wrong"] = Ratio(wrong.count("disagrees"), len(wrong))
-        ratios["verifier_confirmed_right"] = Ratio(right.count("confirmed"), len(right))
-        ratios["verifier_flagged_right"] = Ratio(right.count("disagrees"), len(right))
     return Scores(
         scored=total,
         ratios=ratios,
@@ -561,14 +460,6 @@ def aggregate(scores: Sequence[EntryScore]) -> Scores:
         cost_mean=sum(costs, Decimal(0)) / len(costs) if costs else None,
         cost_max=max(costs, default=None),
         entries=tuple(scores),
-        classify_cost_mean=sum(classify_costs, Decimal(0)) / len(classify_costs)
-        if classify_costs
-        else None,
-        classify_cost_max=max(classify_costs, default=None),
-        verify_cost_mean=sum(verify_costs, Decimal(0)) / len(verify_costs)
-        if verify_costs
-        else None,
-        verify_cost_max=max(verify_costs, default=None),
     )
 
 

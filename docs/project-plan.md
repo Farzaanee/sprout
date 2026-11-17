@@ -15,26 +15,26 @@ An agent system that discovers UK AI startups, groups them by sector (AI models,
 
 ## Data strategy
 No free, complete "UK AI startups + funding" dataset exists (Crunchbase, Dealroom, Beauhurst are paid or ToS-restricted), so Sprout builds one from public sources:
-- **Discovery:** Companies House API (free; SIC codes 62xxx/63xxx, incorporation date, name/description heuristics), startup lists (Sifted, UKTN, investor portfolio pages such as Seedcamp/Balderton/Accel, Wikipedia/Tech Nation lists), news RSS feeds.
+- **Candidate sourcing:** Companies House API (free; SIC codes 62xxx/63xxx, incorporation date, name/description heuristics) and news RSS feeds.
 - **Enrichment:** company website plus web search/fetch (Claude's server-side `web_search`/`web_fetch` tools, or Tavily/Brave if cheaper), funding announcements in the news.
 - **Scope:** target ~150 companies, not "all".
 
 ## Target architecture
 ```
- Sources ──► Discovery ──► candidate companies (SQLite)
+ Sources ──► Candidate sourcing ──► candidate companies (SQLite)
                                │
                      Orchestrator (supervisor)
-        ┌───────────────┬──────┴────────┬──────────────┐
-   Enrichment agent  Classifier     News agent     Verifier
-   (tool loop:       (fixed         (RSS + search, (2nd-source
-   search/fetch →    taxonomy)      dedupe, rank)  funding check)
-   Pydantic schema)
+                  ┌────────────────┴───────────────┐
+           Enrichment agent                    News agent
+           (tool loop:                         (RSS + search,
+           search/fetch →                      dedupe, rank)
+           Pydantic schema)
                                │
                        SQLite + provenance
                   ┌────────────┴─────────────┐
             MCP server (FastMCP)        Streamlit dashboard
 ```
-Models: a small/cheap model (Haiku-class) for bulk extraction and classification; a stronger one (Sonnet-class) for orchestration, verification and synthesis. Confirm current model IDs in the `claude-api` skill at implementation time.
+Models: a small/cheap model (Haiku-class) for bulk extraction; a stronger one (Sonnet-class) for orchestration and synthesis. Confirm current model IDs in the `claude-api` skill at implementation time.
 
 ## Repository layout (target)
 ```
@@ -43,7 +43,7 @@ project-plan.md
 src/sprout/
   config.py  models.py  db.py  costs.py
   sources/   companies_house.py  rss.py  web.py
-  agents/    loop.py  enrich.py  classify.py  news.py  verify.py  discovery.py  orchestrator.py
+  agents/    loop.py  enrich.py  news.py  orchestrator.py
   mcp_server.py
   app/dashboard.py
 evals/       golden.yaml  run_evals.py
@@ -83,7 +83,7 @@ tests/
 - A one-line "hello" call to the Claude API succeeds using the key from `.env`.
 - Taxonomy and schemas are in code with unit tests (valid and invalid examples).
 
-**Risks & caveats:** Installing Python 3.12 alongside the macOS system Python 3.9 is the usual stumbling block; always run through `uv run` so the right interpreter is used. Decide the taxonomy now: changing it later invalidates classifications and the golden set. Keep it small and include an "Other" bucket, because a fuzzy category list produces inconsistent labels. Never commit API keys; set the console spend limit before the first paid call.
+**Risks & caveats:** Installing Python 3.12 alongside the macOS system Python 3.9 is the usual stumbling block; always run through `uv run` so the right interpreter is used. Decide the taxonomy now: changing it later invalidates the golden set. Keep it small and include an "Other" bucket, because a fuzzy category list produces inconsistent labels. Never commit API keys; set the console spend limit before the first paid call.
 
 **Learnings:** modern Python packaging (`uv`, `pyproject.toml`), secrets handling, Pydantic data modelling, designing a schema before building agents.
 
@@ -181,12 +181,9 @@ tests/
 **Objectives:** split the work across specialised agents and run the whole pipeline over ~50 companies (for now).
 
 **Steps**
-1. **Classifier:** cheap-model agent assigns category/sub-category from the fixed taxonomy plus a short rationale; unknown → "Other".
-2. **News agent:** for each company, collect recent items (RSS match + search), dedupe near-duplicates, and score "big news" (funding round, acquisition, major partnership, regulatory event, leadership change) with a short summary.
-3. **Verifier:** for any funding/stage claim, find a second independent source; downgrade confidence or flag when sources disagree.
-4. **Orchestrator:** supervisor that decides which companies need work (new, stale, low-confidence), runs agents concurrently with a concurrency limit, and records per-company status/errors so a failure doesn't stop the run.
-5. **Discovery agent:** read startup-list pages and news to propose companies missing from Companies House heuristics.
-6. Make the pipeline resumable and idempotent (skip fresh, retry failed).
+1. **News agent:** for each company, collect recent items (RSS match + search), dedupe near-duplicates, and score "big news" (funding round, acquisition, major partnership, regulatory event, leadership change) with a short summary.
+2. **Orchestrator:** supervisor that decides which companies need work (new, stale, low-confidence), runs agents concurrently with a concurrency limit, and records per-company status/errors so a failure doesn't stop the run.
+3. Make the pipeline resumable and idempotent (skip fresh, retry failed).
 
 **Acceptance criteria**
 - `python -m sprout.orchestrator --limit 50` completes, with ≥85% of companies ending in status `ok`, and total cost within budget (< ~US$5 for the full run).
@@ -194,9 +191,9 @@ tests/
 - Each company has a category, stage (or Unknown), funding (or "not disclosed"), business model, target user, and ≥1 news item where news exists, all with source URLs.
 - Written note in the repo explaining why this is multi-agent (or where a single agent would suffice) and the cost/quality trade-offs.
 
-**Risks & caveats:** More agents means more cost, latency and failure modes, and each hand-off can lose or distort information. Add a specialised agent only when it measurably improves the evals, otherwise merge it back. Concurrency can trip API rate limits (429s), so cap parallelism and handle retries. Stale or conflicting sources are normal: the verifier should record disagreement rather than force a single answer. The "big news" score is subjective; define the rubric in the prompt and check it on a sample. Run 10–20 companies before the full 50 to avoid an expensive bad run.
+**Risks & caveats:** More agents means more cost, latency and failure modes, and each hand-off can lose or distort information. Add a specialised agent only when it measurably improves the evals, otherwise merge it back. Concurrency can trip API rate limits (429s), so cap parallelism and handle retries. The "big news" score is subjective; define the rubric in the prompt and check it on a sample. Run 10–20 companies before the full 50 to avoid an expensive bad run.
 
-**Learnings:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, verification/cross-checking patterns, failure isolation.
+**Learnings:** multi-agent orchestration patterns (supervisor/worker, specialisation), model routing for cost, concurrency with `asyncio`, resumable pipelines, failure isolation.
 
 ---
 
@@ -268,9 +265,8 @@ tests/
 
 ## Scope control (cut in this order if behind)
 1. Embeddings / "similar companies" search (never required above)
-2. Discovery agent (rely on Companies House + lists)
-3. HTTP transport for MCP
-4. Docker / hosted deployment (ship a demo recording instead)
+2. HTTP transport for MCP
+3. Docker / hosted deployment (ship a demo recording instead)
 
 **Do not cut:** provenance, evals, the MCP server.
 

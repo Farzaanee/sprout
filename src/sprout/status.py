@@ -16,13 +16,11 @@ from sqlmodel import Session, col, select
 from sprout.db import Company, CompanyNewsRow, Fact, FundingRoundRow, RunKind, RunLog, winning_facts
 from sprout.failures import FailureCategory
 
-STEPS = ("enrich", "classify", "news", "verify")
+STEPS = ("enrich", "news")
 
 STEP_KINDS: dict[str, RunKind] = {
     "enrich": RunKind.COMPANY_ENRICH,
-    "classify": RunKind.COMPANY_CLASSIFICATION,
     "news": RunKind.COMPANY_NEWS_MATCH,
-    "verify": RunKind.COMPANY_VERIFICATION,
 }
 
 StepState = Literal["fresh", "stale", "never", "failed", "exhausted", "running"]
@@ -98,7 +96,6 @@ def _step_status(
     step: str,
     rows: Sequence[_Row],
     *,
-    enrich_ok_at: datetime | None,
     policy: StatusPolicy,
     now: datetime,
 ) -> StepStatus:
@@ -128,12 +125,8 @@ def _step_status(
         return status("exhausted" if len(failed) >= policy.max_attempts else "failed")
     if last_ok_at is None:
         return status("never")
-    if step == "enrich":
-        stale = now - last_ok_at > timedelta(days=policy.enrich_stale_days)
-    elif step == "news":
-        stale = now - last_ok_at > timedelta(days=policy.news_stale_days)
-    else:  # classify and verify describe the enrichment they ran on
-        stale = enrich_ok_at is not None and last_ok_at < enrich_ok_at
+    stale_days = policy.enrich_stale_days if step == "enrich" else policy.news_stale_days
+    stale = now - last_ok_at > timedelta(days=stale_days)
     return status("stale" if stale else "fresh")
 
 
@@ -177,15 +170,8 @@ def company_statuses(
     result: dict[int, CompanyStatus] = {}
     for company_id in ids:
         steps: dict[str, StepStatus] = {}
-        for step in STEPS:  # enrich first: classify and verify are judged against it
-            enrich = steps.get("enrich")
-            steps[step] = _step_status(
-                step,
-                rows[company_id][step],
-                enrich_ok_at=enrich.last_ok_at if enrich else None,
-                policy=policy,
-                now=now,
-            )
+        for step in STEPS:
+            steps[step] = _step_status(step, rows[company_id][step], policy=policy, now=now)
         result[company_id] = CompanyStatus(company_id, steps, costs[company_id])
     return result
 
