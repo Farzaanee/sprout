@@ -10,9 +10,9 @@ from sqlmodel import Session, col, func, select
 
 from sprout.db import (
     Company,
+    CompanyNewsRow,
     Fact,
     FundingRoundRow,
-    NewsItemRow,
     OfficerRow,
     RunKind,
     RunLog,
@@ -115,7 +115,7 @@ def count_rows(session: Session) -> dict[str, int]:
     return {
         "companies": count(Company),
         "facts": count(Fact),
-        "news_items": count(NewsItemRow),
+        "news": count(CompanyNewsRow),
         "runs": count(RunLog),
     }
 
@@ -372,16 +372,21 @@ def company_officers(session: Session, company_id: int) -> list[OfficerRow]:
     )
 
 
-def search_news(session: Session, *, text: str = "", limit: int = 200) -> list[NewsItemRow]:
-    query = select(NewsItemRow)
+def search_news(
+    session: Session, *, text: str = "", limit: int = 200
+) -> list[tuple[CompanyNewsRow, str]]:
+    """News rows with their company's name, newest first."""
+    query = select(CompanyNewsRow, Company.name).join(
+        Company, col(CompanyNewsRow.company_id) == col(Company.id)
+    )
     if text.strip():
         pattern = text.strip()
         query = query.where(
-            col(NewsItemRow.title).icontains(pattern, autoescape=True)
-            | col(NewsItemRow.summary).icontains(pattern, autoescape=True)
+            col(CompanyNewsRow.title).icontains(pattern, autoescape=True)
+            | col(CompanyNewsRow.summary).icontains(pattern, autoescape=True)
         )
-    query = query.order_by(col(NewsItemRow.published).desc(), col(NewsItemRow.id).desc())
-    return list(session.exec(query.limit(limit)).all())
+    query = query.order_by(col(CompanyNewsRow.published).desc(), col(CompanyNewsRow.url))
+    return [(row, name) for row, name in session.exec(query.limit(limit)).all()]
 
 
 def companies_house_url(company_number: str | None) -> str | None:

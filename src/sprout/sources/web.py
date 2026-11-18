@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -31,6 +31,7 @@ ROBOTS_TTL = timedelta(days=1)
 DEFAULT_MAX_CHARS = 20_000
 MAX_REDIRECTS = 5
 TEXT_CONTENT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
+_TRACKING_PARAMS = frozenset({"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "cmp"})
 
 _SKIPPED_TAGS = frozenset({"script", "style", "noscript", "template", "svg", "head"})
 _BLOCK_TAGS = frozenset(
@@ -125,6 +126,17 @@ class _TextExtractor(HTMLParser):
     def text(self) -> str:
         lines = (" ".join(line.split()) for line in "".join(self._parts).splitlines())
         return "\n".join(line for line in lines if line)
+
+
+def normalise_url(url: str) -> str:
+    """Drop the fragment and tracking parameters so the same page dedupes by URL."""
+    parts = urlsplit(url.strip())
+    query = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_PARAMS
+    ]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 
 
 def html_to_text(html: str) -> tuple[str | None, str]:

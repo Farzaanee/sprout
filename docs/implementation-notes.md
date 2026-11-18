@@ -10,7 +10,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 | Item | Where |
 |---|---|
 | uv project, Python 3.12 (`requires-python >=3.12`, `.python-version` = 3.12) | [pyproject.toml](pyproject.toml) |
-| Runtime deps: `anthropic`, `pydantic`, `sqlmodel`, `httpx`, `feedparser`, `mcp`, `streamlit`, `python-dotenv` · dev: `pytest`, `ruff` | [pyproject.toml](pyproject.toml), `uv.lock` |
+| Runtime deps: `anthropic`, `pydantic`, `sqlmodel`, `httpx`, `mcp`, `streamlit`, `python-dotenv` · dev: `pytest`, `ruff` | [pyproject.toml](pyproject.toml), `uv.lock` |
 | Settings loader (keys, model IDs) | [src/sprout/config.py](src/sprout/config.py) |
 | Taxonomy, stage enum, `Sourced[T]`, `CompanyProfile` | [src/sprout/models.py](src/sprout/models.py) |
 | "hello" smoke call to Claude | [src/sprout/hello.py](src/sprout/hello.py) (`uv run python -m sprout.hello`) |
@@ -53,24 +53,23 @@ Running log of what was built, why, and what later phases need to know. Newest p
 
 ## Phase 2 - Data foundations
 
-**Status: done.** Verified end to end against the live Companies House API and the RSS feeds.
+**Status: done.** Verified end to end against the live Companies House API.
 
 ### What was built
 | Item | Where |
 |---|---|
 | Shared HTTP layer: disk cache, sliding-window rate limiter (global and per host), retries with exponential backoff + `Retry-After`, response size cap | [src/sprout/sources/http.py](src/sprout/sources/http.py) |
 | Companies House client: `search`, `advanced_search` (+ paginating iterator), `get_company`, `filing_history` | [src/sprout/sources/companies_house.py](src/sprout/sources/companies_house.py) |
-| RSS ingestion (6 feeds) → `NewsItem`, URL normalisation | [src/sprout/sources/rss.py](src/sprout/sources/rss.py) |
-| Polite web fetcher: robots.txt, per-domain rate limit, public-hosts-only, cache, HTML→text | [src/sprout/sources/web.py](src/sprout/sources/web.py) |
+| Polite web fetcher: robots.txt, per-domain rate limit, public-hosts-only, cache, HTML→text, URL normalisation | [src/sprout/sources/web.py](src/sprout/sources/web.py) |
 | Candidate filter (SIC + name keywords) and Companies House search terms | [src/sprout/candidates.py](src/sprout/candidates.py) |
-| SQLModel schema `company`, `fact`, `news_item`, `run_log` + write helpers | [src/sprout/db.py](src/sprout/db.py) |
+| SQLModel schema `company`, `fact`, `run_log` + write helpers | [src/sprout/db.py](src/sprout/db.py) |
 | One-command ingestion | [src/sprout/ingest.py](src/sprout/ingest.py) (`uv run python -m sprout.ingest`) |
 | Config: `SPROUT_DB_PATH` (default `data/sprout.db`), `SPROUT_CACHE_DIR` (default `.cache/http`) | [src/sprout/config.py](src/sprout/config.py), [.env.example](.env.example) |
-| Tests (all network mocked with `httpx.MockTransport`) | `tests/test_http.py`, `test_companies_house.py`, `test_rss.py`, `test_web.py`, `test_candidates.py`, `test_db.py`, `test_ingest.py`, shared `tests/conftest.py` |
+| Tests (all network mocked with `httpx.MockTransport`) | `tests/test_http.py`, `test_companies_house.py`, `test_web.py`, `test_candidates.py`, `test_db.py`, `test_ingest.py`, shared `tests/conftest.py` |
 
 ### Acceptance criteria
-- [x] `python -m sprout.ingest` populates ≥200 candidate companies and ≥100 news items. Live run on a clean DB: **876 candidate companies** (1,377 search results read, 477 rejected by the filter, 19 HTTP requests) and **115 news items** (6 requests).
-- [x] Re-running creates no duplicates and makes no repeated HTTP calls for cached URLs. Verified live: second run made 0 HTTP requests (19 + 6 cache hits), added 0 rows (876 companies / 115 news items unchanged) Also covered in tests, including that fact rows are not duplicated.
+- [x] `python -m sprout.ingest` populates ≥200 candidate companies. Live run on a clean DB: **876 candidate companies** (1,377 search results read, 477 rejected by the filter, 19 HTTP requests).
+- [x] Re-running creates no duplicates and makes no repeated HTTP calls for cached URLs. Verified live: second run made 0 HTTP requests (19 cache hits), added 0 rows (876 companies unchanged) Also covered in tests, including that fact rows are not duplicated.
 - [x] Network code tested against mocked responses (93 tests pass, `ruff check` clean).
 - [x] Web fetcher also checked live once (a real page fetched, second fetch from cache, `127.0.0.1`/`localhost` blocked).
 
@@ -80,15 +79,15 @@ Running log of what was built, why, and what later phases need to know. Newest p
 3. Phase 1's Anthropic-key items are unchanged by this phase.
 
 ### Decisions locked in
-- **One HTTP entry point.** All network code goes through `HttpClient.get`. 2xx and 404 responses are cached (404 so a missing `robots.txt` or company is not re-requested); 3xx are returned uncached; other 4xx raise `FetchError` without retrying; 429/5xx/transport errors retry (4 retries, 1s·2ⁿ, raised to `Retry-After`, capped at 60s). `max_age` is per call: Companies House 7 days, feeds 6 hours, pages 7 days, `robots.txt` 1 day. Cache files are JSON under `.cache/http/` keyed by a hash of the URL + sorted params; **the API key lives only in the `httpx` client's auth, never in a key or file.** There is no `--refresh` flag; delete `.cache/http/` to force refetching.
-- **Companies House rate limit** is 550 calls / 300 s (the API allows ~600). Web pages and feeds are limited to 1 request per host per 2 s / 1 s.
+- **One HTTP entry point.** All network code goes through `HttpClient.get`. 2xx and 404 responses are cached (404 so a missing `robots.txt` or company is not re-requested); 3xx are returned uncached; other 4xx raise `FetchError` without retrying; 429/5xx/transport errors retry (4 retries, 1s·2ⁿ, raised to `Retry-After`, capped at 60s). `max_age` is per call: Companies House 7 days, pages 7 days, `robots.txt` 1 day. Cache files are JSON under `.cache/http/` keyed by a hash of the URL + sorted params; **the API key lives only in the `httpx` client's auth, never in a key or file.** There is no `--refresh` flag; delete `.cache/http/` to force refetching.
+- **Companies House rate limit** is 550 calls / 300 s (the API allows ~600). Web pages are limited to 1 request per host per 2 s.
 - **Candidate sourcing uses `/advanced-search/companies`** (`company_name_includes`, `company_status=active`, `incorporated_from=2012-01-01`), because its results carry SIC codes and the plain `/search/companies` results do not. A 404 from either is treated as "no results". Verified live: the parameters work (the response also carries `hits` and a `top_hit`; `top_hit` is repeated in `items`, so we ignore it).
 - **Candidate filter** (`assess`): requires active status and incorporation ≥ 2012-01-01. A *strong* name keyword (artificial intelligence, machine learning, deep learning, neural, generative, computer vision, llm, robot*) is enough on its own; a *weak* one (`ai`, intelligen*, cognitive, autonomous, algorithm*, analytics) counts only together with a tech SIC code (62011/62012/62020/62090/63110/63120/63990/72190), so "Ai Restaurant Ltd" is rejected. Whole-word matching, so "Airways" ≠ "ai". Score = 2/strong + 1/weak + 1 for a tech SIC. Only the name and SIC are used; the search API has no description. `Company.candidate_score` and `matched_keywords` are stored so Phase 6 can rank or re-filter without re-querying.
 - **Company identity = Companies House number** (unique index); the upsert refreshes name/status/SIC/locality. Companies found later by other means have `company_number = NULL`.
 - **`fact` table** = one row per (company, field, source_url): `value_json` (via `pydantic_core.to_json`, so models like `FundingRound` serialise), `source_url`, `retrieved_at`, `confidence`, `note`. `save_fact` upserts on that key; `value_json IS NULL` represents "not disclosed". Ingestion writes two registry-sourced facts per company, both `confidence=medium` and sourced to the public Companies House page: `hq` (registered-office locality) and `founded` (incorporation year; the note says it can differ from the real founding year). `retrieved_at` is the ingest time, and a cached response can be up to 7 days old.
 - **Timestamps are timezone-aware UTC** everywhere: this SQLModel version rejects naive datetimes.
-- **Table class names** are `Company`, `Fact`, `NewsItemRow` (avoids clashing with the Pydantic `NewsItem`) and `RunLog`; table names match the plan. `run_log` stores `kind`, status (`running|ok|error`), start/finish, `stats` JSON (including `http_requests`/`cache_hits`) and the error. Cost logging is still Phase 3 (`costs.py`).
-- **News feeds (6):** Sifted, UKTN, Tech.eu, The Guardian (AI), TechCrunch (Startups), BBC (Technology). One more than the plan's 3–5, to clear 100 items from a single fetch. They are not filtered for UK relevance (Tech.eu/TechCrunch are broader); Phase 6's news agent should match items to companies. A broken feed is reported in `failed_feeds` and exit code 1, but does not stop the others. Only title, link, a ≤500-char plain-text summary and date are stored; URLs are deduped after stripping `utm_*`/`fbclid`/fragments.
+- **Table class names** are `Company`, `Fact` and `RunLog`; table names match the plan. `run_log` stores `kind`, status (`running|ok|error`), start/finish, `stats` JSON (including `http_requests`/`cache_hits`) and the error. Cost logging is still Phase 3 (`costs.py`).
+- **URL normalisation** (`normalise_url` in `sources/web.py`) strips `utm_*`/`fbclid`/fragments so one page dedupes to one URL.
 - **Web fetcher safety** (URLs will come from untrusted scraped content): only `http(s)`; every host (and every redirect hop, which is followed manually) must resolve to a public IP, so loopback/private/link-local/metadata addresses are refused; `robots.txt` is honoured (4xx other than 429 → allow all, unreachable/5xx → refuse); only `text/html`, `application/xhtml+xml`, `text/plain` are accepted; max 5 redirects; 5 MB download cap; text truncated to 20k chars. Residual risk: DNS can change between our check and the connection (rebinding); acceptable for this project.
 - **HTML→text** uses the standard library (`html.parser`), so no new dependency. It drops script/style/noscript/head and keeps block structure as lines. It does not extract "main content", so nav/footer text is included; JavaScript-rendered pages yield little text.
 - **No new dependencies.** `pyproject.toml` and `uv.lock` are unchanged.
@@ -172,7 +171,7 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 
 ### Decisions locked in
 - **Models and call shape (verified live on Haiku 5.5):** `tool_choice: {"type": "auto"}`, `output_config={"effort": "low"}` (default effort `low`), top-level `cache_control={"type": "ephemeral"}` on `messages.create` plus a marker on the system block. Caching works: `cache_creation_input_tokens > 0`; across all runs about 455k tokens were written and 1.50M read. Haiku 5.5 is the default; `--strong` selects Sonnet 5.5.
-- **`submit_profile` is not `strict`** (rationale: D13 in `docs/architecture/6. decisions.md`). The schema is derived from `CompanyProfile` with `$ref`s inlined, `retrieved_at`, `news` and `name` removed and all fields required.
+- **`submit_profile` is not `strict`** (rationale: D13 in `docs/architecture/6. decisions.md`). The schema is derived from `CompanyProfile` with `$ref`s inlined, `retrieved_at` and `name` removed and all fields required.
 - **Search is server-side `web_search_20260209`** with `max_uses` (start 3); `fetch_page` and `lookup_companies_house` are custom (rationale: D8 in `docs/architecture/6. decisions.md`). The SDK also ships `web_search_20260318`, not documented in the skill; not adopted. Average cost is far below target, so there is no reason to fall back to a custom search backend.
 - **Provenance is enforced in code:** a non-null value needs `source_url` (existing `Sourced` validator); `source_url` must be a URL a tool actually returned (the seen-URL ledger; matching ignores trailing slash and host case); `retrieved_at` is stamped by code; funding fields need a `note` with the original figure and currency; a source seen only in a search snippet is capped at `medium` confidence. Rejections go back to the model as a compact error (which does not echo input) that lists up to 25 citable URLs, then one repair attempt, then `invalid`.
 - **Nothing is persisted unless a validated `submit_profile` arrived.** On any other stop (`invalid`, `max_iter`, `budget`, `no_submit`, `truncated`, `refused`, `error`) no facts or category are written, but the `enrich` `run_log` row keeps the stats and cost. `enrich_company` assigns stats and commits before raising, because `logged_run` rolls back on exceptions.
@@ -331,12 +330,12 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 ### What was built
 | Item | Where |
 |---|---|
-| WAL, 30 s busy timeout, `RunKind.PIPELINE_RUN`, `link_company_news`, `latest_round` (the D22 rule, shared with evals) | [src/sprout/db.py](src/sprout/db.py) |
+| WAL, 30 s busy timeout, `RunKind.PIPELINE_RUN`, `save_company_news`, `latest_round` (the D22 rule, shared with evals) | [src/sprout/db.py](src/sprout/db.py) |
 | `BatchBudget` lock and atomic `try_slice(cap)` | [src/sprout/costs.py](src/sprout/costs.py) |
 | `make_client(max_retries=)`; `DiskCache.put` unique temp name; `build_tools(max_searches=)`; `ALLOWED_NEWS_TOOLS`; `assert_tools_allowed`; `NewsKind` | [loop.py](src/sprout/agents/loop.py), [http.py](src/sprout/sources/http.py), [tools.py](src/sprout/agents/tools.py), [models.py](src/sprout/models.py) |
 | `Deps`, `AgentFailed` (with `error_type`), `run_recorded` (lifted from `enrich_with_result`; `persist` may return extra stats) | [src/sprout/agents/common.py](src/sprout/agents/common.py) |
 | Derived per-step status, `reap_abandoned`, `profile_gaps` (reads `db` only) | [src/sprout/status.py](src/sprout/status.py) |
-| News agent (RSS name matcher, near-duplicate collapse, `company_news` writer) | [src/sprout/agents/news.py](src/sprout/agents/news.py) |
+| News agent (one web search, `company_news` writer) | [src/sprout/agents/news.py](src/sprout/agents/news.py) |
 | Orchestrator (asyncio plus `to_thread`, one resource bundle per worker, 429 gate, dry run) and shim | [src/sprout/agents/orchestrator.py](src/sprout/agents/orchestrator.py), [src/sprout/orchestrator.py](src/sprout/orchestrator.py) |
 | Tests | `test_agent_common.py`, `test_status.py`, `test_news.py`, `test_orchestrator.py`; additions to `test_costs.py`, `test_http.py`, `test_db.py`, `test_agent_tools.py`, `test_models.py`, `test_evals_run.py`, `test_evals_metrics.py` |
 
@@ -349,7 +348,7 @@ CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max
 - [x] **Written note explaining why this is multi-agent and the cost/quality trade-offs.** See "Why multi-agent" below.
 
 ### Why multi-agent (and where one agent would do)
-- A single enrichment call already produces category, stage, funding, business model and target user. Splitting buys two things: a separately capped and separately logged run per concern (failure isolation: a failed news step leaves the profile intact, and each step has its own `run_log` row, cost and `failure_category`); and an input the extractor does not have (the ingested RSS items).
+- A single enrichment call already produces category, stage, funding, business model and target user. Splitting buys a separately capped and separately logged run per concern (failure isolation: a failed news step leaves the profile intact, and each step has its own `run_log` row, cost and `failure_category`).
 - The cost is small at the measured prices. Per company, measured on the 50-run: enrich US$0.023 (ok runs), news US$0.011. Per-company cost was about US$0.03 to 0.04, well below the US$0.077 planned. Enrichment is 68% of spend, news 32%.
 - Where one agent would suffice: the news agent runs one search per company and finds items for 7 of 50 shell-heavy companies. On the golden-set companies (real startups) the balance is likely different, which is exactly what the unrun D28 check would show.
 
@@ -361,7 +360,7 @@ CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max
 ### Open items (need you)
 1. **Hand-check the news agent (D28):** 15 to 20 items against the rubric (the keep rule is in the Phase 6 page). Until done, the news agent is **not shown to improve quality**.
 2. **Decide whether to tighten the candidate pool** (D34 miss above) before a larger run or Phase 9's weekly refresh.
-3. **Weak spots seen live, not fixed:** (a) near-duplicate news from different outlets survives (3 groups in 24 items), and the big-news rubric still over-flags (16 of 24 items big; board appointments and routine hires); (b) `profile_gaps` and the console line treat an explicit "not disclosed" as incomplete (48 of 50 shown incomplete); (c) 9 of 24 news items have no published date; (d) a stale `running` `companies_ingest` row (id 68) is never reaped (batch kinds are not).
+3. **Weak spots seen live, not fixed:** (a) the big-news rubric still over-flags (16 of 24 items big; board appointments and routine hires); (b) `profile_gaps` and the console line treat an explicit "not disclosed" as incomplete (48 of 50 shown incomplete); (c) 9 of 24 news items have no published date; (d) a stale `running` `companies_ingest` row (id 68) is never reaped (batch kinds are not).
 4. 429 handling and the 5-trip stop were never exercised live (0 trips); they are covered by tests only.
 
 ### Decisions locked in
@@ -372,7 +371,7 @@ CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max
 
 ### Things later phases must know
 - WAL is on for every `get_engine` caller (including a read-only snapshot, which keeps its mode). Snapshots must use `VACUUM INTO` or the backup API; `*.db-wal` and `*.db-shm` are gitignored.
-- Phase 7: the news timeline needs a `company_news` join. Per-company status and cost come from `status.py`.
+- Phase 7: the news timeline reads `company_news`. Per-company status and cost come from `status.py`.
 - Phase 8: `refresh_company` should call `process_company` (sync, non-raising, non-printing). A refresh can cost up to about US$0.21 at the per-run caps. Swapping `fetch_page` must update both `ALLOWED_*` sets.
 - Phase 9: a second SIGINT hard-exits and leaves the `pipeline_run` row `running`, blocking a restart for 30 minutes unless `--force`. Exit codes: 0 at >=85% `ok`, 1 below that or stopped early, 2 for configuration or a run in progress.
 - The first 50 pre-screen survivors by `candidate_score` then `id` are the ones that were run; rerunning with `--limit 50` completes that same set and never reaches further down the pool.

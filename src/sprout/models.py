@@ -101,14 +101,6 @@ class Sourced[T](_Strict):
         return self
 
 
-class NewsItem(_Strict):
-    title: str = Field(min_length=1)
-    url: AnyHttpUrl
-    published: date | None = None
-    summary: str = ""
-    source: str | None = None
-
-
 class FundingRound(_Strict):
     stage: Stage = Stage.UNKNOWN
     amount_million_usd: Annotated[int, Field(ge=0)] | None = None
@@ -138,4 +130,3 @@ class CompanyProfile(_Strict):
     business_model: Sourced[str] = Field(default_factory=Sourced[str])
     target_user: Sourced[str] = Field(default_factory=Sourced[str])
     one_liner: Sourced[str] = Field(default_factory=Sourced[str])
-    news: list[NewsItem] = Field(default_factory=list)

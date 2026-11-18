@@ -8,6 +8,7 @@ from sprout.sources.web import (
     WebFetcher,
     _is_public_address,
     html_to_text,
+    normalise_url,
 )
 
 HTML = """<html><head><title> Acme  Ltd </title><style>p{color:red}</style></head>
@@ -278,3 +279,10 @@ def test_page_over_the_byte_cap_fails(make_http):
     fetcher = WebFetcher(make_http(site(pages)), resolver=PUBLIC)
     with pytest.raises(FetchError, match="larger than 5000000"):
         fetcher.fetch("https://acme.example/")
+
+
+def test_normalise_url_strips_tracking_and_fragment():
+    assert (
+        normalise_url("https://news.example/a?utm_source=x&id=7&fbclid=1#top")
+        == "https://news.example/a?id=7"
+    )

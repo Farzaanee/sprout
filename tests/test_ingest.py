@@ -5,9 +5,8 @@ import pytest
 from sqlmodel import Session, func, select
 
 from sprout import config, ingest
-from sprout.db import Company, Fact, NewsItemRow, OfficerRow, RunLog, get_engine, init_db
+from sprout.db import Company, Fact, OfficerRow, RunLog, get_engine, init_db
 from sprout.sources.companies_house import CompaniesHouseClient
-from sprout.sources.rss import Feed
 
 OFFICERS = {
     "active_count": 2,
@@ -65,15 +64,6 @@ def session(tmp_path):
     init_db(engine)
     with Session(engine) as s:
         yield s
-
-
-def rss(n: int) -> str:
-    items = "".join(
-        f"<item><title>Story {i}</title><link>https://n.example/{i}</link></item>" for i in range(n)
-    )
-    return (
-        f'<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>{items}</channel></rss>'
-    )
 
 
 def test_ingest_companies_filters_dedupes_and_records_facts(session, make_http):
@@ -141,32 +131,6 @@ def test_backfill_active_officers_only_touches_companies_missing_it(session, mak
     assert companies == {"00000001": 3, "00000002": 5}
 
 
-def test_ingest_news_dedupes_and_tolerates_a_broken_feed(session, make_http):
-    calls = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request.url.host)
-        if request.url.host == "bad.example":
-            return httpx.Response(404)
-        return httpx.Response(200, text=rss(3))
-
-    http = make_http(handler)
-    feeds = [
-        Feed("A", "https://a.example/feed"),
-        Feed("B", "https://b.example/feed"),  # carries the same story URLs as A
-        Feed("Bad", "https://bad.example/feed"),
-    ]
-    stats = ingest.ingest_news(session, http, feeds)
-    assert stats["fetched"] == 6
-    assert stats["new"] == 3  # both feeds carry the same story URLs
-    assert len(stats["failed_feeds"]) == 1 and "Bad" in stats["failed_feeds"][0]
-
-    before = len(calls)
-    assert ingest.ingest_news(session, http, feeds)["new"] == 0
-    assert session.exec(select(func.count()).select_from(NewsItemRow)).one() == 3
-    assert len(calls) == before  # every response, including the 404, is cached
-
-
 @pytest.fixture
 def isolated_settings(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: False)
@@ -177,10 +141,10 @@ def isolated_settings(monkeypatch, tmp_path):
 
 
 def test_main_reports_missing_companies_house_key(isolated_settings, capsys):
-    assert ingest.main(["--skip-news"]) == 1
+    assert ingest.main([]) == 1
     captured = capsys.readouterr()
     assert "COMPANIES_HOUSE_API_KEY" in captured.err
-    assert "0 candidate companies, 0 news items" in captured.out
+    assert "0 candidate companies" in captured.out
 
 
 def test_main_logs_failed_runs(isolated_settings, monkeypatch):
@@ -190,7 +154,7 @@ def test_main_logs_failed_runs(isolated_settings, monkeypatch):
         raise ingest.FetchError("GET returned 401", status_code=401)
 
     monkeypatch.setattr(ingest.CompaniesHouseClient, "iter_advanced_search", reject)
-    assert ingest.main(["--skip-news"]) == 1
+    assert ingest.main([]) == 1
     with Session(get_engine(isolated_settings / "out" / "sprout.db")) as s:
         run = s.exec(select(RunLog)).one()
     assert (run.kind, run.status) == ("companies_ingest", "error")

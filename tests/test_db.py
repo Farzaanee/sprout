@@ -11,11 +11,9 @@ from sprout.db import (
     Company,
     Fact,
     FundingRoundRow,
-    NewsItemRow,
     RunKind,
     RunLog,
     RunLogStep,
-    add_news_items,
     get_engine,
     init_db,
     logged_run,
@@ -23,7 +21,7 @@ from sprout.db import (
     upsert_company,
     winning_facts,
 )
-from sprout.models import Confidence, FundingRound, NewsItem, Sourced, Stage
+from sprout.models import Confidence, FundingRound, Sourced, Stage
 from sprout.sources.companies_house import CompanyHit
 
 
@@ -133,21 +131,6 @@ def test_winning_facts_breaks_a_same_timestamp_tie_on_confidence(session):
     session.commit()
     rows = session.exec(select(Fact)).all()
     assert winning_facts(rows)["stage"].value_json == '"Series A"'
-
-
-def test_add_news_items_dedupes_by_url(session):
-    def item(url, title="t"):
-        return NewsItem(title=title, url=url)
-
-    batch = [
-        item("https://n.example/a"),
-        item("https://n.example/a?utm_source=x", "dup in batch"),
-        item("https://n.example/b"),
-    ]
-    assert add_news_items(session, batch) == 2
-    session.commit()
-    assert add_news_items(session, batch) == 0
-    assert len(session.exec(select(NewsItemRow)).all()) == 2
 
 
 def test_logged_run_records_success_and_failure(session):

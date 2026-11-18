@@ -6,7 +6,7 @@ Part of the [Sprout architecture docs](../README.md). Status: see [7. status.md]
 flowchart TB
     ENV[".env: API keys, SPROUT_* overrides"]
     CFG["config.py: Settings, get_settings, require_*_key"]
-    MODELS["models.py: Category, Stage, Confidence, Sourced of T, FundingRound, NewsItem, CompanyProfile"]
+    MODELS["models.py: Category, Stage, Confidence, Sourced of T, FundingRound, CompanyProfile"]
     HELLO["hello.py: smoke call"]
     TESTS["tests: test_models, test_config, test_live_api"]
     CI["GitHub Actions ci.yml: uv sync, ruff, pytest"]
@@ -62,4 +62,3 @@ All four reject unknown fields (`extra="forbid"`), so malformed model output fai
 | `business_model` | `Sourced[str]` | |
 | `target_user` | `Sourced[str]` | |
 | `one_liner` | `Sourced[str]` | |
-| `news` | `list[NewsItem]` | Not `Sourced`; each `NewsItem` carries its own `title`, `url`, `published`, `summary`, `source` |

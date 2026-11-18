@@ -1,15 +1,13 @@
 """One-command ingestion: `uv run python -m sprout.ingest`.
 
-Discovers candidate companies from Companies House and pulls news from RSS feeds into SQLite.
-Re-running is safe: companies dedupe on company number, news on URL, and HTTP responses are
-served from the on-disk cache while fresh.
+Discovers candidate companies from Companies House into SQLite. Re-running is safe: companies
+dedupe on company number and HTTP responses are served from the on-disk cache while fresh.
 """
 
 import argparse
 import sys
 from collections.abc import Iterable, Sequence
 from datetime import date
-from typing import Any
 
 from sqlmodel import Session, col, func, select
 
@@ -17,9 +15,7 @@ from sprout.candidates import DISCOVERY_TERMS, MIN_INCORPORATION_DATE, assess
 from sprout.config import MissingConfigError, get_settings
 from sprout.db import (
     Company,
-    NewsItemRow,
     RunKind,
-    add_news_items,
     get_engine,
     init_db,
     logged_run,
@@ -30,8 +26,7 @@ from sprout.db import (
 from sprout.models import Confidence, Sourced
 from sprout.sources import companies_house
 from sprout.sources.companies_house import CompaniesHouseClient, CompanyHit
-from sprout.sources.http import DiskCache, FetchError, HttpClient, PerHostRateLimiter
-from sprout.sources.rss import FEEDS, Feed, fetch_feed
+from sprout.sources.http import FetchError
 
 DEFAULT_MAX_PER_TERM = 200
 
@@ -113,29 +108,8 @@ def backfill_active_officers(session: Session, client: CompaniesHouseClient) -> 
     return stats
 
 
-def ingest_news(
-    session: Session, http: HttpClient, feeds: Sequence[Feed] = FEEDS
-) -> dict[str, Any]:
-    """Fetch every feed; one broken feed is reported but does not stop the others."""
-    stats: dict[str, Any] = {"fetched": 0, "new": 0}
-    failed: list[str] = []
-    for feed in feeds:
-        try:
-            items = fetch_feed(http, feed)
-        except FetchError as exc:
-            failed.append(f"{feed.name}: {exc}")
-            continue
-        stats["fetched"] += len(items)
-        stats["new"] += add_news_items(session, items)
-        session.commit()
-    stats["failed_feeds"] = failed
-    return stats
-
-
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="sprout.ingest", description=__doc__)
-    parser.add_argument("--skip-companies", action="store_true")
-    parser.add_argument("--skip-news", action="store_true")
     parser.add_argument(
         "--backfill-officers",
         action="store_true",
@@ -172,41 +146,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 exit_code = 1
             return exit_code
 
-        if not args.skip_news:
-            try:
-                feed_http = HttpClient(
-                    cache=DiskCache(settings.cache_dir), limiter=PerHostRateLimiter(1, 1.0)
-                )
-                with feed_http as http:
-                    with logged_run(session, RunKind.NEWS_INGEST.value) as run:
-                        run.stats = ingest_news(session, http)
-                        run.stats["http_requests"] = http.requests_made
-                        run.stats["cache_hits"] = http.cache_hits
-                    print(f"news: {run.stats}")
-                    if run.stats["failed_feeds"]:
-                        exit_code = 1
-            except FetchError as exc:
-                print(f"news ingestion failed: {exc}", file=sys.stderr)
-                exit_code = 1
-
-        if not args.skip_companies:
-            try:
-                key = settings.require_companies_house_key()
-                with companies_house.make_http_client(key, settings.cache_dir) as http:
-                    with logged_run(session, RunKind.COMPANIES_INGEST.value) as run:
-                        run.stats = ingest_companies(
-                            session, CompaniesHouseClient(http), max_per_term=args.max_per_term
-                        )
-                        run.stats["http_requests"] = http.requests_made
-                        run.stats["cache_hits"] = http.cache_hits
-                    print(f"companies: {run.stats}")
-            except (MissingConfigError, FetchError) as exc:
-                print(f"company ingestion failed: {exc}", file=sys.stderr)
-                exit_code = 1
+        try:
+            key = settings.require_companies_house_key()
+            with companies_house.make_http_client(key, settings.cache_dir) as http:
+                with logged_run(session, RunKind.COMPANIES_INGEST.value) as run:
+                    run.stats = ingest_companies(
+                        session, CompaniesHouseClient(http), max_per_term=args.max_per_term
+                    )
+                    run.stats["http_requests"] = http.requests_made
+                    run.stats["cache_hits"] = http.cache_hits
+                print(f"companies: {run.stats}")
+        except (MissingConfigError, FetchError) as exc:
+            print(f"company ingestion failed: {exc}", file=sys.stderr)
+            exit_code = 1
 
         companies = session.exec(select(func.count()).select_from(Company)).one()
-        news = session.exec(select(func.count()).select_from(NewsItemRow)).one()
-        print(f"database {settings.db_path}: {companies} candidate companies, {news} news items")
+        print(f"database {settings.db_path}: {companies} candidate companies")
     return exit_code
 
 

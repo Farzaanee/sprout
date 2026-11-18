@@ -1,7 +1,7 @@
 """SQLite schema (SQLModel) and the small set of write helpers ingestion needs.
 
-Tables: `company`, `fact` (provenance), `funding_round`, `officer`, `news_item`, `company_news`
-(written by the news agent), `run_log`, `run_log_step`. All
+Tables: `company`, `fact` (provenance), `funding_round`, `officer`, `company_news` (written by
+the news agent), `run_log`, `run_log_step`. All
 timestamps are timezone-aware UTC.
 """
 
@@ -19,9 +19,9 @@ from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from sprout.candidates import Assessment, assess
 from sprout.failures import FailureCategory, failure_category_for
-from sprout.models import CompanyProfile, Confidence, FundingRound, NewsItem, Sourced, Stage
+from sprout.models import CompanyProfile, Confidence, FundingRound, Sourced, Stage
 from sprout.sources.companies_house import CompanyHit, Officer, officer_category, parse_hit
-from sprout.sources.rss import normalise_url
+from sprout.sources.web import normalise_url
 
 
 def utcnow() -> datetime:
@@ -33,7 +33,6 @@ class RunKind(StrEnum):
     an enum would add a CHECK constraint, which complicates additive `ALTER`); this is just the
     vocabulary our own code uses. Add members here as new agents arrive, no migration needed."""
 
-    NEWS_INGEST = "news_ingest"
     COMPANIES_INGEST = "companies_ingest"
     COMPANY_ENRICH = "company_enrich"
     COMPANY_WEBSITE_SCREEN = "company_website_screen"
@@ -122,33 +121,23 @@ class OfficerRow(SQLModel, table=True):
     note: str | None = None
 
 
-class NewsItemRow(SQLModel, table=True):
-    __tablename__ = "news_item"
-    __table_args__ = {"extend_existing": True}
-
-    id: int | None = Field(default=None, primary_key=True)
-    url: str = Field(unique=True, index=True)
-    title: str
-    published: date | None = None
-    summary: str = ""
-    source: str | None = None
-    first_seen_at: datetime = Field(default_factory=utcnow)
-
-
 class CompanyNewsRow(SQLModel, table=True):
-    """Links a news item to a company (D33). Written by `link_company_news`."""
+    """One article found for a company (D33). Written by `save_company_news`."""
 
     __tablename__ = "company_news"
     __table_args__ = {"extend_existing": True}
 
     company_id: int = Field(foreign_key="company.id", primary_key=True)
-    news_item_id: int = Field(foreign_key="news_item.id", primary_key=True)
-    news_kind: str | None = None  # NULL means matched but not big news
+    url: str = Field(primary_key=True)
+    title: str
+    published: date | None = None
+    news_kind: str | None = None  # NULL means found but not big news
     summary: str | None = None  # one sentence, model-written, untrusted
+    first_seen_at: datetime = Field(default_factory=utcnow)
 
 
 class RunLog(SQLModel, table=True):
-    """One row per pipeline run: a whole batch for `kind in (news_ingest, companies_ingest)`, one
+    """One row per pipeline run: a whole batch for `kind == companies_ingest`, one
     company's attempt for every other kind. `stats` stays a thin JSON catch-all, for whatever a
     future `kind` needs that has not earned a column yet (for example Phase 4's planned `sources`
     list); everything that is common to every run already has one."""
@@ -257,7 +246,6 @@ def _backfill_failure_categories(session: Session) -> None:
 
 
 _RUN_KIND_RENAMES = {
-    "ingest_news": RunKind.NEWS_INGEST.value,
     "ingest_companies": RunKind.COMPANIES_INGEST.value,
     "enrich": RunKind.COMPANY_ENRICH.value,
 }
@@ -433,47 +421,27 @@ def latest_round[R: _Round](rounds: Iterable[R]) -> R | None:
     )
 
 
-def add_news_items(session: Session, items: Iterable[NewsItem]) -> int:
-    """Insert items whose URL is not stored yet (also within `items`). Returns the new count."""
-    seen: set[str] = set()
-    new = 0
-    for item in items:
-        url = normalise_url(str(item.url))
-        if url in seen:
-            continue
-        seen.add(url)
-        if session.exec(select(NewsItemRow.id).where(NewsItemRow.url == url)).first() is not None:
-            continue
-        session.add(
-            NewsItemRow(
-                url=url,
-                title=item.title,
-                published=item.published,
-                summary=item.summary,
-                source=item.source,
-            )
-        )
-        new += 1
-    session.flush()
-    return new
-
-
-def link_company_news(
+def save_company_news(
     session: Session,
     company_id: int,
-    news_item_id: int,
     *,
+    url: str,
+    title: str,
+    published: date | None,
     news_kind: str | None,
     summary: str | None,
 ) -> None:
-    """Link a news item to a company (D33). Upserts on the primary key and never deletes, so
+    """Store one article for a company (D33). Upserts on `(company_id, url)` and never deletes, so
     re-running the news agent is idempotent; `news_kind` is set only for big news."""
-    link = session.get(CompanyNewsRow, (company_id, news_item_id))
-    if link is None:
-        link = CompanyNewsRow(company_id=company_id, news_item_id=news_item_id)
-    link.news_kind = news_kind
-    link.summary = summary
-    session.add(link)
+    url = normalise_url(url)
+    row = session.get(CompanyNewsRow, (company_id, url))
+    if row is None:
+        row = CompanyNewsRow(company_id=company_id, url=url, title=title)
+    row.title = title
+    row.published = published
+    row.news_kind = news_kind
+    row.summary = summary
+    session.add(row)
     session.flush()
 
 

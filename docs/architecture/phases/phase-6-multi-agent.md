@@ -17,9 +17,9 @@ flowchart TB
     COMMON["agents/common.py: Deps, run_recorded, AgentFailed"]
     WEBSITE["website.py: verify company website"]
     ENR["enrich.py"]
-    NEWS["news.py: bulk model, RSS match plus 1 search"]
+    NEWS["news.py: bulk model, 1 search"]
     LLM(["Anthropic API"])
-    EXT(["Search, websites, RSS rows"])
+    EXT(["Search, websites"])
     BATCH["BatchBudget with lock (costs.py)"]
     SQL[("SQLite, WAL")]
     CLI --> SEL
@@ -54,7 +54,7 @@ flowchart TB
     WS -- "screen failed" --> F
     E -- no --> N
     RE -- "failed" --> F["status failed or gave_up; nothing else runs"]
-    RE -- "ok" --> N["news (RSS match plus 1 search, writes company_news)"]
+    RE -- "ok" --> N["news (1 search, writes company_news)"]
     N --> O["outcome: ok, partial or failed"]
 ```
 
@@ -97,11 +97,8 @@ assert_tools_allowed(tools, allowed, label)       # RuntimeError before logged_r
 build_tools(fetcher, ch, ledger, *, max_searches=3)   # 0 omits web_search
 
 # agents/news.py
-NEWS_BUDGET = Budget(8, 0.05, max_repairs=1); NEWS_WINDOW_DAYS = 365; MAX_NEWS_PER_COMPANY = 5; MAX_CANDIDATES = 15
+NEWS_BUDGET = Budget(8, 0.05, max_repairs=1); MAX_NEWS_PER_COMPANY = 5
 class NewsEntry(BaseModel): url; title; published: date | None; big: bool; kind: NewsKind | None; summary
-match_name(name) -> str | None                  # None for a too short or generic name: no RSS candidates, search still runs
-match_rss_candidates(session, company, *, window_days, now) -> list[NewsItemRow]   # deterministic
-dedupe_near_duplicates(items, *, threshold=0.8) -> list                            # pure, title-token Jaccard
 collect_news(...) -> list[NewsEntry]; collect_with_result(...) -> (entries, LoopResult)   # NewsFailed
 
 # status.py  (reads db only; the Phase 8 cooldown and Phase 7 reuse it)
@@ -127,14 +124,14 @@ async run(settings, args, *, client=None, stop=None) -> RunSummary(exit_code, te
 
 - **`process_company` is the seam.** `steps` is the set of steps allowed; the function reads the company's status itself and runs those that are due, so callers do not compute the needed steps. It never raises (an unexpected exception rolls the session back and is recorded as `internal_error`) and never prints, so Phase 8's `refresh_company` can call it from an MCP stdio server. The eval runner does **not** go through it: `run_evals._enrich_entry` still calls `enrich_with_result` directly (it needs a `Worker`, a `RunContext` and a cost-breakdown rework).
 - **Per-agent `Deps`:** `_run_step` builds one `Deps` per step from the worker's fetcher and Companies House client, with the bulk model. News gets no Companies House client. Routing, effort and caps are in [cross-cutting 9](../4.%20cross-cutting.md#9-phase-6-agent-caps-and-run-budget).
-- **News input.** Candidates are `news_item` rows whose title or summary contains the normalised company name (legal suffix stripped, whole words) within `NEWS_WINDOW_DAYS` (an undated item counts by `first_seen_at`), near-duplicate-collapsed in code, newest 15 shown. A name that is one generic word yields no candidates. The model rejects same-name false matches, may run the one allowed `web_search` and `fetch_page`, and submits at most 5 entries (big first). RSS candidate URLs are seeded into the run's `SourceLedger` as `fetched=False`; an entry whose URL no tool returned gets one repair, then is dropped. "Big news" is the rubric in the prompt (leadership only for C-suite changes, own-site posts only for funding, acquisition or a named-partner partnership). There is no RSS-only fallback: the agent is the only news writer.
+- **News input.** The model gets the company's name, number, locality, website and one-liner, runs the one allowed `web_search` (and may `fetch_page`), rejects same-name false matches, and submits at most 5 entries (big first). An entry whose URL no tool returned gets one repair, then is dropped. "Big news" is the rubric in the prompt (leadership only for C-suite changes, own-site posts only for funding, acquisition or a named-partner partnership). The agent is the only news writer.
 
 ## What each agent writes
 
 | Agent | Writes | Never writes |
 |---|---|---|
 | enrich | `fact` rows, `funding_round` rows (replaced wholesale), `company.category` | news |
-| news | `news_item` rows for URLs found by search (`source="web_search"`, empty summary), then `company_news` rows via `db.link_company_news` (`news_kind` set only when `big`, one-sentence `summary`); upsert on the primary key, never deletes; run `stats`: `rss_candidates`, `stored`, `big` | `fact` |
+| news | `company_news` rows via `db.save_company_news` (`news_kind` set only when `big`, one-sentence `summary`); upsert on `(company_id, url)`, never deletes; run `stats`: `stored`, `big` | `fact` |
 
 ## Selector, status and retry
 
@@ -159,7 +156,7 @@ Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-co
 
 **Retry policy.** At most one attempt per company and step per invocation, retried by the next invocation (a failed latest attempt is selected, D32) up to 3 failed attempts across runs. The only in-run retry is the one 429 re-run below.
 
-**Stale `running` rows.** A killed process leaves a `running` row with no stats. At startup `reap_abandoned` turns every per-company row still `running` after 30 minutes into `status='error'`, `failure_category='internal_error'`, `error_message='abandoned: process ended before the run finished'`, so it counts as a failed attempt. Batch kinds (`companies_ingest`, `news_ingest`, `pipeline_run`) are never reaped. Two orchestrator processes at once are unsupported: startup refuses (exit 2) if a `pipeline_run` row is `running` and younger than 30 minutes, unless `--force`.
+**Stale `running` rows.** A killed process leaves a `running` row with no stats. At startup `reap_abandoned` turns every per-company row still `running` after 30 minutes into `status='error'`, `failure_category='internal_error'`, `error_message='abandoned: process ended before the run finished'`, so it counts as a failed attempt. Batch kinds (`companies_ingest`, `pipeline_run`) are never reaped. Two orchestrator processes at once are unsupported: startup refuses (exit 2) if a `pipeline_run` row is `running` and younger than 30 minutes, unless `--force`.
 
 **Company result** (one per working-set company; the acceptance rate is `ok` over the working-set size):
 
@@ -192,13 +189,13 @@ Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-co
 
 ## Evaluating the news agent (D28)
 
-The news agent is to be measured before it stays in the default pipeline. No golden labels exist, so hand-check 15 to 20 items: same company, not a duplicate, `big` and `kind` match the rubric, URL in the ledger (code-enforced). Keep it if at least 90 percent of items are about the right company; otherwise fall back to a deterministic RSS-only matcher (not built) and say so. The check has not been done, so no keep-or-merge result exists. The news agent changes no profile value, so the category, business-status and fabricated-funding gates cannot move because of it.
+The news agent is to be measured before it stays in the default pipeline. No golden labels exist, so hand-check 15 to 20 items: same company, not a duplicate, `big` and `kind` match the rubric, URL in the ledger (code-enforced). Keep it if at least 90 percent of items are about the right company; otherwise say so. The check has not been done, so no keep-or-merge result exists. The news agent changes no profile value, so the category, business-status and fabricated-funding gates cannot move because of it.
 
 ## Changes to existing code (built)
 
 | File | Change |
 |---|---|
-| `src/sprout/db.py` | `get_engine`: 30 s busy timeout, WAL and `synchronous=NORMAL` on connect (a read-only file keeps its mode); `RunKind.PIPELINE_RUN`; `link_company_news`; `latest_round` (the D22 rule, shared with `evals/metrics.py` as `last_round`) |
+| `src/sprout/db.py` | `get_engine`: 30 s busy timeout, WAL and `synchronous=NORMAL` on connect (a read-only file keeps its mode); `RunKind.PIPELINE_RUN`; `save_company_news`; `latest_round` (the D22 rule, shared with `evals/metrics.py` as `last_round`) |
 | `src/sprout/costs.py` | `BatchBudget` gains a `threading.Lock` around `charge` and `clamp` and the new `try_slice(cap)`. `enrichment_batch_size`, `COST_PER_COMPANY_USD` and `BUDGET_PER_RUN_USD` remain, unused by the orchestrator (only `tests/test_costs.py` calls them) |
 | `src/sprout/agents/loop.py` | `make_client(api_key, *, max_retries=2)`; no `on_step` callback |
 | `src/sprout/agents/tools.py` | `ALLOWED_NEWS_TOOLS`, `assert_tools_allowed`, `build_tools(max_searches=)` |
@@ -236,16 +233,15 @@ No table or column changes (D10 is not triggered): the Phase 6 data lands in exi
 
 | Aspect | Detail |
 | --- | --- |
-| Role | <ul><li>Deterministic RSS name match, near-duplicate collapse, one search, writes `company_news`</li></ul> |
-| Gotchas | <ul><li>`match_name` returns `None` for generic names, so only the search runs</li></ul> |
+| Role | <ul><li>One search per company, model-scored entries, writes `company_news`</li></ul> |
 
 ## Known weak spots and open items
 
 - **Pre-screen too loose (A1, D34):** validated live and found too loose, not too strict; details in [implementation-notes](../../implementation-notes.md#d34-pre-screen-validation-a1). Whether to tighten the pool is undecided.
-- **News:** near-duplicates from different outlets survive the title-token collapse, the big-news rubric over-flags, and some items have no published date.
+- **News:** the big-news rubric over-flags, and some items have no published date.
 - **`profile_gaps`** treats an explicit "not disclosed" (NULL) fact as a gap, so most ok companies are reported incomplete.
 - **Not exercised live:** a SIGINT mid-run and the 429 gate (unit tests only). A stale `running` batch row (for example `companies_ingest`) is never reaped.
 - **A34:** the absence of news labels stays as in [risks](../5.%20risks.md).
-- **Not built:** `on_step` callback, live per-iteration progress, an `enrichment_state` table, an RSS-only news fallback, low-confidence-first ordering.
+- **Not built:** `on_step` callback, live per-iteration progress, an `enrichment_state` table, low-confidence-first ordering.
 
 This phase reuses the generic loop, tool pattern and cost accounting from [Phase 3](phase-3-enrichment.md) (D12), `BatchBudget` from [Phase 5](phase-5-evals-guardrails.md) (D24), `enrich_with_result(extra_context=)` and `stats["sources"]`. Step records are written per run by the worker's own session after `run_agent` returns, as described in the [Phase 4 page](phase-4-observability.md#what-phase-6-uses-from-this-phase).

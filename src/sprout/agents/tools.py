@@ -14,8 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 from sprout.agents.loop import Tool, ToolOutcome
 from sprout.sources.companies_house import PUBLIC_COMPANY_URL, CompaniesHouseClient
 from sprout.sources.http import FetchError
-from sprout.sources.rss import normalise_url
-from sprout.sources.web import Page, WebFetcher
+from sprout.sources.web import Page, WebFetcher, normalise_url
 
 TOOL_RESULT_MAX_CHARS = 8_000
 TRUNCATION_MARKER = "\n[truncated]"

@@ -15,7 +15,7 @@ An agent system that discovers UK AI startups, groups them by sector (AI models,
 
 ## Data strategy
 No free, complete "UK AI startups + funding" dataset exists (Crunchbase, Dealroom, Beauhurst are paid or ToS-restricted), so Sprout builds one from public sources:
-- **Candidate sourcing:** Companies House API (free; SIC codes 62xxx/63xxx, incorporation date, name/description heuristics) and news RSS feeds.
+- **Candidate sourcing:** Companies House API (free; SIC codes 62xxx/63xxx, incorporation date, name/description heuristics).
 - **Enrichment:** company website plus web search/fetch (Claude's server-side `web_search`/`web_fetch` tools, or Tavily/Brave if cheaper), funding announcements in the news.
 - **Scope:** target ~150 companies, not "all".
 
@@ -26,8 +26,8 @@ No free, complete "UK AI startups + funding" dataset exists (Crunchbase, Dealroo
                      Orchestrator (supervisor)
                   ┌────────────────┴───────────────┐
            Enrichment agent                    News agent
-           (tool loop:                         (RSS + search,
-           search/fetch →                      dedupe, rank)
+           (tool loop:                         (web search,
+           search/fetch →                      rank)
            Pydantic schema)
                                │
                        SQLite + provenance
@@ -42,7 +42,7 @@ pyproject.toml            # uv, Python >= 3.12
 project-plan.md
 src/sprout/
   config.py  models.py  db.py  costs.py
-  sources/   companies_house.py  rss.py  web.py
+  sources/   companies_house.py  web.py
   agents/    loop.py  enrich.py  news.py  orchestrator.py
   mcp_server.py
   app/dashboard.py
@@ -72,10 +72,10 @@ tests/
 
 **Steps**
 1. Install `uv`; create the project with Python 3.12 (system Python is 3.9, too old for the MCP SDK).
-2. Add dependencies: `anthropic`, `pydantic`, `sqlmodel`, `httpx`, `feedparser`, `mcp`, `streamlit`, `pytest`, `ruff`.
+2. Add dependencies: `anthropic`, `pydantic`, `sqlmodel`, `httpx`, `mcp`, `streamlit`, `pytest`, `ruff`.
 3. Obtain keys: Anthropic API key (set a monthly spend limit in the console) and a Companies House API key; store in `.env`, add `.env` to `.gitignore`, commit a `.env.example`.
 4. Define the **taxonomy** (20 categories: Fintech and payments, Enterprise software and cloud, Data, AI infrastructure and developer tools, Sales, marketing and customer experience software, HR and people software, Cybersecurity, Biotech and pharma, Healthtech and digital health, Electric vehicles and batteries, Climate, energy and cleantech, Semiconductors and AI hardware, Robotics and automation, Defense, aerospace and space, E-commerce and retail tech, Consumer social, media and gaming, Logistics and supply chain, Deep tech and quantum, Consultancy and services, Legal tech and compliance, Other) and **stage** enum (Pre-seed, Seed, Series A, B, C, D, E, F, Growth, Unknown).
-5. Define the Pydantic schemas: `Sourced[T]` (value, source_url, retrieved_at, confidence) and `CompanyProfile` (name, website, hq, founded, category, stage, total_raised_million_usd, valuation_million_usd, funding_rounds, business_model, target_user, one_liner, news[]).
+5. Define the Pydantic schemas: `Sourced[T]` (value, source_url, retrieved_at, confidence) and `CompanyProfile` (name, website, hq, founded, category, stage, total_raised_million_usd, valuation_million_usd, funding_rounds, business_model, target_user, one_liner).
 6. Set up `ruff`, `pytest`, and a minimal CI workflow.
 
 **Acceptance criteria**
@@ -90,17 +90,16 @@ tests/
 ---
 
 ## Phase 2 - Data foundations (≈6h)
-**Objectives:** reliable, cached, rate-limited ingestion of candidate companies and news into SQLite.
+**Objectives:** reliable, cached, rate-limited ingestion of candidate companies into SQLite.
 
 **Steps**
 1. Build the Companies House client (search, company profile, filing history) with retries, backoff and a response cache.
-2. Build RSS ingestion for 3–5 UK tech/startup feeds; normalise to `news_item` rows (url, title, published, summary, source); dedupe by URL.
-3. Create the SQLite schema with SQLModel: `company`, `fact` (provenance), `news_item`, `run_log`.
-4. Write a simple candidate filter (SIC code + keyword heuristics for "AI/machine learning") and load an initial list of ~200 candidates.
-5. Add a polite web fetcher: robots.txt check, per-domain rate limit, on-disk cache, HTML→text extraction.
+2. Create the SQLite schema with SQLModel: `company`, `fact` (provenance), `run_log`.
+3. Write a simple candidate filter (SIC code + keyword heuristics for "AI/machine learning") and load an initial list of ~200 candidates.
+4. Add a polite web fetcher: robots.txt check, per-domain rate limit, on-disk cache, HTML→text extraction.
 
 **Acceptance criteria**
-- One command (`python -m sprout.ingest`) populates ≥200 candidate companies and ≥100 news items.
+- One command (`python -m sprout.ingest`) populates ≥200 candidate companies.
 - Re-running it creates no duplicates and makes no repeated HTTP calls for cached URLs.
 - Network code is tested against recorded/mocked responses.
 
@@ -181,7 +180,7 @@ tests/
 **Objectives:** split the work across specialised agents and run the whole pipeline over ~50 companies (for now).
 
 **Steps**
-1. **News agent:** for each company, collect recent items (RSS match + search), dedupe near-duplicates, and score "big news" (funding round, acquisition, major partnership, regulatory event, leadership change) with a short summary.
+1. **News agent:** for each company, collect recent items (web search) and score "big news" (funding round, acquisition, major partnership, regulatory event, leadership change) with a short summary.
 2. **Orchestrator:** supervisor that decides which companies need work (new, stale, low-confidence), runs agents concurrently with a concurrency limit, and records per-company status/errors so a failure doesn't stop the run.
 3. Make the pipeline resumable and idempotent (skip fresh, retry failed).
 
@@ -275,7 +274,7 @@ tests/
 |---|---|
 | Funding data is sparse or paywalled | Allow "not disclosed"; prefer press releases/news; report coverage % |
 | Costs creep up | Cheap-model routing, caching, per-run caps, spend limit in the console |
-| Scraping blocked or ToS issues | robots.txt, rate limits, prefer APIs/RSS, store snippets + links not full copies |
+| Scraping blocked or ToS issues | robots.txt, rate limits, prefer APIs, store snippets + links not full copies |
 | Stale data | Per-fact `retrieved_at`, weekly refresh of stale entries |
 | Scope creep | Fixed 50-company target for now; cut list above |
 

@@ -16,7 +16,7 @@ cp .env.example .env   # add ANTHROPIC_API_KEY and COMPANIES_HOUSE_API_KEY
 ## Usage
 
 ```bash
-uv run python -m sprout.ingest        # load candidates from Companies House and RSS feeds into data/sprout.db
+uv run python -m sprout.ingest        # load candidates from Companies House into data/sprout.db
 uv run python -m sprout.hello         # one tiny Claude call to check the API key
 uv run streamlit run streamlit_app.py # dashboard
 ```

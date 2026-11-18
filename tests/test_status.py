@@ -8,7 +8,6 @@ from sprout.db import (
     CompanyNewsRow,
     Fact,
     FundingRoundRow,
-    NewsItemRow,
     RunKind,
     RunLog,
     get_engine,
@@ -182,7 +181,7 @@ def test_reaper_marks_old_running_rows_and_spares_young_and_batch(session, compa
     old = add_run(session, company, ENRICH, days_ago=1, status="running")
     young = add_run(session, company, NEWS, days_ago=0.01, status="running")
     batch = RunLog(
-        kind=RunKind.NEWS_INGEST.value, started_at=NOW - timedelta(days=2), status="running"
+        kind=RunKind.COMPANIES_INGEST.value, started_at=NOW - timedelta(days=2), status="running"
     )
     session.add(batch)
     session.commit()
@@ -234,12 +233,13 @@ def test_profile_gaps(session, company):
     session.commit()
     assert profile_gaps(session, company.id) == ["stage", "target_user", "news"]
 
-    item = NewsItemRow(url="https://n.example/1", title="ACME raises")
     session.add_all(
-        [fact("stage", '"Seed"', "https://b.example"), fact("target_user", '"SMEs"'), item]
+        [
+            fact("stage", '"Seed"', "https://b.example"),
+            fact("target_user", '"SMEs"'),
+            CompanyNewsRow(company_id=company.id, url="https://n.example/1", title="ACME raises"),
+        ]
     )
-    session.commit()
-    session.add(CompanyNewsRow(company_id=company.id, news_item_id=item.id))
     session.commit()
     assert profile_gaps(session, company.id) == []
 

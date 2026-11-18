@@ -149,12 +149,12 @@ def test_unrecognized_category_falls_back_to_other_once_repair_is_declined():
     assert profile.category is Category.OTHER
 
 
-def test_model_supplied_retrieved_at_and_news_are_ignored():
+def test_model_supplied_retrieved_at_is_ignored():
     ledger = ledger_with(SEEN)
-    raw = submission(news=[{"title": "x", "url": "https://x.example"}])
+    raw = submission()
     raw["hq"] = {**raw["hq"], "retrieved_at": "1999-01-01T00:00:00Z"}
     profile = validate_submission(raw, "ACME", ledger)
-    assert profile.news == [] and profile.hq.retrieved_at.year != 1999
+    assert profile.hq.retrieved_at.year != 1999
 
 
 def test_invented_source_url_is_rejected_and_the_error_lists_citable_urls():

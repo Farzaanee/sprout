@@ -1,6 +1,6 @@
 """Resilient HTTP GET: disk cache, rate limiting, retries with backoff.
 
-Every network source (Companies House, RSS, the web fetcher) goes through `HttpClient`, so
+Every network source (Companies House, the web fetcher) goes through `HttpClient`, so
 caching and politeness are implemented once. Credentials are passed to the underlying
 `httpx.Client` and are never part of a cache key or a cache file.
 """

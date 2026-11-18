@@ -35,7 +35,7 @@ def test_shows_counts_and_action_tab_when_enabled(monkeypatch, tmp_path):
     at = _app(monkeypatch, tmp_path, actions=True).run()
     assert not at.exception
     assert [t.label for t in at.tabs][-2:] == ["Observability", "Run & test"]
-    assert any(b.label == "Both" for b in at.tabs[-1].button)
+    assert any(b.label == "Ingest companies" for b in at.tabs[-1].button)
     assert {m.label: m.value for m in at.metric}["Candidate companies"] == "1"
 
 

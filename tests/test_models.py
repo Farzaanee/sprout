@@ -9,7 +9,6 @@ from sprout.models import (
     CompanyProfile,
     Confidence,
     FundingRound,
-    NewsItem,
     NewsKind,
     Sourced,
     Stage,
@@ -108,7 +107,6 @@ def test_empty_profile_defaults_to_not_disclosed():
     assert p.business_status.value is None
     assert p.total_raised_million_usd.value is None
     assert p.valuation_million_usd.value is None
-    assert p.news == []
 
 
 def test_default_sourced_fields_are_not_shared_between_profiles():
@@ -134,7 +132,6 @@ def test_full_profile_round_trips_through_json():
                 source_url=SRC,
             )
         ],
-        news=[NewsItem(title="Acme raises seed", url=SRC)],
     )
     assert CompanyProfile.model_validate_json(p.model_dump_json()) == p
 
@@ -155,13 +152,6 @@ def test_full_profile_round_trips_through_json():
 def test_invalid_profiles_are_rejected(bad):
     with pytest.raises(ValidationError):
         CompanyProfile.model_validate(bad)
-
-
-def test_news_item_requires_title_and_http_url():
-    with pytest.raises(ValidationError):
-        NewsItem(title="", url=SRC)
-    with pytest.raises(ValidationError):
-        NewsItem(title="x", url="javascript:alert(1)")
 
 
 def test_news_kind_vocabulary():

@@ -142,9 +142,9 @@ def render_progress() -> None:
     cols = st.columns(4)
     cols[0].metric("Candidate companies", counts["companies"])
     cols[1].metric("Facts (with sources)", counts["facts"])
-    cols[2].metric("News items", counts["news_items"])
+    cols[2].metric("News items", counts["news"])
     cols[3].metric("Logged runs", counts["runs"])
-    if counts["companies"] == 0 and counts["news_items"] == 0:
+    if counts["companies"] == 0 and counts["news"] == 0:
         st.info(
             "The database is empty. Use the Run & test tab (or `uv run python -m sprout.ingest`)."
         )
@@ -501,9 +501,11 @@ def render_news() -> None:
     with _session() as session:
         items = queries.search_news(session, text=text)
     st.caption(f"{len(items)} items")
-    for item in items:
+    for item, company_name in items:
         st.markdown(f"**[{item.title}]({item.url})**")
-        st.caption(f"{item.source or 'unknown source'} · {item.published or 'no date'}")
+        st.caption(
+            f"{company_name} · {item.news_kind or 'not big news'} · {item.published or 'no date'}"
+        )
         if item.summary:
             st.write(item.summary)
 
@@ -830,18 +832,11 @@ def render_run_and_test() -> None:
     st.subheader("Ingestion")
     st.caption("Safe to repeat: no duplicates, and cached URLs are not fetched again.")
     max_per_term = st.number_input("Companies House results per search term", 10, 1000, 50)
-    cols = st.columns(3)
-    jobs = {
-        "News only": ["--skip-companies"],
-        "Companies only": ["--skip-news", "--max-per-term", str(int(max_per_term))],
-        "Both": ["--max-per-term", str(int(max_per_term))],
-    }
-    for col, (label, argv) in zip(cols, jobs.items(), strict=True):
-        if col.button(label, width="stretch"):
-            with st.spinner(f"Running ingestion: {label.lower()}…"):
-                code, output = _run_captured(ingest.main, argv)
-            (st.success if code == 0 else st.error)(f"exit code {code}")
-            st.code(output)
+    if st.button("Ingest companies", width="stretch"):
+        with st.spinner("Running ingestion…"):
+            code, output = _run_captured(ingest.main, ["--max-per-term", str(int(max_per_term))])
+        (st.success if code == 0 else st.error)(f"exit code {code}")
+        st.code(output)
 
     st.subheader("Claude connectivity")
     if st.button("Send one tiny 'hello' request (costs a fraction of a penny)"):

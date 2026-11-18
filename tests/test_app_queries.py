@@ -6,17 +6,18 @@ from sqlmodel import Session
 from sprout.app import queries
 from sprout.candidates import assess
 from sprout.db import (
+    Company,
+    CompanyNewsRow,
     OfficerRow,
     RunLog,
     RunLogStep,
-    add_news_items,
     get_engine,
     init_db,
     save_fact,
     upsert_company,
     utcnow,
 )
-from sprout.models import Confidence, NewsItem, Sourced
+from sprout.models import Confidence, Sourced
 from sprout.sources.companies_house import CompanyHit
 
 PLAN = """
@@ -174,7 +175,7 @@ def test_counts_facts_keywords_and_years(session):
         Sourced[str](value="London", source_url="https://example.com", confidence=Confidence.LOW),
     )
     session.commit()
-    assert queries.count_rows(session) == {"companies": 1, "facts": 1, "news_items": 0, "runs": 0}
+    assert queries.count_rows(session) == {"companies": 1, "facts": 1, "news": 0, "runs": 0}
     assert [f.field for f in queries.company_facts(session, company.id)] == ["hq"]
     assert queries.keyword_counts(session)["neural"] == 1
     assert queries.incorporation_year_counts(session) == {2020: 1}
@@ -293,21 +294,35 @@ def test_business_status_counts_uses_the_winning_fact_per_company(session):
 
 
 def test_search_news_matches_title_or_summary_newest_first(session):
-    add_news_items(
-        session,
+    company = Company(company_number="1", name="ACME")
+    session.add(company)
+    session.commit()
+    session.add_all(
         [
-            NewsItem(url="https://a.example/1", title="Seed round", published=date(2026, 1, 1)),
-            NewsItem(
+            CompanyNewsRow(
+                company_id=company.id,
+                url="https://a.example/1",
+                title="Seed round",
+                published=date(2026, 1, 1),
+            ),
+            CompanyNewsRow(
+                company_id=company.id,
                 url="https://a.example/2",
                 title="Other",
                 summary="a seed deal",
                 published=date(2026, 2, 1),
             ),
-            NewsItem(url="https://a.example/3", title="Unrelated", published=date(2026, 3, 1)),
-        ],
+            CompanyNewsRow(
+                company_id=company.id,
+                url="https://a.example/3",
+                title="Unrelated",
+                published=date(2026, 3, 1),
+            ),
+        ]
     )
     session.commit()
-    assert [n.title for n in queries.search_news(session, text="seed")] == ["Other", "Seed round"]
+    found = queries.search_news(session, text="seed")
+    assert [(n.title, name) for n, name in found] == [("Other", "ACME"), ("Seed round", "ACME")]
     assert len(queries.search_news(session)) == 3
 
 

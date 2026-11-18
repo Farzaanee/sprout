@@ -211,7 +211,7 @@ def profile_gaps(session: Session, company_id: int) -> list[str]:
         select(FundingRoundRow.id).where(FundingRoundRow.company_id == company_id).limit(1)
     ).first()
     has_news = session.exec(
-        select(CompanyNewsRow.news_item_id).where(CompanyNewsRow.company_id == company_id).limit(1)
+        select(CompanyNewsRow.url).where(CompanyNewsRow.company_id == company_id).limit(1)
     ).first()
 
     checks = {
