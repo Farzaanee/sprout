@@ -7,7 +7,8 @@ want caching (the dashboard) wrap these functions themselves.
 """
 
 import json
-from collections.abc import Iterable
+import statistics
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -25,7 +26,7 @@ from sprout.db import (
     latest_round,
     winning_facts,
 )
-from sprout.models import PUBLIC_COMPANY_URL, BusinessStatus
+from sprout.models import PUBLIC_COMPANY_URL, BusinessStatus, Stage
 
 NOT_DISCLOSED = "Not disclosed"
 
@@ -75,14 +76,68 @@ class CompanySearch:
     coverage: Coverage  # over every match, not just the companies returned
 
 
+@dataclass(frozen=True)
+class CompanyCard:
+    """One row of the companies list. A missing fact means not researched; a fact with
+    `disclosed=False` means researched, nothing found."""
+
+    company: Company
+    one_liner: ProfileFact | None
+    stage: ProfileFact | None
+    founded: ProfileFact | None
+    latest_round: FundingRoundRow | None  # D22
+
+
+@dataclass(frozen=True)
+class StageFunding:
+    """Rounds of one stage. The amounts are None, never 0, when no round of the stage has one."""
+
+    stage: str
+    rounds: int
+    amount_known: int  # rounds with an amount
+    total_million_usd: int | None
+    median_million_usd: float | None
+
+
+@dataclass(frozen=True)
+class FundingByStage:
+    stages: list[StageFunding]  # `Stage` order, only stages that have a round
+    companies: int  # companies in scope
+    companies_with_rounds: int
+
+
+@dataclass(frozen=True)
+class RecentRound:
+    company_id: int
+    company_name: str
+    round: FundingRoundRow
+
+
 def _parse(fact: Fact | None) -> Any:
     return None if fact is None or fact.value_json is None else json.loads(fact.value_json)
 
 
-def _winning_by_company(session: Session, fields: Iterable[str]) -> dict[int, dict[str, Fact]]:
+def _profile_fact(fact: Fact) -> ProfileFact:
+    return ProfileFact(
+        field=fact.field,
+        value=_parse(fact),
+        disclosed=fact.value_json is not None,
+        source_url=fact.source_url,
+        confidence=fact.confidence,
+        retrieved_at=fact.retrieved_at,
+        note=fact.note,
+    )
+
+
+def _winning_by_company(
+    session: Session, fields: Iterable[str], company_ids: Collection[int] | None = None
+) -> dict[int, dict[str, Fact]]:
     """Winning fact per field per company (A6, see `winning_facts`), from one query."""
+    query = select(Fact).where(col(Fact.field).in_(list(fields)))
+    if company_ids is not None:
+        query = query.where(col(Fact.company_id).in_(list(company_ids)))
     by_company: dict[int, list[Fact]] = {}
-    for fact in session.exec(select(Fact).where(col(Fact.field).in_(list(fields)))).all():
+    for fact in session.exec(query).all():
         by_company.setdefault(fact.company_id, []).append(fact)
     return {company_id: winning_facts(facts) for company_id, facts in by_company.items()}
 
@@ -99,11 +154,8 @@ def _winning_values(session: Session, field: str) -> dict[int, Any]:
 def _latest_funding_amounts(session: Session) -> dict[int, int | None]:
     """Amount of each company's latest round (D22); None when that round has no amount. Companies
     with no rounds are absent."""
-    by_company: dict[int, list[FundingRoundRow]] = {}
-    for funding_round in session.exec(select(FundingRoundRow)).all():
-        by_company.setdefault(funding_round.company_id, []).append(funding_round)
     amounts: dict[int, int | None] = {}
-    for company_id, rounds in by_company.items():
+    for company_id, rounds in _rounds_by_company(session, None).items():
         latest = latest_round(rounds)
         if latest is not None:
             amounts[company_id] = latest.amount_million_usd
@@ -116,18 +168,7 @@ def get_profile(session: Session, company_id: int) -> Profile | None:
     if company is None:
         return None
     winners = winning_facts(session.exec(select(Fact).where(Fact.company_id == company_id)).all())
-    facts = {
-        field: ProfileFact(
-            field=field,
-            value=_parse(fact),
-            disclosed=fact.value_json is not None,
-            source_url=fact.source_url,
-            confidence=fact.confidence,
-            retrieved_at=fact.retrieved_at,
-            note=fact.note,
-        )
-        for field, fact in sorted(winners.items())
-    }
+    facts = {field: _profile_fact(fact) for field, fact in sorted(winners.items())}
     rounds = company_funding_rounds(session, company_id)
     news = list(
         session.exec(
@@ -347,16 +388,20 @@ def search_companies(
     category: str | None = None,
     stage: str | None = None,
     min_funding_million_usd: int | None = None,
+    max_funding_million_usd: int | None = None,
     founded_from: int | None = None,
     founded_to: int | None = None,
+    enriched_only: bool = False,
     limit: int = 500,
 ) -> CompanySearch:
-    """Candidates ordered by score. `stage`, `business_status` and the founded years match the
-    winning fact; funding is the amount of the latest round (D22). A company whose value is not
-    known never matches a filter on it. Coverage counts known values among all matches."""
+    """Candidates ordered by score. `text` matches the name or the winning `one_liner`; `stage`,
+    `business_status` and the founded years match the winning fact; funding is the amount of the
+    latest round (D22). A company whose value is not known never matches a filter on it.
+    `enriched_only` keeps companies with a category. Coverage counts known values among all
+    matches."""
     query = select(Company).where(Company.candidate_score >= min_score)
-    if text.strip():
-        query = query.where(col(Company.name).icontains(text.strip(), autoescape=True))
+    if enriched_only:
+        query = query.where(col(Company.category).is_not(None))
     if incorporated_from is not None:
         query = query.where(col(Company.incorporated) >= incorporated_from)
     if status:
@@ -368,12 +413,18 @@ def search_companies(
     if keyword:
         rows = [row for row in rows if keyword in row.matched_keywords]
 
-    winners = _winning_by_company(session, ("stage", "business_status", "founded"))
+    winners = _winning_by_company(session, ("stage", "business_status", "founded", "one_liner"))
     funding = _latest_funding_amounts(session)
 
     def value(company: Company, field: str) -> Any:
         return _parse(winners.get(company.id, {}).get(field))
 
+    if needle := text.strip().casefold():
+        rows = [
+            row
+            for row in rows
+            if needle in row.name.casefold() or needle in (value(row, "one_liner") or "").casefold()
+        ]
     if business_status:
         rows = [row for row in rows if value(row, "business_status") == business_status]
     if stage:
@@ -392,12 +443,113 @@ def search_companies(
             if (amount := funding.get(row.id)) is not None and amount >= min_funding_million_usd
         ]
 
+    if max_funding_million_usd is not None:
+        rows = [
+            row
+            for row in rows
+            if (amount := funding.get(row.id)) is not None and amount <= max_funding_million_usd
+        ]
+
     coverage = Coverage(
         matched=len(rows),
         stage_known=sum(value(row, "stage") is not None for row in rows),
         funding_known=sum(funding.get(row.id) is not None for row in rows),
     )
     return CompanySearch(companies=rows[:limit], coverage=coverage)
+
+
+def company_cards(session: Session, company_ids: Sequence[int]) -> list[CompanyCard]:
+    """List rows in the order given; an unknown id is skipped. One winning-fact query and one
+    rounds query, however many companies."""
+    companies = {
+        company.id: company
+        for company in session.exec(
+            select(Company).where(col(Company.id).in_(list(company_ids)))
+        ).all()
+    }
+    winners = _winning_by_company(session, ("one_liner", "stage", "founded"), company_ids)
+    rounds = _rounds_by_company(session, company_ids)
+
+    def card(company: Company) -> CompanyCard:
+        facts = {field: _profile_fact(fact) for field, fact in winners.get(company.id, {}).items()}
+        return CompanyCard(
+            company=company,
+            one_liner=facts.get("one_liner"),
+            stage=facts.get("stage"),
+            founded=facts.get("founded"),
+            latest_round=latest_round(rounds.get(company.id, [])),
+        )
+
+    return [card(companies[company_id]) for company_id in company_ids if company_id in companies]
+
+
+def _rounds_by_company(
+    session: Session, company_ids: Collection[int] | None
+) -> dict[int, list[FundingRoundRow]]:
+    query = select(FundingRoundRow)
+    if company_ids is not None:
+        query = query.where(col(FundingRoundRow.company_id).in_(list(company_ids)))
+    by_company: dict[int, list[FundingRoundRow]] = {}
+    for funding_round in session.exec(query).all():
+        by_company.setdefault(funding_round.company_id, []).append(funding_round)
+    return by_company
+
+
+def funding_by_stage(
+    session: Session, company_ids: Collection[int] | None = None
+) -> FundingByStage:
+    """Rounds grouped by the round's own stage. A stage outside the `Stage` enum goes in the
+    "Unknown" bucket, which sorts last like the enum. Unknown amounts are left out of the total
+    and median; a stage with none has None for both."""
+    by_company = _rounds_by_company(session, company_ids)
+    known_stages = {stage.value for stage in Stage}
+    by_stage: dict[str, list[int | None]] = {}
+    for rounds in by_company.values():
+        for funding_round in rounds:
+            stage = (
+                funding_round.stage if funding_round.stage in known_stages else Stage.UNKNOWN.value
+            )
+            by_stage.setdefault(stage, []).append(funding_round.amount_million_usd)
+    stages = []
+    for stage in Stage:
+        if stage.value not in by_stage:
+            continue
+        amounts = [amount for amount in by_stage[stage.value] if amount is not None]
+        stages.append(
+            StageFunding(
+                stage=stage.value,
+                rounds=len(by_stage[stage.value]),
+                amount_known=len(amounts),
+                total_million_usd=sum(amounts) if amounts else None,
+                median_million_usd=statistics.median(amounts) if amounts else None,
+            )
+        )
+    companies = (
+        len(set(company_ids))
+        if company_ids is not None
+        else session.exec(select(func.count()).select_from(Company)).one()
+    )
+    return FundingByStage(stages=stages, companies=companies, companies_with_rounds=len(by_company))
+
+
+def recent_rounds(
+    session: Session, company_ids: Collection[int] | None = None, *, limit: int = 10
+) -> list[RecentRound]:
+    """Newest announced rounds first; undated rounds last. A round with no amount is kept."""
+    query = select(FundingRoundRow, Company.name).join(
+        Company, col(FundingRoundRow.company_id) == col(Company.id)
+    )
+    if company_ids is not None:
+        query = query.where(col(FundingRoundRow.company_id).in_(list(company_ids)))
+    query = query.order_by(
+        col(FundingRoundRow.announced).is_(None),
+        col(FundingRoundRow.announced).desc(),
+        col(FundingRoundRow.id),
+    )
+    return [
+        RecentRound(company_id=row.company_id, company_name=name, round=row)
+        for row, name in session.exec(query.limit(limit)).all()
+    ]
 
 
 def company_facts(session: Session, company_id: int) -> list[Fact]:
@@ -430,12 +582,28 @@ def company_officers(session: Session, company_id: int) -> list[OfficerRow]:
 
 
 def search_news(
-    session: Session, *, text: str = "", limit: int = 200
+    session: Session,
+    *,
+    text: str = "",
+    big_only: bool = False,
+    category: str | None = None,
+    since: date | None = None,
+    company_ids: Collection[int] | None = None,
+    limit: int = 200,
 ) -> list[tuple[CompanyNewsRow, str]]:
-    """News rows with their company's name, newest first."""
+    """News rows with their company's name, newest first, undated last. `big_only` keeps rows with
+    a `news_kind`; `since` keeps rows published on or after that date (undated rows never match)."""
     query = select(CompanyNewsRow, Company.name).join(
         Company, col(CompanyNewsRow.company_id) == col(Company.id)
     )
+    if big_only:
+        query = query.where(col(CompanyNewsRow.news_kind).is_not(None))
+    if category:
+        query = query.where(Company.category == category)
+    if since is not None:
+        query = query.where(col(CompanyNewsRow.published) >= since)
+    if company_ids is not None:
+        query = query.where(col(CompanyNewsRow.company_id).in_(list(company_ids)))
     if text.strip():
         pattern = text.strip()
         query = query.where(

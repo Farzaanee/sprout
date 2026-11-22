@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event
 from sqlmodel import Session
 
 from sprout import queries
@@ -169,12 +170,223 @@ def test_search_companies_coverage_counts_known_values_over_all_matches(session,
 
 def test_search_companies_loads_winning_facts_once(session, pool):
     statements: list[str] = []
-    from sqlalchemy import event
-
     engine = session.get_bind()
     event.listen(engine, "before_cursor_execute", lambda *args: statements.append(args[2]))
     queries.search_companies(session, stage="Seed", business_status="x", founded_from=2000)
     assert sum("FROM fact" in s for s in statements) == 1
+
+
+def test_search_companies_text_matches_name_or_winning_one_liner(session, pool):
+    a, b, _, _ = pool
+    _fact(session, a, "one_liner", "Warehouse robots for retailers", retrieved_at=utcnow())
+    _fact(session, b, "one_liner", "Payments for SMEs")
+    newer = utcnow() + timedelta(days=1)
+    _fact(session, b, "one_liner", None, url="https://b.example", retrieved_at=newer)  # newer NULL
+
+    def names(text):
+        return set(_names(queries.search_companies(session, text=text)))
+
+    assert names("WAREHOUSE") == {"Alpha Robotics Ltd"}
+    assert names("payments") == {"Beta Robotics Ltd"}  # a valued fact beats the newer NULL (A6)
+    assert names("gamma") == {"Gamma Robotics Ltd"}  # name still matches
+    assert "100%" not in names("100%")  # wildcards are not special in the one-liner either
+    assert queries.search_companies(session, text="100%").companies == []
+
+
+def test_search_companies_one_liner_ignores_superseded_value(session):
+    company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    old = datetime.now(UTC) - timedelta(days=30)
+    _fact(session, company, "one_liner", "Old pitch", url="https://a.example", retrieved_at=old)
+    _fact(session, company, "one_liner", "New pitch", url="https://b.example")
+
+    assert queries.search_companies(session, text="old pitch").companies == []
+    assert _names(queries.search_companies(session, text="new pitch")) == ["Neural Robotics Ltd"]
+
+
+def test_search_companies_enriched_only_and_max_funding(session, pool):
+    assert len(queries.search_companies(session).companies) == 4
+    enriched = queries.search_companies(session, enriched_only=True)
+    assert set(_names(enriched)) == {
+        "Alpha Robotics Ltd",
+        "Beta Robotics Ltd",
+        "Gamma Robotics Ltd",
+    }
+    assert enriched.coverage.matched == 3
+
+    under_40 = queries.search_companies(session, max_funding_million_usd=40)
+    assert _names(under_40) == ["Alpha Robotics Ltd"]  # unknown latest amounts never match
+    assert queries.search_companies(session, max_funding_million_usd=29).companies == []
+    band = queries.search_companies(
+        session, min_funding_million_usd=30, max_funding_million_usd=30, enriched_only=True
+    )
+    assert _names(band) == ["Alpha Robotics Ltd"]
+
+
+def test_company_cards_keep_order_and_carry_provenance(session, pool):
+    a, b, c, d = pool
+    _fact(session, a, "one_liner", "Warehouse robots", url="https://a.example")
+
+    cards = queries.company_cards(session, [d.id, a.id, c.id, 999])
+
+    assert [card.company.name for card in cards] == [
+        "Delta Robotics Ltd",
+        "Alpha Robotics Ltd",
+        "Gamma Robotics Ltd",
+    ]  # given order, unknown id skipped
+    delta, alpha, gamma = cards
+    assert (delta.one_liner, delta.stage, delta.founded, delta.latest_round) == (None,) * 4
+    assert alpha.one_liner.value == "Warehouse robots"
+    assert alpha.one_liner.source_url == "https://a.example/"
+    assert alpha.stage.value == "Seed" and alpha.founded.value == 2019
+    assert alpha.latest_round.stage == "Series A"
+    assert gamma.stage.disclosed is False  # researched, nothing found
+    assert gamma.stage.display_value == queries.NOT_DISCLOSED
+
+
+def test_company_cards_empty_ids_and_query_count(session, pool):
+    assert queries.company_cards(session, []) == []
+
+    statements: list[str] = []
+    event.listen(session.get_bind(), "before_cursor_execute", lambda *a: statements.append(a[2]))
+    queries.company_cards(session, [company.id for company in pool])
+    assert sum("FROM fact" in s for s in statements) == 1
+    assert sum("FROM funding_round" in s for s in statements) == 1
+
+
+def test_funding_by_stage_orders_stages_and_keeps_unknown_amounts_none(session, pool):
+    a, b, c, _ = pool
+    _round(session, c, "Pre-seed", None, date(2022, 1, 1))  # no amount anywhere in this stage
+
+    result = queries.funding_by_stage(session)
+
+    assert [s.stage for s in result.stages] == ["Pre-seed", "Seed", "Series A"]  # Stage order
+    pre_seed, seed, series_a = result.stages
+    assert (pre_seed.rounds, pre_seed.amount_known) == (1, 0)
+    assert pre_seed.total_million_usd is None and pre_seed.median_million_usd is None
+    assert (seed.rounds, seed.amount_known, seed.total_million_usd) == (2, 2, 55)
+    assert seed.median_million_usd == 27.5
+    assert (series_a.rounds, series_a.amount_known, series_a.total_million_usd) == (2, 1, 30)
+    assert series_a.median_million_usd == 30
+    assert (result.companies, result.companies_with_rounds) == (4, 3)
+
+
+def test_funding_by_stage_puts_off_enum_stages_in_unknown_last(session, pool):
+    a, b, _, _ = pool
+    _round(session, a, "Mezzanine", 7, date(2025, 3, 1))
+    _round(session, b, "", None, None)
+
+    result = queries.funding_by_stage(session)
+
+    assert [s.stage for s in result.stages] == ["Seed", "Series A", "Unknown"]
+    assert (result.stages[-1].rounds, result.stages[-1].total_million_usd) == (2, 7)
+
+
+def test_funding_by_stage_restricts_to_company_ids(session, pool):
+    a, b, c, d = pool
+
+    only_b = queries.funding_by_stage(session, [b.id, d.id])
+    assert [(s.stage, s.rounds) for s in only_b.stages] == [("Seed", 1), ("Series A", 1)]
+    assert (only_b.companies, only_b.companies_with_rounds) == (2, 1)
+
+    nobody = queries.funding_by_stage(session, [])
+    assert nobody == queries.FundingByStage(stages=[], companies=0, companies_with_rounds=0)
+    assert queries.funding_by_stage(session, [c.id]).stages == []
+
+
+def test_recent_rounds_newest_first_undated_last_and_keeps_null_amount(session, pool):
+    a, b, c, d = pool
+    _round(session, c, "Growth", 100, None)  # undated
+
+    rounds = queries.recent_rounds(session)
+
+    assert [(r.company_name, r.round.stage) for r in rounds] == [
+        ("Beta Robotics Ltd", "Series A"),  # 2025-06, amount unknown but kept
+        ("Alpha Robotics Ltd", "Series A"),  # 2025-01
+        ("Alpha Robotics Ltd", "Seed"),  # 2024-01
+        ("Beta Robotics Ltd", "Seed"),  # 2023-01
+        ("Gamma Robotics Ltd", "Growth"),  # undated last
+    ]
+    assert rounds[0].round.amount_million_usd is None
+    assert rounds[0].company_id == b.id
+    assert len(queries.recent_rounds(session, limit=2)) == 2
+
+
+def test_recent_rounds_restricts_to_company_ids(session, pool):
+    a, b, _, _ = pool
+
+    assert {r.company_id for r in queries.recent_rounds(session, [a.id])} == {a.id}
+    assert queries.recent_rounds(session, []) == []
+
+
+@pytest.fixture
+def news(session):
+    robotics = Company(company_number="1", name="ACME", category="Robotics and automation")
+    fintech = Company(company_number="2", name="PayCo", category="Fintech and payments")
+    session.add_all([robotics, fintech])
+    session.commit()
+    session.add_all(
+        [
+            CompanyNewsRow(
+                company_id=robotics.id,
+                url="https://a.example/1",
+                title="Raises Series A",
+                news_kind="funding",
+                published=date(2026, 3, 1),
+            ),
+            CompanyNewsRow(
+                company_id=robotics.id,
+                url="https://a.example/2",
+                title="Minor update",
+                published=date(2026, 1, 1),
+            ),
+            CompanyNewsRow(
+                company_id=fintech.id,
+                url="https://a.example/3",
+                title="Acquired",
+                news_kind="acquisition",
+                published=None,
+            ),
+            CompanyNewsRow(
+                company_id=fintech.id,
+                url="https://a.example/4",
+                title="Launch",
+                news_kind="product",
+                published=date(2026, 2, 1),
+            ),
+        ]
+    )
+    session.commit()
+    return robotics, fintech
+
+
+def _titles(session, **kwargs):
+    return [row.title for row, _ in queries.search_news(session, **kwargs)]
+
+
+def test_search_news_big_only_category_and_since(session, news):
+    robotics, fintech = news
+
+    assert len(_titles(session)) == 4
+    assert _titles(session, big_only=True) == [
+        "Raises Series A",
+        "Launch",
+        "Acquired",
+    ]  # undated last
+    assert _titles(session, category="Fintech and payments") == ["Launch", "Acquired"]
+    assert _titles(session, since=date(2026, 2, 1)) == ["Raises Series A", "Launch"]  # undated out
+    assert _titles(
+        session, big_only=True, category="Fintech and payments", since=date(2026, 1, 1)
+    ) == ["Launch"]
+    assert _titles(session, category="Nothing") == []
+
+
+def test_search_news_company_ids_none_is_unrestricted_and_empty_is_nobody(session, news):
+    robotics, fintech = news
+
+    assert _titles(session, company_ids=[robotics.id]) == ["Raises Series A", "Minor update"]
+    assert len(_titles(session, company_ids=None)) == 4
+    assert _titles(session, company_ids=[]) == []
+    assert _titles(session, company_ids=set()) == []
 
 
 def _add_officer(session, company_id, name, role, birth_year=None, nationality=None):
