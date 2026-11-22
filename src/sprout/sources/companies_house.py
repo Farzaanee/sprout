@@ -13,10 +13,10 @@ from typing import Any
 
 import httpx
 
+from sprout.models import PUBLIC_COMPANY_URL
 from sprout.sources.http import USER_AGENT, DiskCache, FetchError, HttpClient, RateLimiter
 
 BASE_URL = "https://api.company-information.service.gov.uk"
-PUBLIC_COMPANY_URL = "https://find-and-update.company-information.service.gov.uk/company/{number}"
 RATE_LIMIT_CALLS = 550
 RATE_LIMIT_PERIOD_SECONDS = 300.0
 DEFAULT_CACHE_TTL = timedelta(days=7)

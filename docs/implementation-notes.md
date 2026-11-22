@@ -109,8 +109,9 @@ Running log of what was built, why, and what later phases need to know. Newest p
 |---|---|
 | Streamlit entry point (adds `src/` to `sys.path`; this is the file to deploy) | [streamlit_app.py](streamlit_app.py) |
 | App: Progress, Companies, News, Run & test tabs | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
-| Streamlit-free queries and docs parsing | [src/sprout/app/queries.py](src/sprout/app/queries.py) |
-| Tests (queries on a temp DB; `AppTest` smoke tests of the whole app) | [tests/test_app_queries.py](tests/test_app_queries.py), [tests/test_dashboard.py](tests/test_dashboard.py) |
+| Streamlit-free docs parsing | [src/sprout/app/observability_queries.py](src/sprout/app/observability_queries.py) |
+| Streamlit-free company reads (shared with Phase 8, D29) | [src/sprout/queries.py](src/sprout/queries.py) |
+| Tests (queries on a temp DB; `AppTest` smoke tests of the whole app) | [tests/test_queries.py](tests/test_queries.py), [tests/test_observability_queries.py](tests/test_observability_queries.py), [tests/test_dashboard.py](tests/test_dashboard.py) |
 | New direct dependency `pandas` (already pulled in by Streamlit) | [pyproject.toml](pyproject.toml) |
 
 ### Acceptance (no plan criteria; own checks)
@@ -125,7 +126,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 
 ### Things later phases must know
 - **Streamlit Community Cloud has no persistent disk and `*.db` is gitignored**, so a deployed copy starts empty. Phase 7/8's bundled snapshot DB is still needed for a populated public app. Secrets go in the app's Secrets settings (exposed as environment variables), never in the repo.
-- Phase 7 should extend `queries.py` (shared service layer) rather than add SQL in the page code.
+- Phase 7 adds company reads to `sprout/queries.py` (shared service layer, D29) rather than SQL in the page code.
 
 
 ## Phase 3 - First agent: single-company enrichment
@@ -213,9 +214,9 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 | `RunLog.failure_category` (nullable), `RunLogStep` table, idempotent backfill in `init_db`, `logged_run` fallback to `internal_error` | [src/sprout/db.py](src/sprout/db.py) |
 | `StepRecord`, `LOGGED_TEXT_MAX_CHARS` (1,000), `LoopResult.steps` and `LoopResult.error_type`; one record per model response, no new parameter, loop still DB-free | [src/sprout/agents/loop.py](src/sprout/agents/loop.py) |
 | `_stats` gains `error_type`; `failure_category` set and `RunLogStep` rows added before the existing pre-raise commit (`_step_row`) | [src/sprout/agents/enrich.py](src/sprout/agents/enrich.py) |
-| `EnrichRun`, `TrendPoint`, `DayOutcome`; `enrich_runs`, `failure_counts`, `cost_trend`, `daily_outcomes`, `run_steps` | [src/sprout/app/queries.py](src/sprout/app/queries.py) |
+| `EnrichRun`, `TrendPoint`, `DayOutcome`; `enrich_runs`, `failure_counts`, `cost_trend`, `daily_outcomes`, `run_steps` | [src/sprout/app/observability_queries.py](src/sprout/app/observability_queries.py) |
 | `render_observability` and the Observability tab (after News, before gated Run & test); tabs now built from `(name, renderer)` pairs | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
-| Tests | `tests/test_failures.py` (new), additions to `test_agent_loop.py`, `test_db.py`, `test_enrich.py`, `test_app_queries.py`, `test_dashboard.py` |
+| Tests | `tests/test_failures.py` (new), additions to `test_agent_loop.py`, `test_db.py`, `test_enrich.py`, `test_observability_queries.py`, `test_dashboard.py` |
 
 Commits: step 1 `3ba922b` (taxonomy and schema), step 2 `b93c0bb` (loop step records), step 3 `1082259` (enrich wiring), step 4 `8738494` (queries), step 5 `e500f56` (dashboard), fix `6ac974c` (see below).
 
@@ -242,7 +243,7 @@ Built as designed per D14-D17 in `docs/architecture/6. decisions.md` (run_log_st
 - `init_db` backfills `failure_category` from `stats.stop` for historic enrich rows, so a hand-seeded success row needs `stop: "submitted"`.
 - The Observability metrics and charts use the newest 200 runs (`enrich_runs` default limit); the failure-category chart covers all runs. Irrelevant at about 45 runs, relevant in Phase 6.
 - Steps are persisted at the end of a run, so a hard process kill loses that run's steps (as it already loses its stats). Live per-worker progress in Phase 6 needs the optional `on_step` callback described in the architecture (A29 notes).
-- Queries live in `app/queries.py`, Streamlit-free, reusable by the Phase 7 service layer; the file moves to `sprout/queries.py` before Phase 8.
+- Run-log queries live in `app/observability_queries.py`, Streamlit-free; only the dashboard reads them.
 
 ### Step 3c findings (live batch, 2026-10-28)
 Batch: the 20 highest-`candidate_score` companies that were not pilots and not yet enriched (run ids 47 to 66, Haiku 5.5, defaults, `uv run python -m sprout.enrich <20 numbers>`). Total cost **US$0.3049**. All figures come from `run_log`, `run_log_step` and the new query functions; the 20 runs are all name-matched "artificial intelligence" shell-style companies, not the pilot set, so they are not representative of real startups.
@@ -319,7 +320,7 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 - Phase 8's swap of `fetch_page` must update `ALLOWED_ENRICHMENT_TOOLS` on purpose, keep feeding `SourceLedger`, and keep `UrlPolicy`, size caps and robots; `fixture_fetcher` tests cover only the `WebFetcher` path.
 - Phase 9's eval job needs both API keys (so not for fork PRs); exit codes 0/1/2 map to job outcomes.
 - A page asking the model to fetch an attacker URL on a public host passes `UrlPolicy`; this is a documented residual risk, visible only in fixture runs.
-- `ruff format --check` flags `src/sprout/app/dashboard.py` and `tests/test_app_queries.py` (pre-existing; CI does not enforce format).
+- `ruff format --check` flags `src/sprout/app/dashboard.py` (pre-existing; CI does not enforce format).
 
 ---
 
@@ -376,3 +377,30 @@ CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max
 - Phase 9: a second SIGINT hard-exits and leaves the `pipeline_run` row `running`, blocking a restart for 30 minutes unless `--force`. Exit codes: 0 at >=85% `ok`, 1 below that or stopped early, 2 for configuration or a run in progress.
 - The first 50 pre-screen survivors by `candidate_score` then `id` are the ones that were run; rerunning with `--limit 50` completes that same set and never reaches further down the pool.
 - Enrichment cost on the current prompt is about US$0.023 to 0.026 per company (up from US$0.015 in Phases 3 and 4), and 32 repairs over 338 enrichment steps were mostly category-enum rejections.
+
+## Phase 7 - Dashboard
+
+**Status: in progress.** Only the shared query layer (D29) is built so far; filters, charts, the company detail page, the big-news feed and the Ask box are not. `uv run pytest -q` passes (571 passed, 9 live tests skipped) and `uv run ruff check src tests` is clean.
+
+### What was built
+| Item | Where |
+|---|---|
+| UI-free company reads shared with Phase 8: `get_profile`, `search_companies` with `Coverage`, `NOT_DISCLOSED`, pool counts | [src/sprout/queries.py](../src/sprout/queries.py) |
+| Run-log and docs reads, dashboard only (moved from `app/queries.py` unchanged) | [src/sprout/app/observability_queries.py](../src/sprout/app/observability_queries.py) |
+| `PUBLIC_COMPANY_URL` moved to `models.py` so `queries.py` needs no `sources` import | [src/sprout/models.py](../src/sprout/models.py) |
+| Dashboard imports updated; Companies tab reads `.companies` from the search | [src/sprout/app/dashboard.py](../src/sprout/app/dashboard.py) |
+| Tests, including the import rule, `get_profile`, the filters and coverage | [tests/test_queries.py](../tests/test_queries.py), [tests/test_observability_queries.py](../tests/test_observability_queries.py) |
+
+### Decisions locked in
+- `get_profile` returns `None` for an unknown id. A NULL winning fact is `disclosed=False` ("not disclosed"); a field with no fact is absent from `Profile.facts` ("not researched").
+- `search_companies` now returns `CompanySearch(companies, coverage)`. Funding is the amount of the latest round (D22), so a company whose latest round has no amount never matches `min_funding_million_usd`. Stage, business status and founded year come from the winning fact. Coverage counts over all matches, before `limit`.
+- Stage, business status and founded are loaded with one `fact` query per search, and funding rounds with one more. Nothing is cached in the module; the UI caches.
+- The "Not found" labels in the stage, business status and valuation counts are now "Not disclosed" (`NOT_DISCLOSED`).
+
+### Open items (need you)
+- `status.profile_gaps` still counts a NULL (not disclosed) fact as a gap (48 of 50 ok companies shown incomplete); left unchanged pending your decision.
+- Filter latency: a combined stage, funding and founded search over `data/sprout.db` (a few thousand candidates, about 90 facted companies) took 0.04 s. Not measured on a larger pool.
+
+### Things later phases must know
+- The dashboard's Companies tab still reads `company_facts` (every fact row, including superseded ones); the detail page should switch to `get_profile`.
+- The Phase 8 `search_companies(category, stage, min_raised_million_usd)` tool maps to this function's `category`, `stage` and `min_funding_million_usd`.

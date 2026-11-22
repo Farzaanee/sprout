@@ -18,8 +18,8 @@ import pandas as pd
 import streamlit as st
 from sqlmodel import Session
 
-from sprout import hello, ingest
-from sprout.app import queries
+from sprout import hello, ingest, queries
+from sprout.app import observability_queries as obs
 from sprout.config import DEFAULT_EVAL_DB_PATH, get_settings
 from sprout.db import RunKind, get_engine, init_db
 
@@ -119,7 +119,7 @@ def _run_captured(func, *args) -> tuple[int, str]:
 def render_progress() -> None:
     plan = (DOCS_DIR / "project-plan.md").read_text()
     notes = (DOCS_DIR / "implementation-notes.md").read_text()
-    phases = queries.parse_phases(plan, notes)
+    phases = obs.parse_phases(plan, notes)
 
     done = sum(p.state == "Done" for p in phases)
     st.progress(done / len(phases) if phases else 0, text=f"{done} of {len(phases)} phases done")
@@ -136,7 +136,7 @@ def render_progress() -> None:
     render_db_picker()
     with _session() as session:
         counts = queries.count_rows(session)
-        runs = queries.recent_runs(session)
+        runs = obs.recent_runs(session)
         keywords = queries.keyword_counts(session)
         years = queries.incorporation_year_counts(session)
     cols = st.columns(4)
@@ -402,7 +402,7 @@ def render_companies() -> None:
             keyword=keyword or None,
             incorporated_from=date(int(year), 1, 1),
             business_status=business_status or None,
-        )
+        ).companies
         st.caption(f"{len(rows)} companies (max 500 shown). Candidates, not verified startups.")
         st.dataframe(
             pd.DataFrame(
@@ -432,7 +432,7 @@ def render_companies() -> None:
             pd.DataFrame(
                 {
                     "field": f.field,
-                    "value": f.value_json if f.value_json is not None else "not disclosed",
+                    "value": f.value_json if f.value_json is not None else queries.NOT_DISCLOSED,
                     "confidence": f.confidence,
                     "retrieved": f.retrieved_at,
                     "note": f.note,
@@ -510,7 +510,7 @@ def render_news() -> None:
             st.write(item.summary)
 
 
-def _run_row(run: queries.EnrichRun) -> dict[str, object]:
+def _run_row(run: obs.EnrichRun) -> dict[str, object]:
     """One table row; a run with no stats (still running or crashed) keeps blanks."""
     has_stats = bool(run.stats)
     return {
@@ -529,10 +529,10 @@ def _run_row(run: queries.EnrichRun) -> dict[str, object]:
     }
 
 
-def _render_run_detail(session: Session, run: queries.EnrichRun) -> None:
+def _render_run_detail(session: Session, run: obs.EnrichRun) -> None:
     # Logged text (response_text, errors) is untrusted: st.code and dataframes only, never markdown.
     st.dataframe(pd.DataFrame([_run_row(run)]), hide_index=True, width="stretch")
-    steps = queries.run_steps(session, run.run_id)
+    steps = obs.run_steps(session, run.run_id)
     if steps:
         st.dataframe(
             pd.DataFrame(
@@ -572,14 +572,14 @@ def _render_run_detail(session: Session, run: queries.EnrichRun) -> None:
 
 def render_observability() -> None:
     with _session() as session:
-        if not queries.enrich_runs(session):
+        if not obs.enrich_runs(session):
             st.info(
                 "No enrichment runs yet. Run `uv run python -m sprout.enrich NAME_OR_NUMBER` "
                 "to create one."
             )
             return
 
-        date_bounds = queries.run_date_range(session)
+        date_bounds = obs.run_date_range(session)
         start_date, end_date = date_bounds if date_bounds else (None, None)
         if date_bounds:
             min_date, max_date = date_bounds
@@ -592,15 +592,15 @@ def render_observability() -> None:
                 start_date = end_date = selected
 
         date_kwargs = {"start": start_date, "end": end_date}
-        runs = queries.enrich_runs(session, **date_kwargs)
-        counts = queries.failure_counts(session, **date_kwargs)
-        rate_by_kind = queries.failure_rate_by_kind(session, **date_kwargs)
-        tool_failures = queries.failures_by_tool(session, **date_kwargs)
-        cost_tool = queries.cost_by_tool(session, **date_kwargs)
-        calls_tool = queries.calls_by_tool(session, **date_kwargs)
-        cost_kind = queries.cost_by_kind(session, **date_kwargs)
-        trend = queries.cost_trend(session, **date_kwargs)
-        days = queries.daily_outcomes(session, **date_kwargs)
+        runs = obs.enrich_runs(session, **date_kwargs)
+        counts = obs.failure_counts(session, **date_kwargs)
+        rate_by_kind = obs.failure_rate_by_kind(session, **date_kwargs)
+        tool_failures = obs.failures_by_tool(session, **date_kwargs)
+        cost_tool = obs.cost_by_tool(session, **date_kwargs)
+        calls_tool = obs.calls_by_tool(session, **date_kwargs)
+        cost_kind = obs.cost_by_kind(session, **date_kwargs)
+        trend = obs.cost_trend(session, **date_kwargs)
+        days = obs.daily_outcomes(session, **date_kwargs)
 
         if not runs:
             st.info("No runs in this date range.")
@@ -793,10 +793,10 @@ def render_observability() -> None:
         kind_options += [k for k in sorted(rate_by_kind) if k not in kind_options]
         kind = filters[2].selectbox("Kind", [*kind_options, ""], format_func=lambda k: k or "any")
         tool = filters[3].selectbox(
-            "Tool call", [""] + queries.all_tools(session), format_func=lambda t: t or "any"
+            "Tool call", [""] + obs.all_tools(session), format_func=lambda t: t or "any"
         )
         failures_only = filters[4].toggle("Failures only", value=True)
-        shown = queries.enrich_runs(
+        shown = obs.enrich_runs(
             session,
             failure_category=category or None,
             failures_only=failures_only,

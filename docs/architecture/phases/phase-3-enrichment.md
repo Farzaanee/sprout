@@ -153,7 +153,7 @@ flowchart TB
     NEWEST -- "tie" --> CONF --> WINNER
 ```
 
-It's a pure function over `Fact` rows already loaded, not a query or a write, nothing calls it yet: today's only reader (`dashboard.py`'s Details table) still lists every fact as history. It belongs wherever a feature needs "the current value of a field" rather than its full history.
+It's a pure function over `Fact` rows already loaded, not a query or a write. Readers: `sprout.queries` (`get_profile`, the filters and counts), `status.profile_gaps`, the news prompt and the evals. The dashboard's Details table still lists every fact as history. How to read a winner as disclosed, not disclosed or not researched is on the [Phase 6 page](phase-6-multi-agent.md#fact-fields-writers-rows-and-how-to-read-them).
 
 ## Built interfaces (signatures as in the code)
 
@@ -316,7 +316,7 @@ the legal entity still exists, not that the business is operating, independent, 
 | Dormant (shell) | Companies House marks it dormant, or it has no real operations |
 | Unclear | Genuinely conflicting or insufficient signals after researching; cite whatever was checked, at low confidence |
 
-`app/queries.py:business_status_counts` picks the winning fact per company (same rule as
+`queries.py:business_status_counts` picks the winning fact per company (same rule as
 `stage_counts`, A6) and the dashboard's companies page charts the distribution next to stage and
 valuation.
 
@@ -326,7 +326,7 @@ valuation.
 - Tool handlers return error outcomes and never raise into the loop (`run_agent` also catches any handler exception and turns it into an error result).
 - `enrich_with_result` writes facts and the `company_enrich` run_log row in one session: it assigns `run.stats` and the run-level columns (`company_id`, `model`, `effort`, `iterations`, `repairs`, `max_iterations`, `max_usd`, `tool_calls`, `error_message`), sets `run.failure_category` and adds the `run_log_step` rows, then **commits before raising** on failure, because `logged_run` rolls back on exceptions and would otherwise discard the record of what a failed run cost; on success it then calls `save_profile`. On failure `logged_run` also marks the row `status="error"`, filling in `error_message` only if it is still null. The status therefore means "run did not produce a profile", and `stats.stop` and `failure_category` say why.
 - `agents/enrich.py` was split in Phase 6: `Deps`, the run-recording block (`run_recorded`) and the failure base class (`AgentFailed`) moved to `agents/common.py`, reused by the three new agents (see the [Phase 6 page](phase-6-multi-agent.md#interfaces-as-built)).
-- Move `app/queries.py` to `sprout/queries.py` (keep a re-export) before Phase 8 so MCP does not import from the UI package.
+- Company reads shared with Phase 8 live in `sprout/queries.py` (D29); run-log reads stay in `app/observability_queries.py`.
 
 ## Outstanding
 

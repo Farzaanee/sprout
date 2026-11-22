@@ -15,7 +15,7 @@ flowchart TB
     LRUN[("run_log: nullable column failure_category")]
     LSTEP[("run_log_step: one row per iteration")]
     HIST["Historical enrich runs: category backfilled in init_db, no steps"]
-    Q["app/queries.py: enrich_runs, failure_counts, cost_trend, daily_outcomes, run_steps"]
+    Q["app/observability_queries.py: enrich_runs, failure_counts, cost_trend, daily_outcomes, run_steps"]
     subgraph UI["app/dashboard.py: Observability tab"]
         V1["Failures by category"]
         V2["Cost per iteration and failures per day"]
@@ -45,9 +45,9 @@ flowchart TB
 | `src/sprout/agents/loop.py` | `StepRecord`, `LOGGED_TEXT_MAX_CHARS`, `LoopResult.steps` and `LoopResult.error_type`; step bookkeeping inside `run_agent`. No new import beyond `datetime`; no new parameter |
 | `src/sprout/db.py` | `RunLog.failure_category`; `RunLogStep` table; backfill step in `init_db`; `logged_run` fallback to `internal_error` |
 | `src/sprout/agents/enrich.py` | set `run.failure_category` and `run.error_message`; build and add `RunLogStep` rows before the existing pre-raise `session.commit()` |
-| `src/sprout/app/queries.py` | five read functions (below) |
+| `src/sprout/app/observability_queries.py` | five read functions (below) |
 | `src/sprout/app/dashboard.py` | `render_observability` and the new tab |
-| Tests | `test_failures.py`, additions to `test_agent_loop.py`, `test_enrich.py`, `test_db.py`, `test_app_queries.py`, `test_dashboard.py` |
+| Tests | `test_failures.py`, additions to `test_agent_loop.py`, `test_enrich.py`, `test_db.py`, `test_observability_queries.py`, `test_dashboard.py` |
 
 ## Key files
 
@@ -81,7 +81,7 @@ flowchart TB
 | `init_db` | Runs `_add_missing_columns`, then `_backfill_failure_categories`, so an existing `data/sprout.db` upgrades in place. |
 | `logged_run` | After rollback, sets `internal_error` if the category is still NULL, so an escaped exception is never recorded as a success. |
 
-`app/queries.py` additions
+`app/observability_queries.py` additions
 
 | Aspect | Detail |
 | --- | --- |
@@ -195,7 +195,7 @@ save_profile(...)
 - `init_db` then runs an idempotent backfill: for `kind='company_enrich'` rows with a NULL category and a `stats.stop` other than `submitted` (or `status='error'` with no `stop`, which maps to `internal_error`), set the category from `failure_category_for`. The backfill runs over a few hundred rows in Python and is safe to run on every start.
 - Historical runs have **no steps** and are not fabricated from `stats`. The dashboard shows them in the failure grouping and the cost trend (both come from `stats` and the column), and in the drill-down shows their run-level stats with a note. Rule for the note: no step rows and `stats.iterations > 0` means "this run predates step logging (Phase 4), run-level stats only"; no step rows and `iterations == 0` means "no model response was received".
 
-## Query layer (`app/queries.py`, Streamlit-free, tested on a seeded temp DB)
+## Query layer (`app/observability_queries.py`, Streamlit-free, tested on a seeded temp DB)
 
 ```python
 @dataclass(frozen=True)
@@ -216,7 +216,7 @@ def daily_outcomes(session) -> list[DayOutcome]               # the error trend
 def run_steps(session, run_id: int) -> list[RunLogStep]       # ordered by iteration
 ```
 
-Metrics and charts use the newest 200 runs (the `enrich_runs` default limit); the failure-category chart covers all runs. Runs logged before the USD switch hold `cost_gbp` and `usd_to_gbp` instead of `cost_usd`, and `queries.py` converts them. Aggregation happens in Python over a few hundred `enrich` rows (company name joined from `stats.company_id`; `steps_logged` from one grouped count over `run_log_step`), so no JSON SQL functions are needed and tolerant parsing of missing `stats` keys (an old or crashed row with `{}`) is in one place. `failed` means `failure_category IS NOT NULL`. These are the first functions the Phase 7 service layer and the Phase 8 MCP server could reuse for run status (`app/queries.py` moves to `sprout/queries.py` before Phase 8).
+Metrics and charts use the newest 200 runs (the `enrich_runs` default limit); the failure-category chart covers all runs. Runs logged before the USD switch hold `cost_gbp` and `usd_to_gbp` instead of `cost_usd`, and `observability_queries.py` converts them. Aggregation happens in Python over a few hundred `enrich` rows (company name joined from `stats.company_id`; `steps_logged` from one grouped count over `run_log_step`), so no JSON SQL functions are needed and tolerant parsing of missing `stats` keys (an old or crashed row with `{}`) is in one place. `failed` means `failure_category IS NOT NULL`. These stay in `app/` because only the dashboard reads them; the shared company reads are in `sprout/queries.py` (D29).
 
 ## Dashboard tab (`app/dashboard.py`)
 
@@ -235,7 +235,7 @@ A new `render_observability` tab named **Observability**, placed after News and 
 | Step | Scope | Status |
 |---|---|---|
 | 3a Backend | `failures.py`; `db.py` (column, table, backfill, `logged_run` fallback); `loop.py` `StepRecord`, `steps`, `error_type`; `enrich.py` wiring; tests for each | Done. Scripted tests cover `len(steps) == iterations`, summed step usage equal to `result.usage`, multi-tool and server-side tool names, `tool_errors`, truncation at the cap, and steps plus category committed for every non-success stop. Live: steps and categories written end to end, step costs sum exactly to `stats.cost_usd`. A deterministic live `iteration_cap` run (`--max-iterations 2`, QUANTEXA LIMITED, run_log id 100) confirmed `failure_category=iteration_cap` with its 2 committed steps, no 400, after the orphaned-server-tool-use fix (`944148f`) |
-| 3b UI | five `queries.py` functions; `render_observability` and the tab; tests | Done. Query tests on a seeded DB and `streamlit.testing` smoke tests for the empty, populated, no-failures, no-steps and `stats == {}` states; `st.markdown` is not used for logged text. The tab was not opened in a browser |
+| 3b UI | five `observability_queries.py` functions; `render_observability` and the tab; tests | Done. Query tests on a seeded DB and `streamlit.testing` smoke tests for the empty, populated, no-failures, no-steps and `stats == {}` states; `st.markdown` is not used for logged text. The tab was not opened in a browser |
 | 3c Findings | a live batch of 20 non-pilot candidates, read through the tab | Done, recorded in `docs/implementation-notes.md` ("Step 3c findings"): 20/20 submitted, mean US$0.0152 per run, 35 percent of runs needed a repair, `response_text` empty on every logged step. Six Phase 5 adjustments were proposed; all resolved (A10) |
 
 Not measured: step logging's runtime overhead (argued from the design: no extra call, no I/O in the loop, one INSERT batch inside an existing commit).

@@ -133,6 +133,41 @@ async run(settings, args, *, client=None, stop=None) -> RunSummary(exit_code, te
 | enrich | `fact` rows, `funding_round` rows (replaced wholesale), `company.category` | news |
 | news | `company_news` rows via `db.save_company_news` (`news_kind` set only when `big`, one-sentence `summary`); upsert on `(company_id, url)`, never deletes; run `stats`: `stored`, `big` | `fact` |
 
+## Fact fields: writers, rows and how to read them
+
+A `fact` row is unique per `(company_id, field, source_url)`: a re-run citing the same URL overwrites its row, a different URL adds one. So every field below can in principle have several rows; the last column says where that happens in practice. The winner is chosen by `db.winning_facts` ([winning-value rule](phase-3-enrichment.md#the-winning-value-rule-a6)).
+
+| Field | Type | Filled by | Several rows? |
+|---|---|---|---|
+| `website` | string (URL) | Website screen, then enrichment | Yes in practice: the screen and enrichment cite different URLs |
+| `hq` | string | Ingest (registered-office locality, medium confidence), then enrichment | Yes in practice: ingest row plus enrichment row |
+| `founded` | int (1800 to 2100) | Ingest (incorporation year, which can differ from the founding year), then enrichment | Yes in practice: ingest row plus enrichment row |
+| `stage` | `Stage` enum | Enrichment only | Only after a re-run that cites a different source |
+| `business_status` | `BusinessStatus` enum | Enrichment only | Only after a re-run that cites a different source |
+| `total_raised_million_usd` | int (0 or more) | Enrichment only | Only after a re-run that cites a different source |
+| `valuation_million_usd` | int (0 or more) | Enrichment only | Only after a re-run that cites a different source |
+| `business_model` | string | Enrichment only | Only after a re-run that cites a different source |
+| `target_user` | string | Enrichment only | Only after a re-run that cites a different source |
+| `one_liner` | string | Enrichment only | Only after a re-run that cites a different source |
+
+Outside the table: `company.category` is a classification with no fact rows, and `funding_rounds` is its own table, replaced wholesale on each enrichment, so it has no winner to pick (`db.latest_round` picks the latest round, D22). `enrich --reset` deletes the company's profile first and re-seeds `website` from the screen result.
+
+### Reading a field: disclosed, not disclosed, not researched
+
+Judge a field by its winning row only (`sprout.queries.get_profile` does this and returns each field as a `ProfileFact` with `disclosed`).
+
+| What you find | Meaning |
+|---|---|
+| Winning row with a value | Disclosed |
+| Winning row with a NULL `value_json` | Not disclosed: the agent researched the field and found nothing (shown as `NOT_DISCLOSED`) |
+| No row for the field | Not researched (see the cases below) |
+
+- **A NULL row next to a valued row is not "not disclosed".** A valued fact beats a NULL one, so the NULL row is history. Only a NULL winner counts.
+- **Enrichment-only fields are all-or-nothing.** `save_profile` writes every `Sourced` field in one go and sets `company.category`, so after a successful enrichment each of them has a row (valued or NULL). With no row, enrichment has not succeeded yet, including when a run failed before saving.
+- **`hq`, `founded` and `website` do not show enrichment.** Ingest and the website screen write them before enrichment runs, so a row only says a source was cited. Use `company.category IS NOT NULL` as the "enriched" marker (as `enriched_company_count` does); a NULL `category` means not enriched.
+- **`funding_rounds`:** no rows on an enriched company means none were found; on an unenriched company it means not researched. The table cannot tell the two apart by itself.
+- **Storage keeps NULL, not a label.** The values are typed and every reader tests `value_json is not None`; the label is a presentation concern and a sentinel string would break the typed fields and the winning-value rule.
+
 ## Selector, status and retry
 
 Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-company-status-derived-not-stored)). Constants live in `StatusPolicy`. Decisions: D39.

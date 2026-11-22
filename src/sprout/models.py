@@ -10,6 +10,9 @@ from typing import Annotated, Self
 
 from pydantic import AnyHttpUrl, AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+# Public Companies House page for a company number, shared by the client and the read layer.
+PUBLIC_COMPANY_URL = "https://find-and-update.company-information.service.gov.uk/company/{number}"
+
 
 class Category(StrEnum):
     FINTECH_AND_PAYMENTS = "Fintech and payments"
