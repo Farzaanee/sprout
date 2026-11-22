@@ -177,11 +177,15 @@ def company_statuses(
 
 
 def reap_abandoned(session: Session, now: datetime, policy: StatusPolicy) -> int:
-    """Turn per-company `running` rows older than the timeout into failed attempts. Batch rows
-    (no `company_id`) are left alone. Returns the number reaped."""
+    """Turn `running` rows older than the timeout into failed attempts, per-company or batch
+    (`pipeline_run`, `companies_ingest`). Returns the number reaped."""
     now = _utc(now)
+    batch_kinds = (RunKind.PIPELINE_RUN.value, RunKind.COMPANIES_INGEST.value)
     running = session.exec(
-        select(RunLog).where(RunLog.status == "running", col(RunLog.company_id).is_not(None))
+        select(RunLog).where(
+            RunLog.status == "running",
+            col(RunLog.company_id).is_not(None) | col(RunLog.kind).in_(batch_kinds),
+        )
     ).all()
     reaped = 0
     for row in running:

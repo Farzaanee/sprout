@@ -193,7 +193,7 @@ Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-co
 
 **Retry policy.** At most one attempt per company and step per invocation, retried by the next invocation (a failed latest attempt is selected, D32) up to 3 failed attempts across runs. The only in-run retry is the one 429 re-run below.
 
-**Stale `running` rows.** A killed process leaves a `running` row with no stats. At startup `reap_abandoned` turns every per-company row still `running` after 30 minutes into `status='error'`, `failure_category='internal_error'`, `error_message='abandoned: process ended before the run finished'`, so it counts as a failed attempt. Batch kinds (`companies_ingest`, `pipeline_run`) are never reaped. Two orchestrator processes at once are unsupported: startup refuses (exit 2) if a `pipeline_run` row is `running` and younger than 30 minutes, unless `--force`.
+**Stale `running` rows.** A killed process leaves a `running` row with no stats. At startup `reap_abandoned` turns every row still `running` after 30 minutes into `status='error'`, `failure_category='internal_error'`, `error_message='abandoned: process ended before the run finished'`: per-company rows count as a failed attempt, batch rows (`companies_ingest`, `pipeline_run`) just get an honest `error` record. Two orchestrator processes at once are unsupported: startup refuses (exit 2) if a `pipeline_run` row is `running` and younger than 30 minutes, unless `--force` (reaping does not shorten this window; it only fixes the stale record).
 
 **Company result** (one per working-set company; the acceptance rate is `ok` over the working-set size):
 
@@ -211,7 +211,7 @@ Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-co
 - `BatchBudget` is charged from worker threads under a `threading.Lock`. Each agent call first takes `batch.try_slice(cap)`, which atomically returns `min(cap, remaining)` or `None` (then `skipped_budget`); the call runs with that slice as its `max_usd`. Spend overshoots the cap by at most one response per in-flight call.
 - `get_engine` enables WAL and a 30 s busy timeout. No write transaction is open across an API call (`logged_run` commits the row first; results are written after the call), so writers queue only for short commits.
 - **429 handling.** The SDK client is built with `max_retries=5`. A step that still ends `stop="error"` with `error_type=="RateLimitError"` trips the shared `RateLimitGate` (all workers wait 30 s before starting any step) and is re-run once; that re-run is not an extra attempt in the policy because `api_error` rows are excluded. After 5 trips the orchestrator stops launching companies (they end `stopped`), finishes in-flight ones and exits 1 with `rate_limited`.
-- **Interrupt.** The first SIGINT sets `ctx.stop`: no new step or company starts, in-flight agent calls finish, the summary prints, exit 1. A second SIGINT hard-exits (`os._exit(130)`), leaving the `pipeline_run` row `running`, which blocks a restart for 30 minutes unless `--force`; abandoned per-company `running` rows are reaped on the next start. Each agent run commits its row first and its results at the end in one transaction, so an interrupted run leaves either nothing or a complete step.
+- **Interrupt.** The first SIGINT sets `ctx.stop`: no new step or company starts, in-flight agent calls finish, the summary prints, exit 1. A second SIGINT hard-exits (`os._exit(130)`), leaving the `pipeline_run` row `running`, which blocks a restart for 30 minutes unless `--force`; abandoned `running` rows, per-company or batch, are reaped on a later start. Each agent run commits its row first and its results at the end in one transaction, so an interrupted run leaves either nothing or a complete step.
 
 ## CLI
 
@@ -277,7 +277,7 @@ No table or column changes (D10 is not triggered): the Phase 6 data lands in exi
 - **Pre-screen too loose (A1, D34):** validated live and found too loose, not too strict; details in [implementation-notes](../../implementation-notes.md#d34-pre-screen-validation-a1). Whether to tighten the pool is undecided.
 - **News:** cross-outlet coverage of one event can still duplicate (same-date exact match is collapsed in code; different dates are not), and some items have no published date.
 - **`profile_gaps`** treats an explicit "not disclosed" (NULL) fact as a gap, so most ok companies are reported incomplete.
-- **Not exercised live:** a SIGINT mid-run and the 429 gate (unit tests only). A stale `running` batch row (for example `companies_ingest`) is never reaped.
+- **Exercised live since:** a single and a double SIGINT mid-run, and the 429 gate (simulated client). See [risks.md](../5.%20risks.md).
 - **A34:** resolved; see [risks](../5.%20risks.md).
 - **Not built:** `on_step` callback, live per-iteration progress, an `enrichment_state` table, low-confidence-first ordering.
 

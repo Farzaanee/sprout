@@ -177,25 +177,29 @@ def test_empty_ids(session):
     assert company_statuses(session, [], POLICY, NOW) == {}
 
 
-def test_reaper_marks_old_running_rows_and_spares_young_and_batch(session, company):
+def test_reaper_marks_old_running_rows_and_spares_young(session, company):
     old = add_run(session, company, ENRICH, days_ago=1, status="running")
     young = add_run(session, company, NEWS, days_ago=0.01, status="running")
-    batch = RunLog(
+    old_batch = RunLog(
         kind=RunKind.COMPANIES_INGEST.value, started_at=NOW - timedelta(days=2), status="running"
     )
-    session.add(batch)
+    young_batch = RunLog(
+        kind=RunKind.PIPELINE_RUN.value, started_at=NOW - timedelta(minutes=1), status="running"
+    )
+    session.add(old_batch)
+    session.add(young_batch)
     session.commit()
 
-    assert reap_abandoned(session, NOW, POLICY) == 1
+    assert reap_abandoned(session, NOW, POLICY) == 2
 
     session.expire_all()
-    reaped = session.get(RunLog, old.id)
-    assert reaped.status == "error"
-    assert reaped.failure_category == "internal_error"
-    assert reaped.error_message == ABANDONED_MESSAGE
-    assert reaped.finished_at is not None
+    for reaped in (session.get(RunLog, old.id), session.get(RunLog, old_batch.id)):
+        assert reaped.status == "error"
+        assert reaped.failure_category == "internal_error"
+        assert reaped.error_message == ABANDONED_MESSAGE
+        assert reaped.finished_at is not None
     assert session.get(RunLog, young.id).status == "running"
-    assert session.get(RunLog, batch.id).status == "running"
+    assert session.get(RunLog, young_batch.id).status == "running"
     assert reap_abandoned(session, NOW, POLICY) == 0
     assert step(session, company, "enrich").failed_attempts == 1
 
