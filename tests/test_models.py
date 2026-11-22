@@ -161,5 +161,6 @@ def test_news_kind_vocabulary():
         "partnership",
         "regulatory",
         "leadership",
+        "ipo",
         "other",
     ]

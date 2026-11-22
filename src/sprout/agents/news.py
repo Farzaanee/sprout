@@ -40,22 +40,26 @@ name.
 
 Process
 1. Use your one search for recent news about the company (funding, acquisition, partnership, \
-regulation, leadership). Use the company number, website and description to tell it apart from a \
-namesake. Use fetch_page only to read an article you are unsure about.
+regulation, leadership, IPO). Use the company number, website and description to tell it apart \
+from a namesake. Use fetch_page only to read an article you are unsure about.
 2. Drop every result that is not about THIS company. When unsure, drop it.
-3. Call submit_news exactly once, with at most {MAX_NEWS_PER_COMPANY} entries (an empty list is \
+3. When several results describe the same event (the same funding round, deal or appointment), \
+submit only the single best source for it, not one entry per outlet.
+4. Call submit_news exactly once, with at most {MAX_NEWS_PER_COMPANY} entries (an empty list is \
 fine). Do not write a prose answer.
 
 For each entry
 - url: the exact URL of a search or fetch result. Never write a URL from memory.
 - title: the article title. published: the date as YYYY-MM-DD, or null if unknown.
 - big: true only for news that changes the company's standing: a funding round, an acquisition \
-or merger, a major partnership or customer, a regulatory event, or a leadership change. \
-Leadership is big only for a CEO, founder or other C-suite change at the company; routine \
-hires, board welcomes and advisory appointments are NOT big. A post on the company's own website \
-is big only if it reports a funding round, an acquisition, or a partnership with a named third \
-party. Events and conference listings are NOT big. Product updates, awards, opinion pieces, \
-hiring and general mentions are NOT big.
+or merger, a major partnership or customer, a regulatory event, an IPO or stock listing, or a \
+leadership change. Leadership is big only for a CEO, founder, Chair/Executive Chair or other \
+C-suite change at the company; a new board member, director or advisory appointment is NOT big \
+even when announced as a "board appointment", unless that person is also named CEO, Chair or \
+another C-suite title. Routine hires, board welcomes and advisory appointments are NOT big. A \
+post on the company's own website is big only if it reports a funding round, an acquisition, or \
+a partnership with a named third party. Events and conference listings are NOT big. Product \
+updates, awards, opinion pieces, hiring and general mentions are NOT big.
 - kind: for big news one of {", ".join(k.value for k in NewsKind)}; otherwise null.
 - summary: one sentence of at most {SUMMARY_MAX_CHARS} characters saying what happened.
 
@@ -106,6 +110,7 @@ def _settle(raw: Any, ledger: SourceLedger) -> tuple[list[NewsEntry], list[str]]
     entries: list[NewsEntry] = []
     problems: list[str] = []
     seen: set[str] = set()
+    seen_events: set[tuple[str, date]] = set()
     for i, item in enumerate(raw if isinstance(raw, list) else [], 1):
         try:
             entry = NewsEntry.model_validate(item)
@@ -119,8 +124,12 @@ def _settle(raw: Any, ledger: SourceLedger) -> tuple[list[NewsEntry], list[str]]
             )
         elif seen_url.url in seen:
             problems.append(f"{entry.url} is given twice")
+        elif entry.big and entry.published and (entry.kind, entry.published) in seen_events:
+            pass  # same kind and date as an entry already kept: almost certainly the same event
         else:
             seen.add(seen_url.url)
+            if entry.big and entry.published:
+                seen_events.add((entry.kind, entry.published))
             entries.append(entry.model_copy(update={"url": AnyHttpUrl(seen_url.url)}))
     entries.sort(key=lambda e: not e.big)  # stable: keeps the model's order within each group
     return entries[:MAX_NEWS_PER_COMPANY], problems

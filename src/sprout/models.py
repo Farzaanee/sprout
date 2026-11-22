@@ -70,6 +70,7 @@ class NewsKind(StrEnum):
     PARTNERSHIP = "partnership"
     REGULATORY = "regulatory"
     LEADERSHIP = "leadership"
+    IPO = "ipo"
     OTHER = "other"
 
 

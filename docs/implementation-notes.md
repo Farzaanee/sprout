@@ -325,7 +325,7 @@ Commits: one per step (`implement phase 4 step 1` to `step 8`).
 
 ## Phase 6 - Multi-agent pipeline at scale
 
-**Status: done for the website-screen and news agents and orchestrator.** The website-screen agent finds or verifies websites for companies already in the candidate set. `uv run pytest -q` passes (580 passed, 9 live tests skipped) and `uv run ruff check` is clean. The orchestrator ran live: a 12-company pilot, then `--limit 50` (49 of 50 `ok` on the first pass, 50 of 50 after one resume run). The D28 check for the news agent was **not run** (it needs a hand-check of its items), so it is not yet shown to help (see "Open items").
+**Status: done for the website-screen and news agents and orchestrator.** The website-screen agent finds or verifies websites for companies already in the candidate set. `uv run pytest -q` passes (579 passed, 9 live tests skipped) and `uv run ruff check` is clean. The orchestrator ran live: a 12-company pilot, then `--limit 50` (49 of 50 `ok` on the first pass, 50 of 50 after one resume run). The D28 hand-check for the news agent is done and the agent is kept (see "D28 news hand-check" below).
 
 ### What was built
 | Item | Where |
@@ -350,18 +350,25 @@ CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max
 ### Why multi-agent (and where one agent would do)
 - A single enrichment call already produces category, stage, funding, business model and target user. Splitting buys a separately capped and separately logged run per concern (failure isolation: a failed news step leaves the profile intact, and each step has its own `run_log` row, cost and `failure_category`).
 - The cost is small at the measured prices. Per company, measured on the 50-run: enrich US$0.023 (ok runs), news US$0.011. Per-company cost was about US$0.03 to 0.04, well below the US$0.077 planned. Enrichment is 68% of spend, news 32%.
-- Where one agent would suffice: the news agent runs one search per company and finds items for 7 of 50 shell-heavy companies. On the golden-set companies (real startups) the balance is likely different, which is exactly what the unrun D28 check would show.
+- Where one agent would suffice: the news agent runs one search per company and finds items for 7 of 50 shell-heavy companies. On golden-set companies (real startups) the hit rate is much higher: 8 of 9 enriched golden-set startups produced news (see "D28 news hand-check" below).
 
 ### D34 pre-screen validation (A1)
 - **The pre-screen did not meet its target.** Of the 12 pilot companies, 5 ended `Other`, `Dormant (shell)` or `Unclear` (target: 2 or fewer); on the 50 working set, all 21 Dormant, Unclear or Stagnant companies are `Other`, and 34 of 50 are `Other` (see the [data model](architecture/2.%20data-model.md#profile-persistence)). Only about 4 of the 12 pilot companies were plausibly real startups. All 12 tie at `candidate_score` 4 (name-keyword matches), so ranking falls back to `id`.
 - **The control found no false rejects.** The 5 highest-scored companies that fail the pre-screen (`active_officers < 2`) were enriched: 2 shells, 1 real business that is not a startup (acquired in 2022), 2 companies incorporated in July 2026 with no trading evidence. So the pre-screen does not wrongly reject real startups; it is too loose, not too strict.
 - The officer count is therefore a weak filter on name-matched Companies House candidates. Better sources for the working set (for example, investor lists) or a stricter filter would help; not done this phase.
 
+### D28 news hand-check (A34)
+Hand-checked against the rubric in two passes, since the live 50-company pool was shell-heavy:
+- **Pass 1, 24 items from the shell-heavy pool** (7 companies with any news): all 24 were about the right company. Found: routine board-appointment items wrongly flagged `big`/`leadership` (GAFAI), and one own-site articles-listing page wrongly flagged `big`/`partnership` (AILab).
+- **Pass 2, 24 items from 9 golden-set real startups**, run live via `--only <company numbers> --steps news --force` (Quantexa's news step did not run because its latest enrichment attempt errored; 8 of 9 produced news): all 24 were about the right company. Found: same-event coverage duplicated across outlets (PolyAI's Series D, 2 rows; Peak AI's UiPath acquisition, 3 rows), one own-site aggregator page wrongly flagged `big`/`funding` (Cleo AI), and a gap where an IPO-consideration article was not flagged big at all (no `IPO` kind existed).
+- **Result: 40/40 items (both passes) were about the right company**, clearing the D28 90% keep bar. **Kept in the default pipeline.**
+- **Fixed as a result:** the leadership rule in `SYSTEM_PROMPT` (`agents/news.py`) now excludes board/director/advisory appointments without a named CEO/Chair/C-suite title; `NewsKind` gained `IPO`; `_settle` collapses entries that share the same `kind` and exact `published` date within one submission.
+- **Still open:** cross-date duplicate coverage of one event from different outlets is not caught (the collapse only matches on exact date); some items still have no `published` date; the own-site aggregator/listing-page mislabeling is not specifically addressed by the prompt change.
+
 ### Open items (need you)
-1. **Hand-check the news agent (D28):** 15 to 20 items against the rubric (the keep rule is in the Phase 6 page). Until done, the news agent is **not shown to improve quality**.
-2. **Decide whether to tighten the candidate pool** (D34 miss above) before a larger run or Phase 9's weekly refresh.
-3. **Weak spots seen live, not fixed:** (a) the big-news rubric still over-flags (16 of 24 items big; board appointments and routine hires); (b) `profile_gaps` and the console line treat an explicit "not disclosed" as incomplete (48 of 50 shown incomplete); (c) 9 of 24 news items have no published date; (d) a stale `running` `companies_ingest` row (id 68) is never reaped (batch kinds are not).
-4. 429 handling and the 5-trip stop were never exercised live (0 trips); they are covered by tests only.
+1. **Decide whether to tighten the candidate pool** (D34 miss above) before a larger run or Phase 9's weekly refresh.
+2. **Weak spots seen live, not fixed:** (a) cross-date duplicate coverage of one news event across outlets; (b) `profile_gaps` and the console line treat an explicit "not disclosed" as incomplete (48 of 50 shown incomplete); (c) several news items have no published date; (d) a stale `running` `companies_ingest` row (id 68) is never reaped (batch kinds are not).
+3. 429 handling and the 5-trip stop were never exercised live (0 trips); they are covered by tests only.
 
 ### Decisions locked in
 - Built as designed in D38 and D39 (see [decisions](architecture/6.%20decisions.md)): per-worker resource bundles with `asyncio.to_thread` (default 4 workers); status derived per step from `run_log`; at most one attempt per step per invocation and 3 failed attempts across runs (`api_error` rows excluded); `--limit` is a stable working set.

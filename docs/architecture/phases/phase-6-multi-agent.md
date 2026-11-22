@@ -226,7 +226,7 @@ Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-co
 
 ## Evaluating the news agent (D28)
 
-The news agent is to be measured before it stays in the default pipeline. No golden labels exist, so hand-check 15 to 20 items: same company, not a duplicate, `big` and `kind` match the rubric, URL in the ledger (code-enforced). Keep it if at least 90 percent of items are about the right company; otherwise say so. The check has not been done, so no keep-or-merge result exists. The news agent changes no profile value, so the category, business-status and fabricated-funding gates cannot move because of it.
+The news agent is to be measured before it stays in the default pipeline. No golden labels exist, so hand-check 15 to 20 items: same company, not a duplicate, `big` and `kind` match the rubric, URL in the ledger (code-enforced). Keep it if at least 90 percent of items are about the right company; otherwise say so. The check is done: see [D28/A34](../5.%20risks.md) for the result. The news agent changes no profile value, so the category, business-status and fabricated-funding gates cannot move because of it.
 
 ## Changes to existing code (built)
 
@@ -275,10 +275,10 @@ No table or column changes (D10 is not triggered): the Phase 6 data lands in exi
 ## Known weak spots and open items
 
 - **Pre-screen too loose (A1, D34):** validated live and found too loose, not too strict; details in [implementation-notes](../../implementation-notes.md#d34-pre-screen-validation-a1). Whether to tighten the pool is undecided.
-- **News:** the big-news rubric over-flags, and some items have no published date.
+- **News:** cross-outlet coverage of one event can still duplicate (same-date exact match is collapsed in code; different dates are not), and some items have no published date.
 - **`profile_gaps`** treats an explicit "not disclosed" (NULL) fact as a gap, so most ok companies are reported incomplete.
 - **Not exercised live:** a SIGINT mid-run and the 429 gate (unit tests only). A stale `running` batch row (for example `companies_ingest`) is never reaped.
-- **A34:** the absence of news labels stays as in [risks](../5.%20risks.md).
+- **A34:** resolved; see [risks](../5.%20risks.md).
 - **Not built:** `on_step` callback, live per-iteration progress, an `enrichment_state` table, low-confidence-first ordering.
 
 This phase reuses the generic loop, tool pattern and cost accounting from [Phase 3](phase-3-enrichment.md) (D12), `BatchBudget` from [Phase 5](phase-5-evals-guardrails.md) (D24), `enrich_with_result(extra_context=)` and `stats["sources"]`. Step records are written per run by the worker's own session after `run_agent` returns, as described in the [Phase 4 page](phase-4-observability.md#what-phase-6-uses-from-this-phase).

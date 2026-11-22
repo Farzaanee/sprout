@@ -159,11 +159,13 @@ def test_request_has_one_search_the_allowed_tools_and_company_context(session, c
 
 
 def test_rubric_limits_leadership_own_site_posts_and_events():
-    assert "only for a CEO, founder or other C-suite change" in SYSTEM_PROMPT
+    assert "only for a CEO, founder, Chair/Executive Chair or other C-suite change" in SYSTEM_PROMPT
+    assert "a new board member, director or advisory appointment is NOT big" in SYSTEM_PROMPT
     assert "board welcomes and advisory appointments are NOT big" in SYSTEM_PROMPT
     assert "own website is big only if it reports a funding round" in SYSTEM_PROMPT
     assert "partnership with a named third party" in SYSTEM_PROMPT
     assert "Events and conference listings are NOT big" in SYSTEM_PROMPT
+    assert "submit only the single best source for it" in SYSTEM_PROMPT
 
 
 def test_no_entries_stores_nothing(session, company, deps_for):
@@ -222,6 +224,26 @@ def test_duplicate_urls_and_extra_entries_are_capped(session, company, deps_for)
     entries = collect(session, company, client, deps_for)
     assert len(entries) == MAX_NEWS_PER_COMPANY
     assert str(entries[0].url) == urls[7]  # the big one survives the cap
+
+
+def test_same_kind_and_date_big_entries_collapse_to_one(session, company, deps_for):
+    other_url = "https://s.example/other-outlet"
+    client = ScriptedClient(
+        server_search_turn(
+            [FUNDING, other_url],
+            (
+                "submit_news",
+                {
+                    "entries": [
+                        entry(FUNDING, big=True, kind="funding"),
+                        entry(other_url, big=True, kind="funding"),  # same event, same date
+                    ]
+                },
+            ),
+        )
+    )
+    entries = collect(session, company, client, deps_for)
+    assert [str(e.url) for e in entries] == [FUNDING]
 
 
 def test_rerunning_is_idempotent(session, company, deps_for):
