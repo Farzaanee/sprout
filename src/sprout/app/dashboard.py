@@ -2,12 +2,12 @@
 
 Run locally: `uv run streamlit run streamlit_app.py`.
 
-Tabs: Progress (phases + data counts), Companies, News, Observability.
+Sidebar: database picker, then filters for the first three tabs. Tabs: Overview, Companies,
+News feed, Candidate pool, Progress (phases + data counts), Observability.
 """
 
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 import altair as alt
 import pandas as pd
@@ -16,90 +16,24 @@ from sqlmodel import Session
 
 from sprout import queries
 from sprout.app import observability_queries as obs
+from sprout.app import ui
+from sprout.app.companies import render_companies
+from sprout.app.filters import render_sidebar
+from sprout.app.news_feed import render_news_feed
+from sprout.app.overview import render_overview
 from sprout.config import DEFAULT_EVAL_DB_PATH, get_settings
-from sprout.db import RunKind, get_engine, init_db
+from sprout.db import RunKind
 
 DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
 STATE_ICONS = {"Done": "✅", "In progress": "🟡", "Not started": "⬜"}
 
 
-def _bar_chart(
-    counts: dict[Any, float],
-    *,
-    category_title: str,
-    value_title: str,
-    percent_of: float | None = None,
-    horizontal: bool = False,
-    full_labels: bool = False,
-    height: int | None = None,
-    label_angle: int | None = None,
-) -> alt.Chart:
-    """A static bar chart: unlike `st.bar_chart`, this never calls Altair's `.interactive()`, so
-    the mouse wheel does not pan or zoom it. `percent_of` adds a "% of total" tooltip field;
-    `horizontal` puts the category on the y-axis (for long labels); `full_labels` never truncates
-    the category axis labels (Vega-Lite's default limit is 180px); `height` fixes the plot height
-    in pixels, so two horizontal charts with a different row count still end at the same y
-    position instead of each sizing itself to its own row count; `label_angle` fixes the category
-    axis label rotation, so charts with different label lengths still render at the same total
-    height instead of Vega-Lite auto-rotating some and not others."""
-    rows = []
-    for key, value in counts.items():
-        row = {category_title: key, value_title: value}
-        if percent_of:
-            row["percent"] = 100 * value / percent_of
-        rows.append(row)
-    tooltip = [alt.Tooltip(category_title), alt.Tooltip(value_title)]
-    if percent_of:
-        tooltip.append(alt.Tooltip("percent:Q", title="% of enriched companies", format=".1f"))
-    axis_kwargs = {}
-    if full_labels:
-        axis_kwargs["labelLimit"] = 0
-    if label_angle is not None:
-        axis_kwargs["labelAngle"] = label_angle
-    axis = alt.Axis(**axis_kwargs)
-    if rows:
-        columns = [category_title, value_title] + (["percent"] if percent_of else [])
-        df = pd.DataFrame(rows, columns=columns)
-    else:
-        # An empty object-dtype column infers as pandas dtype "empty", which Altair doesn't
-        # recognise and warns about; give explicit dtypes so an empty chart renders quietly.
-        df = pd.DataFrame(
-            {category_title: pd.Series(dtype="str"), value_title: pd.Series(dtype="float")}
-        )
-        if percent_of:
-            df["percent"] = pd.Series(dtype="float")
-    chart = alt.Chart(df).mark_bar()
-    if height is not None:
-        chart = chart.properties(height=height)
-    if horizontal:
-        return chart.encode(
-            y=alt.Y(f"{category_title}:N", sort="-x", title=None, axis=axis),
-            x=alt.X(f"{value_title}:Q", title=value_title),
-            tooltip=tooltip,
-        )
-    return chart.encode(
-        x=alt.X(f"{category_title}:N", sort=None, title=None, axis=axis),
-        y=alt.Y(f"{value_title}:Q", title=value_title),
-        tooltip=tooltip,
-    )
-
-
-@st.cache_resource
-def _engine(db_path: str):
-    engine = get_engine(db_path)
-    init_db(engine)
-    return engine
-
-
-def _session() -> Session:
-    db_path = st.session_state.get("db_path", str(get_settings().db_path))
-    return Session(_engine(db_path))
-
-
-def render_progress() -> None:
-    plan = (DOCS_DIR / "project-plan.md").read_text()
-    notes = (DOCS_DIR / "implementation-notes.md").read_text()
-    phases = obs.parse_phases(plan, notes)
+def _render_phases() -> None:
+    plan_file, notes_file = DOCS_DIR / "project-plan.md", DOCS_DIR / "implementation-notes.md"
+    if not (plan_file.exists() and notes_file.exists()):
+        st.info("Phase progress needs the project docs (docs/), which are not available here.")
+        return
+    phases = obs.parse_phases(plan_file.read_text(), notes_file.read_text())
 
     done = sum(p.state == "Done" for p in phases)
     st.progress(done / len(phases) if phases else 0, text=f"{done} of {len(phases)} phases done")
@@ -112,9 +46,11 @@ def render_progress() -> None:
         if p.status_line:
             st.caption(p.status_line)
 
+
+def render_progress() -> None:
+    _render_phases()
     st.subheader("Data in the database")
-    render_db_picker()
-    with _session() as session:
+    with ui.session() as session:
         counts = queries.count_rows(session)
         runs = obs.recent_runs(session)
         keywords = queries.keyword_counts(session)
@@ -131,11 +67,11 @@ def render_progress() -> None:
     left, right = st.columns(2)
     left.caption("Candidates by matched keyword")
     left.altair_chart(
-        _bar_chart(keywords, category_title="keyword", value_title="companies"), width="stretch"
+        ui.bar_chart(keywords, category_title="keyword", value_title="companies"), width="stretch"
     )
     right.caption("Candidates by incorporation year")
     right.altair_chart(
-        _bar_chart(years, category_title="year", value_title="companies"), width="stretch"
+        ui.bar_chart(years, category_title="year", value_title="companies"), width="stretch"
     )
 
     st.subheader("Recent runs")
@@ -157,8 +93,8 @@ def render_progress() -> None:
     )
 
 
-def render_companies() -> None:
-    with _session() as session:
+def render_pool() -> None:
+    with ui.session() as session:
         total = queries.count_rows(session)["companies"]
         last_ingest = queries.latest_companies_ingest_run(session)
         enriched = queries.enriched_company_count(session)
@@ -254,7 +190,7 @@ def render_companies() -> None:
         shared_height = row_count * 28
         left.caption("Category distribution (classified candidates only, hover for % of enriched)")
         left.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 category_counts,
                 category_title="category",
                 value_title="companies",
@@ -269,7 +205,7 @@ def render_companies() -> None:
             "HQ locality distribution (top 12, enriched companies, hover for % of enriched)"
         )
         right.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 locality_counts,
                 category_title="locality",
                 value_title="companies",
@@ -284,12 +220,12 @@ def render_companies() -> None:
         left, right = st.columns(2)
         left.caption("Founded year (Companies House incorporation year, all candidates)")
         left.altair_chart(
-            _bar_chart(pool_founded_counts, category_title="year", value_title="companies"),
+            ui.bar_chart(pool_founded_counts, category_title="year", value_title="companies"),
             width="stretch",
         )
         right.caption("Founded year (enriched companies only, hover for % of enriched)")
         right.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 enriched_founded_counts,
                 category_title="year",
                 value_title="companies",
@@ -301,13 +237,13 @@ def render_companies() -> None:
         left, right = st.columns(2)
         left.caption("Officer age distribution (all candidates, from Companies House birth year)")
         left.altair_chart(
-            _bar_chart(officer_age_counts, category_title="age", value_title="officers"),
+            ui.bar_chart(officer_age_counts, category_title="age", value_title="officers"),
             width="stretch",
         )
         n = len(officer_nationality_counts)
         right.caption(f"Officer nationality (top {n}, all candidates)")
         right.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 officer_nationality_counts,
                 category_title="nationality",
                 value_title="officers",
@@ -324,7 +260,7 @@ def render_companies() -> None:
         left, right = st.columns(2)
         left.caption("Stage distribution (enriched companies, hover for % of enriched)")
         left.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 stage_counts, category_title="stage", value_title="companies", percent_of=enriched
             ),
             width="stretch",
@@ -333,7 +269,7 @@ def render_companies() -> None:
             "Valuation distribution, US$ million (enriched companies, hover for % of enriched)"
         )
         right.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 valuation_counts,
                 category_title="valuation",
                 value_title="companies",
@@ -345,7 +281,7 @@ def render_companies() -> None:
         left, right = st.columns(2)
         left.caption("Business status (enriched companies, hover for % of enriched)")
         left.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 business_status_counts,
                 category_title="business status",
                 value_title="companies",
@@ -358,7 +294,7 @@ def render_companies() -> None:
 
     st.divider()
 
-    with _session() as session:
+    with ui.session() as session:
         top = st.columns([3, 1, 2, 2, 2])
         text = top[0].text_input("Name contains")
         min_score = top[1].number_input("Min score", min_value=0, max_value=10, value=0)
@@ -400,92 +336,6 @@ def render_companies() -> None:
             width="stretch",
             column_config={"source": st.column_config.LinkColumn("source", display_text="open")},
         )
-
-        if not rows:
-            return
-        chosen = st.selectbox("Company detail", rows, format_func=lambda r: r.name)
-        assert chosen.id is not None
-        facts = queries.company_facts(session, chosen.id)
-        st.dataframe(
-            pd.DataFrame(
-                {
-                    "field": f.field,
-                    "value": f.value_json if f.value_json is not None else queries.NOT_DISCLOSED,
-                    "confidence": f.confidence,
-                    "retrieved": f.retrieved_at,
-                    "note": f.note,
-                    "source": f.source_url,
-                }
-                for f in facts
-            ),
-            hide_index=True,
-            width="stretch",
-            column_config={"source": st.column_config.LinkColumn("source", display_text="open")},
-        )
-
-        rounds = queries.company_funding_rounds(session, chosen.id)
-        st.caption("Funding rounds")
-        if not rounds:
-            st.caption("No funding rounds found.")
-        else:
-            st.dataframe(
-                pd.DataFrame(
-                    {
-                        "stage": r.stage,
-                        "amount (US$m)": r.amount_million_usd,
-                        "announced": r.announced,
-                        "investors": ", ".join(r.investors),
-                        "confidence": r.confidence,
-                        "note": r.note,
-                        "source": r.source_url,
-                    }
-                    for r in rounds
-                ),
-                hide_index=True,
-                width="stretch",
-                column_config={
-                    "source": st.column_config.LinkColumn("source", display_text="open")
-                },
-            )
-
-        officers = queries.company_officers(session, chosen.id)
-        st.caption("Officers")
-        if not officers:
-            st.caption("No officers found.")
-        else:
-            st.dataframe(
-                pd.DataFrame(
-                    {
-                        "name": o.name,
-                        "role": o.role,
-                        "birth year": o.birth_year,
-                        "nationality": o.nationality,
-                        "confidence": o.confidence,
-                        "note": o.note,
-                        "source": o.source_url,
-                    }
-                    for o in officers
-                ),
-                hide_index=True,
-                width="stretch",
-                column_config={
-                    "source": st.column_config.LinkColumn("source", display_text="open")
-                },
-            )
-
-
-def render_news() -> None:
-    text = st.text_input("Search title or summary")
-    with _session() as session:
-        items = queries.search_news(session, text=text)
-    st.caption(f"{len(items)} items")
-    for item, company_name in items:
-        st.markdown(f"**[{item.title}]({item.url})**")
-        st.caption(
-            f"{company_name} · {item.news_kind or 'not big news'} · {item.published or 'no date'}"
-        )
-        if item.summary:
-            st.write(item.summary)
 
 
 def _run_row(run: obs.EnrichRun) -> dict[str, object]:
@@ -549,7 +399,7 @@ def _render_run_detail(session: Session, run: obs.EnrichRun) -> None:
 
 
 def render_observability() -> None:
-    with _session() as session:
+    with ui.session() as session:
         if not obs.enrich_runs(session):
             st.info(
                 "No enrichment runs yet. Run `uv run python -m sprout.enrich NAME_OR_NUMBER` "
@@ -617,7 +467,7 @@ def render_observability() -> None:
 
         cost_kind_col.caption("Cost by kind (US$)")
         cost_kind_col.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 cost_kind,
                 category_title="kind",
                 value_title="cost (US$)",
@@ -662,7 +512,7 @@ def render_observability() -> None:
         cat_col.caption("Failures by category")
         if counts:
             cat_col.altair_chart(
-                _bar_chart(
+                ui.bar_chart(
                     counts,
                     category_title="category",
                     value_title="runs",
@@ -676,7 +526,7 @@ def render_observability() -> None:
 
         kind_col.caption("Failure rate by kind (%)")
         kind_col.altair_chart(
-            _bar_chart(
+            ui.bar_chart(
                 rate_by_kind,
                 category_title="kind",
                 value_title="failure rate (%)",
@@ -689,7 +539,7 @@ def render_observability() -> None:
         tool_col.caption("Failures by tool call")
         if tool_failures:
             tool_col.altair_chart(
-                _bar_chart(
+                ui.bar_chart(
                     tool_failures,
                     category_title="tool",
                     value_title="failed runs",
@@ -721,9 +571,7 @@ def render_observability() -> None:
                 color=alt.Color(
                     "status:N",
                     title="status",
-                    scale=alt.Scale(
-                        domain=["successful", "failed"], range=["#1f77b4", "#d62728"]
-                    ),
+                    scale=alt.Scale(domain=["successful", "failed"], range=["#1f77b4", "#d62728"]),
                 ),
                 tooltip=["run", "cost per iteration", "status"],
             ),
@@ -812,10 +660,16 @@ def main() -> None:
     st.title("🌱 Sprout")
     st.caption("UK AI startup discovery: progress and data dashboard")
 
+    with st.sidebar:
+        render_db_picker()
+    filters = render_sidebar()
+
     tabs = [
+        ("Overview", lambda: render_overview(filters)),
+        ("Companies", lambda: render_companies(filters)),
+        ("News feed", lambda: render_news_feed(filters)),
+        ("Candidate pool", render_pool),
         ("Progress", render_progress),
-        ("Companies", render_companies),
-        ("News", render_news),
         ("Observability", render_observability),
     ]
     for tab, (_, render) in zip(st.tabs([name for name, _ in tabs]), tabs, strict=True):

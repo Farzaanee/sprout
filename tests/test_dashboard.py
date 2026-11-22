@@ -11,6 +11,7 @@ from sprout.db import RunLog, RunLogStep, get_engine, init_db, upsert_company
 from sprout.sources.companies_house import CompanyHit
 
 ENTRY_POINT = Path(__file__).parents[1] / "streamlit_app.py"
+TABS = ["Overview", "Companies", "News feed", "Candidate pool", "Progress", "Observability"]
 
 
 def _app(monkeypatch, tmp_path) -> AppTest:
@@ -33,7 +34,7 @@ def test_dashboard_imports_no_spend_path():
 def test_renders_with_empty_database_read_only(monkeypatch, tmp_path):
     at = _app(monkeypatch, tmp_path).run()
     assert not at.exception
-    assert [t.label for t in at.tabs] == ["Progress", "Companies", "News", "Observability"]
+    assert [t.label for t in at.tabs] == TABS
     assert any("database is empty" in i.value for i in at.info)
 
 
@@ -47,7 +48,7 @@ def test_shows_counts_read_only(monkeypatch, tmp_path):
 
     at = _app(monkeypatch, tmp_path).run()
     assert not at.exception
-    assert [t.label for t in at.tabs] == ["Progress", "Companies", "News", "Observability"]
+    assert [t.label for t in at.tabs] == TABS
     assert not at.button
     assert {m.label: m.value for m in at.metric}["Candidate companies"] == "1"
 
@@ -181,3 +182,11 @@ def test_observability_renders_logged_text_only_in_code(monkeypatch, tmp_path):
     rendered = " ".join(e.value for e in [*at.markdown, *at.caption, *at.info, *at.success])
     assert "evil.example" not in rendered
     assert not [e for e in at.expander if "evil" in e.label]
+
+
+def test_progress_shows_a_message_when_the_docs_are_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr("sprout.app.dashboard.DOCS_DIR", tmp_path / "no-docs")
+    at = _app(monkeypatch, tmp_path).run()
+    assert not at.exception
+    assert any("needs the project docs" in i.value for i in at.info)
+    assert {m.label for m in at.metric} >= {"Candidate companies"}
