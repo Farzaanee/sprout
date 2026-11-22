@@ -1,0 +1,27 @@
+name: snapshot
+
+on:
+  push:
+    paths:
+      - data/sprout_snapshot.db
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - name: integrity check committed snapshot
+        run: |
+          uv run python -c "
+          import sqlite3
+          import sys
+
+          conn = sqlite3.connect('data/sprout_snapshot.db')
+          result = conn.execute('PRAGMA integrity_check').fetchall()
+          if result != [('ok',)]:
+              print(f'integrity check failed: {result}', file=sys.stderr)
+              sys.exit(1)
+          print('snapshot integrity ok')
+          "

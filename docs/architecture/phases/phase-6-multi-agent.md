@@ -41,6 +41,8 @@ flowchart TB
     NEWS --> EXT
     COMMON --> SQL
     NEWS --> SQL
+    SQL -. "make publish-snapshot (D40)" .-> SNAP["data/sprout_snapshot.db"]
+    SNAP -. push .-> CI["snapshot workflow: integrity check"]
 ```
 
 Per-company flow (one worker thread, steps run in this order; a step that is fresh is skipped):

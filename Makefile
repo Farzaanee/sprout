@@ -1,6 +1,6 @@
 KEEP_BRANCH ?= $(shell git branch --show-current)
 
-.PHONY: run ingest test lint hooks snapshot amend-push del-branch
+.PHONY: run ingest test lint hooks snapshot publish-snapshot amend-push del-branch
 
 run:
 	uv run streamlit run streamlit_app.py
@@ -19,6 +19,14 @@ hooks:
 
 snapshot:
 	uv run python scripts/make_snapshot.py
+
+# Run after an enrichment pass (e.g. `make ingest` or an orchestrator run) to publish the
+# refreshed snapshot: rebuilds data/sprout_snapshot.db and pushes it, which triggers the
+# `snapshot` CI workflow to verify it.
+publish-snapshot: snapshot
+	git add data/sprout_snapshot.db
+	git diff --cached --quiet data/sprout_snapshot.db || git commit -m "snapshot: refresh after enrichment"
+	git push
 
 fpush:
 	git add .
