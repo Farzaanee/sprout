@@ -387,28 +387,45 @@ Hand-checked against the rubric in two passes, since the live 50-company pool wa
 
 ## Phase 7 - Dashboard
 
-**Status: in progress.** Only the shared query layer (D29) is built so far; filters, charts, the company detail page, the big-news feed and the Ask box are not. `uv run pytest -q` passes (571 passed, 9 live tests skipped) and `uv run ruff check src tests` is clean.
+**Status: done, except the narrow-window layout (see open items).** The optional "Ask" box was deliberately skipped (the plan marks it optional; the Phase 8 MCP server provides natural-language access). `uv run pytest -q` passes (643 passed, 9 live tests skipped) and `uv run ruff check` is clean.
 
 ### What was built
 | Item | Where |
 |---|---|
-| UI-free company reads shared with Phase 8: `get_profile`, `search_companies` with `Coverage`, `NOT_DISCLOSED`, pool counts | [src/sprout/queries.py](../src/sprout/queries.py) |
-| Run-log and docs reads, dashboard only (moved from `app/queries.py` unchanged) | [src/sprout/app/observability_queries.py](../src/sprout/app/observability_queries.py) |
-| `PUBLIC_COMPANY_URL` moved to `models.py` so `queries.py` needs no `sources` import | [src/sprout/models.py](../src/sprout/models.py) |
-| Dashboard imports updated; Companies tab reads `.companies` from the search | [src/sprout/app/dashboard.py](../src/sprout/app/dashboard.py) |
-| Tests, including the import rule, `get_profile`, the filters and coverage | [tests/test_queries.py](../tests/test_queries.py), [tests/test_observability_queries.py](../tests/test_observability_queries.py) |
-| Console tab removed (A29): the dashboard is read-only; a test asserts it imports no ingest, hello, agents or `anthropic` module | [src/sprout/app/dashboard.py](../src/sprout/app/dashboard.py), [tests/test_dashboard.py](../tests/test_dashboard.py) |
+| UI-free company reads shared with Phase 8: `get_profile`, `search_companies` with `Coverage` (now also `enriched_only`, `max_funding_million_usd`, text over the winning `one_liner`), `company_cards`, `funding_by_stage`, `recent_rounds`, `search_news` (`big_only`, `category`, `since`, `company_ids`), `NOT_DISCLOSED` | [src/sprout/queries.py](../src/sprout/queries.py) |
+| Run-log and docs reads, dashboard only | [src/sprout/app/observability_queries.py](../src/sprout/app/observability_queries.py) |
+| Shell: database picker and sidebar first, tabs Overview, Companies, News feed, Candidate pool, Progress, Observability; Progress shows a message when `docs/` is missing; the old raw-Markdown News tab and the Companies drill-down are gone | [src/sprout/app/dashboard.py](../src/sprout/app/dashboard.py) |
+| Helpers: `bar_chart`, `open_engine` (read-only open of a non-writable file), `db_version`, `plain`, `source_link`, `confidence_badge`, `money` | [src/sprout/app/ui.py](../src/sprout/app/ui.py) |
+| `Filters`, sidebar with coverage captions, cached `filtered` | [src/sprout/app/filters.py](../src/sprout/app/filters.py) |
+| Overview: coverage strip, category counts, funding by round stage, rounds table with source links, top recent rounds | [src/sprout/app/overview.py](../src/sprout/app/overview.py) |
+| Companies list and detail (9 fields with badge, date and source link, funding history, news timeline, officers) | [src/sprout/app/companies.py](../src/sprout/app/companies.py) |
+| News feed (big news by default, toggle, kind filter) | [src/sprout/app/news_feed.py](../src/sprout/app/news_feed.py) |
+| Tests | [tests/test_queries.py](../tests/test_queries.py), [tests/test_ui.py](../tests/test_ui.py), [tests/test_overview.py](../tests/test_overview.py), [tests/test_companies.py](../tests/test_companies.py), [tests/test_news_feed.py](../tests/test_news_feed.py), [tests/test_dashboard.py](../tests/test_dashboard.py) |
+
+### Acceptance criteria
+- [x] **Filters update the view in under ~1s on the full dataset.** `AppTest` on a copy of the snapshot (84 enriched of 1,672 candidates): every filter change (category, stage, latest round, founded, text) took 0.19 to 0.26 s as a full script rerun of all six tabs; first run 1.3 s. On a synthetic copy with 3,360 enriched companies (40x), a rerun took 0.57 to 0.87 s (`search_companies` about 170 ms, `company_cards` about 184 ms).
+- [x] **Every displayed number links to its source; "not disclosed" is shown rather than blank/zero.** Each disclosed fact and funding round carries its own source link; the Overview chart sits above a table with one link per round; the Companies list says its sources are in the profile. A round with no usable URL shows "No source link". Rendering all 84 snapshot companies' detail produced no "None", "nan" or "US$0" text. News items link to their article.
+- [x] **Works on first run with a bundled snapshot DB.** With no `data/sprout.db`, the app falls back to the snapshot: no exception, six tabs and sidebar, and a real `streamlit run` returned 200 on `/_stcore/health`. A read-only copy (file and directory) opens and is unchanged (hash and listing identical).
+- [~] **Works on a narrow (laptop) window.** Headless Chrome at 800 px: no page-level horizontal scroll; Overview, Companies detail and News feed read fine. With the sidebar open (about 300 px) the Companies list shows only the name column and scrolls sideways inside the grid; the 8-column rounds table also scrolls inside its frame. Not checked in a headed browser.
+- [x] **Never plot a missing value as zero; coverage surfaced.** A stage with no amount is listed as "Not disclosed" and not charted; coverage appears in the Overview ("Funding known 8 of 84", "11 of 12 rounds have an amount") and in the sidebar ("stage known for 5 of 84").
 
 ### Decisions locked in
-- `get_profile` returns `None` for an unknown id. A NULL winning fact is `disclosed=False` ("not disclosed"); a field with no fact is absent from `Profile.facts` ("not researched").
-- `search_companies` now returns `CompanySearch(companies, coverage)`. Funding is the amount of the latest round (D22), so a company whose latest round has no amount never matches `min_funding_million_usd`. Stage, business status and founded year come from the winning fact. Coverage counts over all matches, before `limit`.
-- Stage, business status and founded are loaded with one `fact` query per search, and funding rounds with one more. Nothing is cached in the module; the UI caches.
-- The "Not found" labels in the stage, business status and valuation counts are now "Not disclosed" (`NOT_DISCLOSED`).
+- `get_profile` returns `None` for an unknown id. A NULL winning fact is `disclosed=False` ("not disclosed"); a field with no fact is absent from `Profile.facts` ("not researched"), shown as "Not researched".
+- `search_companies` returns `CompanySearch(companies, coverage)`. Funding is the amount of the latest round (D22), labelled "Latest round" in the UI. Stage, business status, founded year and `one_liner` come from the winning fact; coverage counts over all matches, before `limit`. Text search is applied in Python after the winning facts load.
+- Pages cover enriched companies only (`category IS NOT NULL`); the pool stays on the Candidate pool tab. Filter options come from the data, not the enums (an off-enum legacy category exists in the snapshot).
+- `funding_by_stage` puts a round whose stage is not in `Stage` in the "Unknown" bucket. The Overview charts bars of known totals only; no heatmap (12 rounds in the snapshot).
+- D41 applies: model-written text reaches Markdown only through `ui.plain()`; links only http(s) with a fixed label.
+- The read-only snapshot is opened in `ui.open_engine` (a `mode=ro&immutable=1` URL, no `init_db`) when the file or its directory is not writable; `db.get_engine` is unchanged. The dataframe selection key includes a hash of the shown ids so a filter change clears the selection.
+- Nothing is cached in `queries.py`; the pages cache plain data on `(db_path, db_version, Filters)`. `get_profile` is not cached.
 
 ### Open items (need you)
+- Narrow-window layout: the Companies list is nearly one column wide with the sidebar open at 800 px. Fixing it means a leaner list or a collapsed sidebar default; not done.
 - `status.profile_gaps` still counts a NULL (not disclosed) fact as a gap (48 of 50 ok companies shown incomplete); left unchanged pending your decision.
-- Filter latency: a combined stage, funding and founded search over `data/sprout.db` (a few thousand candidates, about 90 facted companies) took 0.04 s. Not measured on a larger pool.
+- `plain()` is only checked at the string level; whether a bare `https://...` still autolinks after escaping was not checked in a browser. The Candidate pool, Progress and Observability tabs were not audited against the number-link rules (they predate this phase).
+- Whether a public deployment should hide the Observability, Progress and cost tabs is undecided (Phase 9).
 
 ### Things later phases must know
-- The dashboard's Companies tab still reads `company_facts` (every fact row, including superseded ones); the detail page should switch to `get_profile`.
-- The Phase 8 `search_companies(category, stage, min_raised_million_usd)` tool maps to this function's `category`, `stage` and `min_funding_million_usd`.
+- Phase 8: `search_companies(category, stage, min_raised_million_usd)` maps to `category`, `stage` and `min_funding_million_usd` (latest-round amount, not total raised); `latest_news(category, days)` maps to `search_news(big_only=True, category=..., since=...)`; `list_categories` is `category_counts`. `get_company(name)` needs a name lookup that does not exist yet. All new parameters are keyword-only.
+- `search_news(since=...)` excludes undated rows. The snapshot has no news in the last 90 days.
+- Phase 9: the Progress tab reads `docs/project-plan.md` and `docs/implementation-notes.md` at runtime, so a deployment image needs `docs/`.
+- `ruff format --check` fails on 7 files that predate this phase (including `dashboard.py`'s Observability block); `ruff check` is clean.
