@@ -205,7 +205,7 @@ def profile_gaps(session: Session, company_id: int) -> list[str]:
     facts = winning_facts(session.exec(select(Fact).where(Fact.company_id == company_id)).all())
 
     def has_value(field: str) -> bool:
-        return field in facts and facts[field].value_json is not None
+        return field in facts
 
     has_funding = session.exec(
         select(FundingRoundRow.id).where(FundingRoundRow.company_id == company_id).limit(1)

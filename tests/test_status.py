@@ -223,7 +223,7 @@ def test_profile_gaps(session, company):
     company.category = "Other"
     session.add_all(
         [
-            fact("stage", None),  # researched, nothing found: still a gap
+            fact("stage", None),  # researched, not disclosed: no longer a gap
             fact("business_model", '"B2B SaaS"'),
             FundingRoundRow(
                 company_id=company.id, stage="Seed", retrieved_at=NOW, confidence="high"
@@ -231,11 +231,10 @@ def test_profile_gaps(session, company):
         ]
     )
     session.commit()
-    assert profile_gaps(session, company.id) == ["stage", "target_user", "news"]
+    assert profile_gaps(session, company.id) == ["target_user", "news"]
 
     session.add_all(
         [
-            fact("stage", '"Seed"', "https://b.example"),
             fact("target_user", '"SMEs"'),
             CompanyNewsRow(company_id=company.id, url="https://n.example/1", title="ACME raises"),
         ]
