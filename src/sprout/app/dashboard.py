@@ -1,14 +1,10 @@
-"""Streamlit app to check Sprout's progress and try the pipeline.
+"""Read-only Streamlit dashboard for Sprout's progress and data.
 
 Run locally: `uv run streamlit run streamlit_app.py`.
 
-Tabs: Progress (phases + data counts), Companies, News, Observability, Run & test. The Run & test
-tab can write to the database and spend API quota, so it is hidden unless `SPROUT_ENABLE_ACTIONS=1`.
+Tabs: Progress (phases + data counts), Companies, News, Observability.
 """
 
-import contextlib
-import io
-import os
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -18,7 +14,7 @@ import pandas as pd
 import streamlit as st
 from sqlmodel import Session
 
-from sprout import hello, ingest, queries
+from sprout import queries
 from sprout.app import observability_queries as obs
 from sprout.config import DEFAULT_EVAL_DB_PATH, get_settings
 from sprout.db import RunKind, get_engine, init_db
@@ -88,10 +84,6 @@ def _bar_chart(
     )
 
 
-def actions_enabled() -> bool:
-    return os.environ.get("SPROUT_ENABLE_ACTIONS") == "1"
-
-
 @st.cache_resource
 def _engine(db_path: str):
     engine = get_engine(db_path)
@@ -102,18 +94,6 @@ def _engine(db_path: str):
 def _session() -> Session:
     db_path = st.session_state.get("db_path", str(get_settings().db_path))
     return Session(_engine(db_path))
-
-
-def _run_captured(func, *args) -> tuple[int, str]:
-    """Run a CLI-style `main` and return (exit code, everything it printed)."""
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
-        try:
-            code = func(*args)
-        except Exception as exc:  # shown to the tester, not swallowed
-            print(f"{type(exc).__name__}: {exc}")
-            code = 1
-    return code or 0, buffer.getvalue()
 
 
 def render_progress() -> None:
@@ -145,9 +125,7 @@ def render_progress() -> None:
     cols[2].metric("News items", counts["news"])
     cols[3].metric("Logged runs", counts["runs"])
     if counts["companies"] == 0 and counts["news"] == 0:
-        st.info(
-            "The database is empty. Use the Run & test tab (or `uv run python -m sprout.ingest`)."
-        )
+        st.info("The database is empty. Run `uv run python -m sprout.ingest` to fill it.")
         return
 
     left, right = st.columns(2)
@@ -820,31 +798,6 @@ def render_observability() -> None:
         _render_run_detail(session, by_id[chosen])
 
 
-def render_run_and_test() -> None:
-    settings = get_settings()
-    st.write("Keys configured (values are never shown):")
-    st.markdown(
-        f"- Anthropic: {'✅' if settings.anthropic_api_key else '❌'}\n"
-        f"- Companies House: {'✅' if settings.companies_house_api_key else '❌'}\n"
-        f"- Database: `{settings.db_path}`"
-    )
-
-    st.subheader("Ingestion")
-    st.caption("Safe to repeat: no duplicates, and cached URLs are not fetched again.")
-    max_per_term = st.number_input("Companies House results per search term", 10, 1000, 50)
-    if st.button("Ingest companies", width="stretch"):
-        with st.spinner("Running ingestion…"):
-            code, output = _run_captured(ingest.main, ["--max-per-term", str(int(max_per_term))])
-        (st.success if code == 0 else st.error)(f"exit code {code}")
-        st.code(output)
-
-    st.subheader("Claude connectivity")
-    if st.button("Send one tiny 'hello' request (costs a fraction of a penny)"):
-        code, output = _run_captured(hello.main)
-        (st.success if code == 0 else st.error)(f"exit code {code}")
-        st.code(output)
-
-
 def render_db_picker() -> None:
     default_db = str(get_settings().db_path)
     options = {default_db: "Main database"}
@@ -857,7 +810,7 @@ def render_db_picker() -> None:
 def main() -> None:
     st.set_page_config(page_title="Sprout", page_icon="🌱", layout="wide")
     st.title("🌱 Sprout")
-    st.caption("UK AI startup discovery: progress and test console")
+    st.caption("UK AI startup discovery: progress and data dashboard")
 
     tabs = [
         ("Progress", render_progress),
@@ -865,8 +818,6 @@ def main() -> None:
         ("News", render_news),
         ("Observability", render_observability),
     ]
-    if actions_enabled():
-        tabs.append(("Run & test", render_run_and_test))
     for tab, (_, render) in zip(st.tabs([name for name, _ in tabs]), tabs, strict=True):
         with tab:
             render()

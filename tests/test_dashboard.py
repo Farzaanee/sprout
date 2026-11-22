@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -11,20 +13,31 @@ from sprout.sources.companies_house import CompanyHit
 ENTRY_POINT = Path(__file__).parents[1] / "streamlit_app.py"
 
 
-def _app(monkeypatch, tmp_path, *, actions: bool) -> AppTest:
+def _app(monkeypatch, tmp_path) -> AppTest:
     monkeypatch.setenv("SPROUT_DB_PATH", str(tmp_path / "app.db"))
-    monkeypatch.setenv("SPROUT_ENABLE_ACTIONS", "1" if actions else "0")
     return AppTest.from_file(str(ENTRY_POINT), default_timeout=30)
 
 
+def test_dashboard_imports_no_spend_path():
+    code = (
+        "import sys, sprout.app.dashboard\n"
+        "roots = ('sprout.ingest', 'sprout.hello', 'sprout.agents', 'anthropic')\n"
+        "print([m for m in sys.modules if any(m == r or m.startswith(r + '.') for r in roots)])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "[]"
+
+
 def test_renders_with_empty_database_read_only(monkeypatch, tmp_path):
-    at = _app(monkeypatch, tmp_path, actions=False).run()
+    at = _app(monkeypatch, tmp_path).run()
     assert not at.exception
     assert [t.label for t in at.tabs] == ["Progress", "Companies", "News", "Observability"]
     assert any("database is empty" in i.value for i in at.info)
 
 
-def test_shows_counts_and_action_tab_when_enabled(monkeypatch, tmp_path):
+def test_shows_counts_read_only(monkeypatch, tmp_path):
     engine = get_engine(tmp_path / "app.db")
     init_db(engine)
     hit = CompanyHit("1", "Neural Robotics Ltd", "active", date(2020, 1, 1), ("62012",), "London")
@@ -32,10 +45,10 @@ def test_shows_counts_and_action_tab_when_enabled(monkeypatch, tmp_path):
         upsert_company(session, hit, assess(hit.name, hit.sic_codes, incorporated=hit.incorporated))
         session.commit()
 
-    at = _app(monkeypatch, tmp_path, actions=True).run()
+    at = _app(monkeypatch, tmp_path).run()
     assert not at.exception
-    assert [t.label for t in at.tabs][-2:] == ["Observability", "Run & test"]
-    assert any(b.label == "Ingest companies" for b in at.tabs[-1].button)
+    assert [t.label for t in at.tabs] == ["Progress", "Companies", "News", "Observability"]
+    assert not at.button
     assert {m.label: m.value for m in at.metric}["Candidate companies"] == "1"
 
 
@@ -86,7 +99,7 @@ def _seed(
 
 
 def _observability(monkeypatch, tmp_path) -> AppTest:
-    at = _app(monkeypatch, tmp_path, actions=False).run()
+    at = _app(monkeypatch, tmp_path).run()
     assert not at.exception
     return at
 

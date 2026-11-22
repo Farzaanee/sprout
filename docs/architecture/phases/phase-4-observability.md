@@ -92,7 +92,7 @@ flowchart TB
 
 | Aspect | Detail |
 | --- | --- |
-| Tab | `render_observability` sits after News and before the gated Run & test tab. Tabs are now `(name, renderer)` pairs zipped with `strict=True`, so a name and renderer cannot drift apart. |
+| Tab | `render_observability` is the last tab, after News. Tabs are now `(name, renderer)` pairs zipped with `strict=True`, so a name and renderer cannot drift apart. |
 | Content | Four metrics, failures by category (chart and table), cost per iteration and failures per day, a filterable runs table, and a per-run step drill-down. Runs from before this phase have no steps, and the tab says so. |
 
 ## Failure taxonomy (`failures.py`)
@@ -220,7 +220,7 @@ Metrics and charts use the newest 200 runs (the `enrich_runs` default limit); th
 
 ## Dashboard tab (`app/dashboard.py`)
 
-A new `render_observability` tab named **Observability**, placed after News and before the actions-gated Run & test. Tabs are built as a list of `(name, renderer)` pairs zipped with `strict=True`, so the conditional Run & test tab cannot take the wrong renderer. Layout: summary metrics (runs, failed, total cost, mean cost per iteration); **Failures by category** (bar chart plus table from `failure_counts`); **Trends** (line chart of `cost_per_iteration` per run, bar chart of failures per day); **Runs** (dataframe from `enrich_runs`, filterable by category and "failures only"); **Run detail** (select a run: run stats, then a steps dataframe and one `st.code` expander per step for `response_text`, and the raw error in `st.code`).
+A new `render_observability` tab named **Observability**, placed last, after News. Tabs are built as a list of `(name, renderer)` pairs zipped with `strict=True`, so a name cannot take the wrong renderer. Layout: summary metrics (runs, failed, total cost, mean cost per iteration); **Failures by category** (bar chart plus table from `failure_counts`); **Trends** (line chart of `cost_per_iteration` per run, bar chart of failures per day); **Runs** (dataframe from `enrich_runs`, filterable by category and "failures only"); **Run detail** (select a run: run stats, then a steps dataframe and one `st.code` expander per step for `response_text`, and the raw error in `st.code`).
 
 | State | Behaviour |
 |---|---|

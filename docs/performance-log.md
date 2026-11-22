@@ -33,6 +33,7 @@ Token counts are **measured**; Complexity and Effort are recorded labels (see be
 | 2026-11-08 | Phase 6 (Multi-agent pipeline) - Stage 3: learnings (learning-transcripter) plus orchestration | Low | medium (learning-transcripter frontmatter) | claude-sonnet-5-5 | 9 | 18 | 5,909 | 622,931 | 62,545 |
 | 2026-11-22 | Phase 6 to 7 readiness check (architect, read-only) | Low | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | 2026-11-22 | Phase 7 - D29 shared query layer (`sprout/queries.py`, `get_profile`, filters, coverage) | Medium | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-11-22 | Phase 7 - remove the console tab (A29) | Low | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 
 Phase 1 and Phase 2 were written before this log existed, and usage for those sessions was not captured, so they are `n/a` rather than estimates.
 
@@ -86,3 +87,4 @@ Known limits of the script: it counts only what is in the transcripts (usage of 
 - **Phase 6 (Multi-agent pipeline) Stage 3, learnings (2026-11-08)**: `--since 2026-11-08T15:03:23Z`, measured right after the learning-transcripter finished, before this row was written. Effort is the agent frontmatter value, not confirmed from transcript metadata.
 - **Phase 6 to 7 readiness check (2026-11-22)**: `scripts/session_usage.py --since 2026-11-22T09:53:42Z` reported "no assistant messages in that window" (this session is not in the transcripts it reads), so every count is `n/a`. Effort not recorded.
 - **Phase 7 D29 shared query layer (2026-11-22)**: `scripts/session_usage.py --since 2026-11-22T10:21:22Z` reported "no assistant messages in that window" (this session is not in the transcripts it reads), so every count is `n/a`. Effort not recorded.
+- **Phase 7 console tab removal (2026-11-22)**: `scripts/session_usage.py --since 2026-11-22T14:25:28Z` reported "no assistant messages in that window" (this session is not in the transcripts it reads), so every count is `n/a`. Effort not recorded.

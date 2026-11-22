@@ -108,7 +108,7 @@ Running log of what was built, why, and what later phases need to know. Newest p
 | Item | Where |
 |---|---|
 | Streamlit entry point (adds `src/` to `sys.path`; this is the file to deploy) | [streamlit_app.py](streamlit_app.py) |
-| App: Progress, Companies, News, Run & test tabs | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
+| App: Progress, Companies, News tabs (read-only) | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
 | Streamlit-free docs parsing | [src/sprout/app/observability_queries.py](src/sprout/app/observability_queries.py) |
 | Streamlit-free company reads (shared with Phase 8, D29) | [src/sprout/queries.py](src/sprout/queries.py) |
 | Tests (queries on a temp DB; `AppTest` smoke tests of the whole app) | [tests/test_queries.py](tests/test_queries.py), [tests/test_observability_queries.py](tests/test_observability_queries.py), [tests/test_dashboard.py](tests/test_dashboard.py) |
@@ -117,12 +117,11 @@ Running log of what was built, why, and what later phases need to know. Newest p
 ### Acceptance (no plan criteria; own checks)
 - [x] `uv run pytest` 110 passed, `uv run ruff check` clean.
 - [x] App renders with an empty database and with seeded data (`AppTest`), and `streamlit run` serves HTTP 200 / health `ok` headless.
-- [ ] **Not verified:** clicking the ingestion/hello buttons against the live APIs, and a Streamlit Community Cloud deployment. Neither was run here.
+- [ ] **Not verified:** a Streamlit Community Cloud deployment. It was not run here.
 
 ### Decisions locked in
 - **Progress tab is driven by these docs**: phases come from the plan's timeline table; state from each `## Phase N - …` section of this file (`**Status: done…**` and no unticked `- [ ]` → Done, otherwise In progress, no section → Not started). Keep that heading/status/checkbox format or the tab misreports.
-- **Run & test is opt-in**: it writes the database and spends API quota, so it only appears when `SPROUT_ENABLE_ACTIONS=1`. A public deployment is read-only by default.
-- Ingestion is run by calling `sprout.ingest.main` in-process and showing its output.
+- **The app is read-only**: it has no write or API-spend path. Ingestion and the Claude check run as CLIs (`uv run python -m sprout.ingest`, `uv run python -m sprout.hello`).
 
 ### Things later phases must know
 - **Streamlit Community Cloud has no persistent disk and `*.db` is gitignored**, so a deployed copy starts empty. Phase 7/8's bundled snapshot DB is still needed for a populated public app. Secrets go in the app's Secrets settings (exposed as environment variables), never in the repo.
@@ -215,7 +214,7 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 | `StepRecord`, `LOGGED_TEXT_MAX_CHARS` (1,000), `LoopResult.steps` and `LoopResult.error_type`; one record per model response, no new parameter, loop still DB-free | [src/sprout/agents/loop.py](src/sprout/agents/loop.py) |
 | `_stats` gains `error_type`; `failure_category` set and `RunLogStep` rows added before the existing pre-raise commit (`_step_row`) | [src/sprout/agents/enrich.py](src/sprout/agents/enrich.py) |
 | `EnrichRun`, `TrendPoint`, `DayOutcome`; `enrich_runs`, `failure_counts`, `cost_trend`, `daily_outcomes`, `run_steps` | [src/sprout/app/observability_queries.py](src/sprout/app/observability_queries.py) |
-| `render_observability` and the Observability tab (after News, before gated Run & test); tabs now built from `(name, renderer)` pairs | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
+| `render_observability` and the Observability tab (after News, last tab); tabs now built from `(name, renderer)` pairs | [src/sprout/app/dashboard.py](src/sprout/app/dashboard.py) |
 | Tests | `tests/test_failures.py` (new), additions to `test_agent_loop.py`, `test_db.py`, `test_enrich.py`, `test_observability_queries.py`, `test_dashboard.py` |
 
 Commits: step 1 `3ba922b` (taxonomy and schema), step 2 `b93c0bb` (loop step records), step 3 `1082259` (enrich wiring), step 4 `8738494` (queries), step 5 `e500f56` (dashboard), fix `6ac974c` (see below).
@@ -390,6 +389,7 @@ CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max
 | `PUBLIC_COMPANY_URL` moved to `models.py` so `queries.py` needs no `sources` import | [src/sprout/models.py](../src/sprout/models.py) |
 | Dashboard imports updated; Companies tab reads `.companies` from the search | [src/sprout/app/dashboard.py](../src/sprout/app/dashboard.py) |
 | Tests, including the import rule, `get_profile`, the filters and coverage | [tests/test_queries.py](../tests/test_queries.py), [tests/test_observability_queries.py](../tests/test_observability_queries.py) |
+| Console tab removed (A29): the dashboard is read-only; a test asserts it imports no ingest, hello, agents or `anthropic` module | [src/sprout/app/dashboard.py](../src/sprout/app/dashboard.py), [tests/test_dashboard.py](../tests/test_dashboard.py) |
 
 ### Decisions locked in
 - `get_profile` returns `None` for an unknown id. A NULL winning fact is `disclosed=False` ("not disclosed"); a field with no fact is absent from `Profile.facts` ("not researched").

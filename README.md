@@ -21,7 +21,7 @@ uv run python -m sprout.hello         # one tiny Claude call to check the API ke
 uv run streamlit run streamlit_app.py # dashboard
 ```
 
-Set `SPROUT_ENABLE_ACTIONS=1` to enable the dashboard's run buttons (they call live APIs).
+The dashboard is read-only. Run ingest and the other pipeline steps with the CLI commands above.
 
 ## Development
 
