@@ -18,7 +18,7 @@ hooks:
 	git config core.hooksPath .githooks
 
 snapshot:
-	cp data/sprout.db data/sprout_snapshot.db
+	uv run python scripts/make_snapshot.py
 
 fpush:
 	git add .

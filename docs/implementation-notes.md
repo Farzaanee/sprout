@@ -165,7 +165,7 @@ Verification run by the orchestrator after the implementer finished: `uv run pyt
 ### Open items (need you)
 1. **Review the 10 profiles yourself** (`uv run python -m sprout.enrich <number> --show`, or query the `fact` table). The pilot companies are not in the name-matched candidate pool; their numbers: Wayve 10924127, PolyAI 11048129, Synthesia 10933652, Graphcore 10185006, Cleo AI 09864205, Faculty Science 08873131, Tractable 09315523, Peak AI 09307701, Quantexa 10045407, Airborne Robotics 10889295.
 2. **Check the first console invoice** against the assumption of US$10 per 1,000 web searches (taken from the `claude-api` skill, where it appears only in a Managed Agents note). Cost per company is dominated by this number.
-3. ~~`data/sprout.db` is tracked by git~~ **Resolved (2026-10-25):** untracked `sprout.db`; committed `data/sprout_snapshot.db` instead (refresh by hand: `cp data/sprout.db data/sprout_snapshot.db`). `config.get_settings()` falls back to the snapshot when the live db is missing (Streamlit Cloud has no persistent disk). The DB the agent found held 305 companies, not the 876 recorded in the Phase 2 notes (that was probably a different local DB); it now holds 314.
+3. ~~`data/sprout.db` is tracked by git~~ **Resolved (2026-10-25):** untracked `sprout.db`; committed `data/sprout_snapshot.db` instead (refresh with `make snapshot`, which runs [scripts/make_snapshot.py](../scripts/make_snapshot.py)). `config.get_settings()` falls back to the snapshot when the live db is missing (Streamlit Cloud has no persistent disk). The DB the agent found held 305 companies, not the 876 recorded in the Phase 2 notes (that was probably a different local DB); it now holds 314.
 4. Some already-enriched companies have facts stored under stage labels or field names that predate the current schema; re-run `sprout.enrich` on them to refresh.
 5. Not tested live: `--strong` (Sonnet 5.5), forced `tool_choice` on Haiku 5.5, the over-100K-token price tier, and the 512-token minimum cacheable prefix.
 
@@ -370,7 +370,7 @@ CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max
 - The `pipeline_run` stats key is `spent_usd`, not `cost_usd`, so the Observability cost sums do not double count the batch row.
 
 ### Things later phases must know
-- WAL is on for every `get_engine` caller (including a read-only snapshot, which keeps its mode). Snapshots must use `VACUUM INTO` or the backup API; `*.db-wal` and `*.db-shm` are gitignored.
+- WAL is on for every `get_engine` caller (including a read-only snapshot, which keeps its mode). `make snapshot` uses `VACUUM INTO`, verified with `integrity_check` and row counts, so uncheckpointed writes are included; `*.db-wal` and `*.db-shm` are gitignored.
 - Phase 7: the news timeline reads `company_news`. Per-company status and cost come from `status.py`.
 - Phase 8: `refresh_company` should call `process_company` (sync, non-raising, non-printing). A refresh can cost up to about US$0.21 at the per-run caps. Swapping `fetch_page` must update both `ALLOWED_*` sets.
 - Phase 9: a second SIGINT hard-exits and leaves the `pipeline_run` row `running`, blocking a restart for 30 minutes unless `--force`. Exit codes: 0 at >=85% `ok`, 1 below that or stopped early, 2 for configuration or a run in progress.
