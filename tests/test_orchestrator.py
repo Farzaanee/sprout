@@ -22,7 +22,7 @@ from sprout.agents.orchestrator import (
 )
 from sprout.config import Settings
 from sprout.costs import BatchBudget
-from sprout.db import Company, RunKind, RunLog, get_engine, init_db
+from sprout.db import Company, OfficerRow, RunKind, RunLog, get_engine, init_db
 from sprout.models import Category
 from sprout.sources.web import WebFetcher
 from sprout.status import STEPS, CompanyStatus, StatusPolicy, StepStatus
@@ -127,7 +127,7 @@ def no_pause(monkeypatch):
     )
 
 
-def add_companies(engine, *names, officers=2):
+def add_companies(engine, *names, officers=2, director=True):
     """Companies ranked in the order given (descending score). Returns their ids."""
     ids = []
     with Session(engine) as session:
@@ -140,6 +140,17 @@ def add_companies(engine, *names, officers=2):
             )
             session.add(row)
             session.commit()
+            if director:
+                session.add(
+                    OfficerRow(
+                        company_id=row.id,
+                        name="A Director",
+                        role="director",
+                        retrieved_at=datetime.now(UTC),
+                        confidence="medium",
+                    )
+                )
+                session.commit()
             ids.append(row.id)
     return ids
 
@@ -527,14 +538,24 @@ def test_working_set_is_the_ranked_prescreen_survivors_and_limit_is_a_stable_pre
             ("UNKNOWN", 30, None),
         ]
         for number, (name, score, officers) in enumerate(rows):
-            session.add(
-                Company(
-                    company_number=f"{number:08d}",
-                    name=name,
-                    candidate_score=score,
-                    active_officers=officers,
-                )
+            company = Company(
+                company_number=f"{number:08d}",
+                name=name,
+                candidate_score=score,
+                active_officers=officers,
             )
+            session.add(company)
+            session.commit()
+            if name != "SHELL":  # all pass the director check except the shell
+                session.add(
+                    OfficerRow(
+                        company_id=company.id,
+                        name="A Director",
+                        role="director",
+                        retrieved_at=datetime.now(UTC),
+                        confidence="medium",
+                    )
+                )
         session.commit()
         names = {c.id: c.name for c in session.exec(select(Company))}
 
@@ -545,6 +566,26 @@ def test_working_set_is_the_ranked_prescreen_survivors_and_limit_is_a_stable_pre
         assert pick(limit=2) == ["TOP", "TIE-B"]
         assert pick(limit=2, prescreen=False) == ["UNKNOWN", "SHELL"]
         assert pick(limit=1, only=["shell", "TOP"]) == ["SHELL", "TOP"]  # bypasses both
+
+
+def test_working_set_drops_companies_with_no_active_director(engine):
+    with Session(engine) as session:
+        company = Company(
+            company_number="00000001", name="NO-DIRECTOR", candidate_score=9, active_officers=2
+        )
+        session.add(company)
+        session.commit()
+        session.add(
+            OfficerRow(
+                company_id=company.id,
+                name="A Secretary",
+                role="secretary",
+                retrieved_at=datetime.now(UTC),
+                confidence="medium",
+            )
+        )
+        session.commit()
+        assert select_working_set(session, limit=10) == []
 
 
 def status_of(company_id, **states):

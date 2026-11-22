@@ -23,6 +23,13 @@ def test_weak_keyword_needs_a_tech_sic_code():
     assert assess("Faculty Ai Ltd", ["62012"]).is_candidate
 
 
+def test_generic_weak_keyword_alone_needs_corroboration():
+    assert not assess("Acme Analytics Ltd", ["62012"]).is_candidate
+    assert not assess("Acme Autonomous Ltd", ["62012"]).is_candidate
+    assert assess("Acme Autonomous Analytics Ltd", ["62012"]).is_candidate
+    assert assess("Acme Ai Analytics Ltd", ["62012"]).is_candidate
+
+
 def test_dotted_abbreviation_is_recognised():
     assert assess("A.I. Foundry Ltd", ["62020"]).is_candidate
 
@@ -52,9 +59,13 @@ def test_discovery_terms_are_lowercase_and_unique():
 
 @pytest.mark.parametrize("active_officers", [None, 0, 1])
 def test_prescreen_rejects_single_officer_or_unknown(active_officers):
-    assert not passes_prescreen(active_officers)
+    assert not passes_prescreen(active_officers, True)
 
 
 @pytest.mark.parametrize("active_officers", [2, 3, 10])
-def test_prescreen_accepts_two_or_more_officers(active_officers):
-    assert passes_prescreen(active_officers)
+def test_prescreen_accepts_two_or_more_officers_with_a_director(active_officers):
+    assert passes_prescreen(active_officers, True)
+
+
+def test_prescreen_rejects_no_active_director():
+    assert not passes_prescreen(2, False)

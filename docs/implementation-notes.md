@@ -355,7 +355,8 @@ CLI: `uv run python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max
 ### D34 pre-screen validation (A1)
 - **The pre-screen did not meet its target.** Of the 12 pilot companies, 5 ended `Other`, `Dormant (shell)` or `Unclear` (target: 2 or fewer); on the 50 working set, all 21 Dormant, Unclear or Stagnant companies are `Other`, and 34 of 50 are `Other` (see the [data model](architecture/2.%20data-model.md#profile-persistence)). Only about 4 of the 12 pilot companies were plausibly real startups. All 12 tie at `candidate_score` 4 (name-keyword matches), so ranking falls back to `id`.
 - **The control found no false rejects.** The 5 highest-scored companies that fail the pre-screen (`active_officers < 2`) were enriched: 2 shells, 1 real business that is not a startup (acquired in 2022), 2 companies incorporated in July 2026 with no trading evidence. So the pre-screen does not wrongly reject real startups; it is too loose, not too strict.
-- The officer count is therefore a weak filter on name-matched Companies House candidates. Better sources for the working set (for example, investor lists) or a stricter filter would help; not done this phase.
+- The officer count is therefore a weak filter on name-matched Companies House candidates. Better sources for the working set (for example, investor lists) remain undone.
+- **Tightened since**, not yet revalidated live: `passes_prescreen` also requires an active officer in the `director` role (`officer.role`, free, already fetched for the officer count), rejecting 11 more of the 601 prior officer-count survivors in the current DB; `assess()` (`candidates.py`) now requires a strong keyword, `ai`/`intelligen*`, or two weak keywords, not one, alongside a tech SIC code, which only affects companies ingested after the change (see D34).
 
 ### D28 news hand-check (A34)
 Hand-checked against the rubric in two passes, since the live 50-company pool was shell-heavy:
@@ -366,7 +367,7 @@ Hand-checked against the rubric in two passes, since the live 50-company pool wa
 - **Still open:** cross-date duplicate coverage of one event from different outlets is not caught (the collapse only matches on exact date); some items still have no `published` date; the own-site aggregator/listing-page mislabeling is not specifically addressed by the prompt change.
 
 ### Open items (need you)
-1. **Decide whether to tighten the candidate pool** (D34 miss above) before a larger run or Phase 9's weekly refresh.
+1. **Revalidate the tightened pre-screen live** (director-role check and stricter `assess()`, D34 above) before a larger run or Phase 9's weekly refresh; re-ingestion is needed to apply the keyword change to the existing pool.
 2. **Weak spots seen live, not fixed:** (a) cross-date duplicate coverage of one news event across outlets; (b) `profile_gaps` and the console line treat an explicit "not disclosed" as incomplete (48 of 50 shown incomplete); (c) several news items have no published date; (d) a stale `running` `companies_ingest` row (id 68) is never reaped (batch kinds are not).
 3. 429 handling and the 5-trip stop were never exercised live (0 trips); they are covered by tests only.
 

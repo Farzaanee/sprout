@@ -32,7 +32,7 @@ from sprout.agents.website import SCREEN_BUDGET, screen_website
 from sprout.candidates import passes_prescreen
 from sprout.config import MissingConfigError, Settings, get_settings
 from sprout.costs import BatchBudget
-from sprout.db import Company, RunKind, RunLog, get_engine, init_db, logged_run
+from sprout.db import Company, OfficerRow, RunKind, RunLog, get_engine, init_db, logged_run
 from sprout.failures import FailureCategory, failure_category_for
 from sprout.sources import companies_house, web
 from sprout.sources.companies_house import CompaniesHouseClient
@@ -307,7 +307,14 @@ def select_working_set(
         ids = [resolve_company(session, target, ch).id for target in only]
         return [i for i in dict.fromkeys(ids) if i is not None]
     rows = session.exec(select(Company.id, Company.candidate_score, Company.active_officers)).all()
-    survivors = [r for r in rows if not prescreen or passes_prescreen(r.active_officers)]
+    director_ids = set(
+        session.exec(select(OfficerRow.company_id).where(OfficerRow.role == "director")).all()
+    )
+    survivors = [
+        r
+        for r in rows
+        if not prescreen or passes_prescreen(r.active_officers, r.id in director_ids)
+    ]
     survivors.sort(key=lambda r: (-r.candidate_score, r.id))
     return [r.id for r in survivors[:limit]]
 
