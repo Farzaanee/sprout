@@ -245,6 +245,32 @@ def _latest_round_stage(rounds: list[Sourced[FundingRound]]) -> Stage | None:
     return max(dated, key=lambda r: r.value.announced).value.stage  # type: ignore[union-attr]
 
 
+_CONFIDENCE_ORDER = (Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH)
+
+
+def _stage_from_latest_round(rounds: list[Sourced[FundingRound]]) -> Sourced[Stage] | None:
+    """A stage derived from the latest dated round, or None if unknown or ambiguous."""
+    dated = [r for r in rounds if r.value is not None and r.value.announced is not None]
+    if not dated:
+        return None
+    latest = max(r.value.announced for r in dated)  # type: ignore[union-attr]
+    newest = [r for r in dated if r.value.announced == latest]  # type: ignore[union-attr]
+    if len({r.value.stage for r in newest}) != 1:  # type: ignore[union-attr]
+        return None
+    source = newest[0]
+    stage = source.value.stage  # type: ignore[union-attr]
+    if stage is Stage.UNKNOWN:
+        return None
+    confidence = min(source.confidence, Confidence.MEDIUM, key=_CONFIDENCE_ORDER.index)
+    return Sourced[Stage](
+        value=stage,
+        source_url=source.source_url,
+        retrieved_at=source.retrieved_at,
+        confidence=confidence,
+        note=f"derived from latest funding round announced {latest.isoformat()}",
+    )
+
+
 def validate_submission(
     raw: dict[str, Any],
     company_name: str,
@@ -316,6 +342,10 @@ def validate_submission(
             f"announced funding round is {latest_round_stage.value!r}. Make them agree: fix "
             "whichever is wrong, or the round's announced date if that's what's off."
         )
+    if not problems and profile.stage.value is None:
+        derived = _stage_from_latest_round(profile.funding_rounds)
+        if derived is not None:
+            profile.stage = derived
     if problems:
         known = "\n".join(ledger.urls()[:MAX_LISTED_URLS]) or "(none yet)"
         raise SubmissionError("\n".join(problems) + f"\nURLs you may cite:\n{known}")

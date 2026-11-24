@@ -267,6 +267,58 @@ def test_profile_stage_matching_latest_round_is_accepted():
     assert profile.stage.value.value == "Series A"
 
 
+def stage_rounds(*rounds):
+    return [fact(r, FUNDING_URL, "high", "US$9m") for r in rounds]
+
+
+def test_null_stage_is_filled_from_latest_dated_round():
+    raw = submission(
+        funding_rounds=stage_rounds(
+            {**SEED, "announced": "2023-01-01"}, {**SERIES_A, "announced": "2024-05-01"}
+        )
+    )
+    ledger = ledger_with(SEEN, FUNDING_URL)
+    profile = validate_submission(raw, "ACME", ledger)
+    assert profile.stage.value.value == "Series A"
+    assert str(profile.stage.source_url) == FUNDING_URL
+    assert profile.stage.retrieved_at == ledger.get(FUNDING_URL).first_seen_at
+    assert profile.stage.confidence is Confidence.MEDIUM
+    assert profile.stage.note == "derived from latest funding round announced 2024-05-01"
+
+
+def test_derived_stage_keeps_low_round_confidence():
+    raw = submission(funding_rounds=[fact(SERIES_A, FUNDING_URL, "low", "US$9m")])
+    profile = validate_submission(raw, "ACME", ledger_with(SEEN, FUNDING_URL))
+    assert profile.stage.confidence is Confidence.LOW
+
+
+@pytest.mark.parametrize(
+    "rounds",
+    [
+        [{**SEED, "announced": "2023-01-01"}, {**SERIES_A, "stage": "Unknown"}],
+        [{**SEED, "announced": None}, {**SERIES_A, "announced": None}],
+        [SEED, {**SERIES_A, "announced": SEED["announced"]}],
+    ],
+    ids=["latest-unknown", "undated", "tie-differing-stages"],
+)
+def test_null_stage_is_not_filled_when_latest_round_is_unusable(rounds):
+    raw = submission(funding_rounds=stage_rounds(*rounds))
+    profile = validate_submission(raw, "ACME", ledger_with(SEEN, FUNDING_URL))
+    assert profile.stage.value is None
+
+
+def test_tie_with_the_same_stage_fills():
+    raw = submission(funding_rounds=stage_rounds(SERIES_A, {**SERIES_A, "amount_million_usd": 3}))
+    profile = validate_submission(raw, "ACME", ledger_with(SEEN, FUNDING_URL))
+    assert profile.stage.value.value == "Series A"
+
+
+def test_stage_set_with_no_rounds_is_accepted():
+    profile = validate_submission(submission(stage=fact("Seed")), "ACME", ledger_with(SEEN))
+    assert profile.stage.value.value == "Seed"
+    assert profile.stage.note is None
+
+
 def test_search_only_source_cannot_claim_high_confidence():
     ledger = ledger_with(SEEN, fetched=False)
     profile = validate_submission(submission(), "ACME", ledger)
