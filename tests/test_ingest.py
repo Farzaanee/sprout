@@ -172,3 +172,53 @@ def test_date_floor_is_passed_to_companies_house(session, make_http):
         session, CompaniesHouseClient(make_http(handler)), terms=["ai"], max_per_term=10
     )
     assert seen == [date(2012, 1, 1).isoformat()]
+
+
+def test_max_companies_caps_unique_results_across_terms(session, make_http):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/officers"):
+            return httpx.Response(200, json=OFFICERS)
+        return httpx.Response(200, json={"items": ITEMS})
+
+    client = CompaniesHouseClient(make_http(handler))
+    stats = ingest.ingest_companies(
+        session, client, terms=["machine learning", "robotics"], max_companies=2
+    )
+
+    assert stats == {"searched": 2, "new": 2, "updated": 0, "rejected": 0}
+    assert session.exec(select(func.count()).select_from(Company)).one() == 2
+
+
+def test_max_companies_must_be_positive(session, make_http):
+    client = CompaniesHouseClient(
+        make_http(lambda request: httpx.Response(200, json={"items": []}))
+    )
+
+    with pytest.raises(ValueError, match="max_companies must be positive"):
+        ingest.ingest_companies(session, client, max_companies=0)
+
+
+def test_max_companies_does_not_count_rejected_results(session, make_http):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/officers"):
+            return httpx.Response(200, json=OFFICERS)
+        return httpx.Response(200, json={"items": [ITEMS[0], ITEMS[2], ITEMS[1]]})
+
+    client = CompaniesHouseClient(make_http(handler))
+    stats = ingest.ingest_companies(session, client, terms=["machine learning"], max_companies=2)
+
+    assert stats == {"searched": 3, "new": 2, "updated": 0, "rejected": 1}
+    assert session.exec(select(func.count()).select_from(Company)).one() == 2
+
+
+def test_ingest_cli_parses_max_companies():
+    args = ingest._parse_args(["--max-companies", "100"])
+
+    assert args.max_companies == 100
+
+
+def test_ingest_cli_rejects_non_positive_max_companies():
+    with pytest.raises(SystemExit) as exc_info:
+        ingest._parse_args(["--max-companies", "0"])
+
+    assert exc_info.value.code == 2

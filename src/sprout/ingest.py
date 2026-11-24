@@ -65,14 +65,20 @@ def ingest_companies(
     *,
     terms: Iterable[str] = DISCOVERY_TERMS,
     max_per_term: int = DEFAULT_MAX_PER_TERM,
+    max_companies: int | None = None,
     incorporated_from: date = MIN_INCORPORATION_DATE,
 ) -> dict[str, int]:
+    if max_companies is not None and max_companies < 1:
+        raise ValueError("max_companies must be positive")
+
     stats = {"searched": 0, "new": 0, "updated": 0, "rejected": 0}
     seen: set[str] = set()
+    candidates = 0
     for term in terms:
         hits = client.iter_advanced_search(
             term, incorporated_from=incorporated_from, limit=max_per_term
         )
+        reached_limit = False
         for hit in hits:
             stats["searched"] += 1
             if hit.number in seen:
@@ -81,17 +87,26 @@ def ingest_companies(
             assessment = assess(
                 hit.name, hit.sic_codes, status=hit.status, incorporated=hit.incorporated
             )
-            if not assessment.is_candidate:
+            if assessment.is_candidate:
+                candidates += 1
+                officers_info = client.officers_info(hit.number)
+                company, created = upsert_company(
+                    session, hit, assessment, officers_info.active_count
+                )
+                assert company.id is not None
+                _save_registry_facts(session, company.id, hit)
+                active = [o for o in officers_info.officers if not o.resigned]
+                save_officers(session, company.id, active, source_url=hit.url)
+                stats["new" if created else "updated"] += 1
+            else:
                 stats["rejected"] += 1
-                continue
-            officers_info = client.officers_info(hit.number)
-            company, created = upsert_company(session, hit, assessment, officers_info.active_count)
-            assert company.id is not None
-            _save_registry_facts(session, company.id, hit)
-            active = [o for o in officers_info.officers if not o.resigned]
-            save_officers(session, company.id, active, source_url=hit.url)
-            stats["new" if created else "updated"] += 1
+
+            if max_companies is not None and candidates >= max_companies:
+                reached_limit = True
+                break
         session.commit()
+        if reached_limit:
+            break
     return stats
 
 
@@ -121,7 +136,15 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default=DEFAULT_MAX_PER_TERM,
         help="Companies House results to read per search term (default: %(default)s)",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--max-companies",
+        type=int,
+        help="maximum unique candidate companies to ingest across all terms",
+    )
+    args = parser.parse_args(argv)
+    if args.max_companies is not None and args.max_companies < 1:
+        parser.error("--max-companies must be positive")
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -151,7 +174,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             with companies_house.make_http_client(key, settings.cache_dir) as http:
                 with logged_run(session, RunKind.COMPANIES_INGEST.value) as run:
                     run.stats = ingest_companies(
-                        session, CompaniesHouseClient(http), max_per_term=args.max_per_term
+                        session,
+                        CompaniesHouseClient(http),
+                        max_per_term=args.max_per_term,
+                        max_companies=args.max_companies,
                     )
                     run.stats["http_requests"] = http.requests_made
                     run.stats["cache_hits"] = http.cache_hits

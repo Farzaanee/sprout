@@ -162,6 +162,33 @@ def _latest_funding_amounts(session: Session) -> dict[int, int | None]:
     return amounts
 
 
+def _enrichment_dates(session: Session) -> dict[int, date]:
+    """Latest enrichment date per company: the newest of its enrichment runs' `started_at` and
+    its facts' and funding rounds' `retrieved_at`. Companies with none are absent."""
+    latest: dict[int, datetime] = {}
+    sources = (
+        (RunLog.company_id, RunLog.started_at, RunLog.kind == RunKind.COMPANY_ENRICH.value),
+        (Fact.company_id, Fact.retrieved_at, None),
+        (FundingRoundRow.company_id, FundingRoundRow.retrieved_at, None),
+    )
+    for company_col, when_col, condition in sources:
+        query = select(company_col, func.max(when_col)).group_by(company_col)
+        if condition is not None:
+            query = query.where(condition)
+        for company_id, when in session.exec(query).all():
+            if company_id is None or when is None:
+                continue
+            if company_id not in latest or when > latest[company_id]:
+                latest[company_id] = when
+    return {company_id: when.date() for company_id, when in latest.items()}
+
+
+def enrichment_date_range(session: Session) -> tuple[date, date] | None:
+    """Earliest and latest enrichment date across companies; None when nothing is enriched."""
+    dates = _enrichment_dates(session).values()
+    return (min(dates), max(dates)) if dates else None
+
+
 def get_profile(session: Session, company_id: int) -> Profile | None:
     """The winning facts, funding rounds and news for one company; None for an unknown id."""
     company = session.get(Company, company_id)
@@ -196,6 +223,28 @@ def count_rows(session: Session) -> dict[str, int]:
         "news": count(CompanyNewsRow),
         "runs": count(RunLog),
     }
+
+
+def run_kind_counts(session: Session) -> dict[str, int]:
+    """Logged runs per current `RunKind`, largest first. Kinds of removed agents (old classifier
+    and verifier rows) are left out."""
+    current = {kind.value for kind in RunKind}
+    rows = session.exec(select(RunLog.kind, func.count()).group_by(RunLog.kind)).all()
+    return dict(sorted((r for r in rows if r[0] in current), key=lambda row: (-row[1], row[0])))
+
+
+def run_kind_company_counts(session: Session) -> dict[str, int]:
+    """Distinct companies touched per run kind. An ingest run is a batch with no company_id, so
+    it reports every company in the database; other batch kinds are 0."""
+    rows = session.exec(
+        select(RunLog.kind, func.count(func.distinct(RunLog.company_id))).group_by(RunLog.kind)
+    ).all()
+    counts = dict(rows)
+    if RunKind.COMPANIES_INGEST.value in counts:
+        counts[RunKind.COMPANIES_INGEST.value] = session.exec(
+            select(func.count()).select_from(Company)
+        ).one()
+    return counts
 
 
 def latest_companies_ingest_run(session: Session) -> RunLog | None:
@@ -331,12 +380,18 @@ def business_status_options() -> list[str]:
 _AGE_BINS = [(0, 30, "<30"), (30, 40, "30-39"), (40, 50, "40-49"), (50, 60, "50-59")]
 
 
-def officer_age_distribution(session: Session) -> dict[str, int]:
+def officer_age_distribution(session: Session, *, enriched_only: bool = False) -> dict[str, int]:
     """Officer age (from `birth_year`), binned; `60+` and `Unknown` (no birth year) close the
-    list, matching the ordering convention in `officer_count_distribution`."""
+    list, matching the ordering convention in `officer_count_distribution`. When `enriched_only`
+    is true, include officers only for companies with a submitted profile."""
     this_year = date.today().year
     counts: dict[str, int] = {}
-    for birth_year in session.exec(select(OfficerRow.birth_year)).all():
+    query = select(OfficerRow.birth_year)
+    if enriched_only:
+        query = query.join(Company, OfficerRow.company_id == Company.id).where(
+            col(Company.category).is_not(None)
+        )
+    for birth_year in session.exec(query).all():
         if birth_year is None:
             key = "Unknown"
         else:
@@ -347,10 +402,18 @@ def officer_age_distribution(session: Session) -> dict[str, int]:
     return {key: counts[key] for key in order if key in counts}
 
 
-def officer_nationality_counts(session: Session, top_n: int = 10) -> dict[str, int]:
-    """Top officer nationalities, grouping the long tail into "Other" (missing is "Unknown")."""
+def officer_nationality_counts(
+    session: Session, top_n: int = 10, *, enriched_only: bool = False
+) -> dict[str, int]:
+    """Top officer nationalities, grouping the long tail into "Other" (missing is "Unknown").
+    When `enriched_only` is true, include officers only for companies with a submitted profile."""
     counts: dict[str, int] = {}
-    for nationality in session.exec(select(OfficerRow.nationality)).all():
+    query = select(OfficerRow.nationality)
+    if enriched_only:
+        query = query.join(Company, OfficerRow.company_id == Company.id).where(
+            col(Company.category).is_not(None)
+        )
+    for nationality in session.exec(query).all():
         key = nationality or "Unknown"
         counts[key] = counts.get(key, 0) + 1
     ranked = sorted(counts.items(), key=lambda item: -item[1])
@@ -391,12 +454,15 @@ def search_companies(
     max_funding_million_usd: int | None = None,
     founded_from: int | None = None,
     founded_to: int | None = None,
+    enriched_from: date | None = None,
+    enriched_to: date | None = None,
     enriched_only: bool = False,
     limit: int = 500,
 ) -> CompanySearch:
     """Candidates ordered by score. `text` matches the name or the winning `one_liner`; `stage`,
     `business_status` and the founded years match the winning fact; funding is the amount of the
     latest round (D22). A company whose value is not known never matches a filter on it.
+    `enriched_from`/`enriched_to` bound the date of the latest enrichment (`_enrichment_dates`).
     `enriched_only` keeps companies with a category. Coverage counts known values among all
     matches."""
     query = select(Company).where(Company.candidate_score >= min_score)
@@ -448,6 +514,16 @@ def search_companies(
             row
             for row in rows
             if (amount := funding.get(row.id)) is not None and amount <= max_funding_million_usd
+        ]
+
+    if enriched_from is not None or enriched_to is not None:
+        enriched_on = _enrichment_dates(session)
+        rows = [
+            row
+            for row in rows
+            if (day := enriched_on.get(row.id)) is not None
+            and (enriched_from is None or day >= enriched_from)
+            and (enriched_to is None or day <= enriched_to)
         ]
 
     coverage = Coverage(

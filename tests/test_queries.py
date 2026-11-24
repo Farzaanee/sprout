@@ -428,6 +428,23 @@ def test_officer_nationality_counts_groups_the_long_tail(session):
     }
 
 
+def test_officer_distributions_can_be_limited_to_enriched_companies(session):
+    enriched = _add(session, "1", "Enriched Ltd", date(2020, 1, 1))
+    enriched.category = "AI"
+    unenriched = _add(session, "2", "Unenriched Ltd", date(2020, 1, 1))
+    session.commit()
+    this_year = date.today().year
+    _add_officer(
+        session, enriched.id, "A", "director", birth_year=this_year - 25, nationality="British"
+    )
+    _add_officer(
+        session, unenriched.id, "B", "director", birth_year=this_year - 65, nationality="French"
+    )
+
+    assert queries.officer_age_distribution(session, enriched_only=True) == {"<30": 1}
+    assert queries.officer_nationality_counts(session, enriched_only=True) == {"British": 1}
+
+
 def test_company_officers_orders_by_role_then_name(session):
     company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
     _add_officer(session, company.id, "DOE, John", "director")

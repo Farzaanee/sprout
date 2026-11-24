@@ -53,6 +53,8 @@ def render_progress() -> None:
     with ui.session() as session:
         counts = queries.count_rows(session)
         runs = obs.recent_runs(session)
+        run_kinds = queries.run_kind_counts(session)
+        run_kind_companies = queries.run_kind_company_counts(session)
         keywords = queries.keyword_counts(session)
         years = queries.incorporation_year_counts(session)
     cols = st.columns(4)
@@ -73,6 +75,31 @@ def render_progress() -> None:
     right.altair_chart(
         ui.bar_chart(years, category_title="year", value_title="companies"), width="stretch"
     )
+
+    if run_kinds:
+        total_runs = sum(run_kinds.values())
+        kinds_df = pd.DataFrame({"kind": list(run_kinds), "runs": list(run_kinds.values())})
+        kinds_df["percent"] = 100 * kinds_df["runs"] / total_runs
+        kinds_df["companies"] = kinds_df["kind"].map(run_kind_companies)
+        # Slices under 5% are too narrow for a label; they keep the tooltip only.
+        kinds_df["label"] = [
+            f"{r.runs} ({r.percent:.1f}%)" if r.percent >= 5 else "" for r in kinds_df.itertuples()
+        ]
+        base = alt.Chart(kinds_df).encode(
+            theta=alt.Theta("runs:Q", stack=True),
+            color=alt.Color("kind:N", title="Run kind", sort=list(run_kinds)),
+        )
+        pie = base.mark_arc(outerRadius=110).encode(
+            tooltip=[
+                alt.Tooltip("kind:N"),
+                alt.Tooltip("runs:Q"),
+                alt.Tooltip("percent:Q", title="% of runs", format=".1f"),
+                alt.Tooltip("companies:Q", title="Distinct companies"),
+            ]
+        )
+        labels = base.mark_text(radius=130, size=11).encode(text="label:N")
+        st.subheader("Logged runs by kind")
+        st.altair_chart((pie + labels).properties(height=300), width="stretch")
 
     st.subheader("Recent runs")
     st.dataframe(
@@ -107,7 +134,13 @@ def render_pool() -> None:
         locality_counts = queries.locality_counts(session)
         officer_counts = queries.officer_count_distribution(session)
         officer_age_counts = queries.officer_age_distribution(session)
+        enriched_officer_age_counts = queries.officer_age_distribution(
+            session, enriched_only=True
+        )
         officer_nationality_counts = queries.officer_nationality_counts(session)
+        enriched_officer_nationality_counts = queries.officer_nationality_counts(
+            session, enriched_only=True
+        )
 
     st.subheader("Pool overview")
     st.caption(
@@ -240,17 +273,39 @@ def render_pool() -> None:
             ui.bar_chart(officer_age_counts, category_title="age", value_title="officers"),
             width="stretch",
         )
-        n = len(officer_nationality_counts)
-        right.caption(f"Officer nationality (top {n}, all candidates)")
+        right.caption("Officer age distribution (enriched companies only)")
         right.altair_chart(
+            ui.bar_chart(
+                enriched_officer_age_counts,
+                category_title="age",
+                value_title="officers",
+            ),
+            width="stretch",
+        )
+
+        left, right = st.columns(2)
+        n = len(officer_nationality_counts)
+        left.caption(f"Officer nationality (top {n}, all candidates)")
+        left.altair_chart(
             ui.bar_chart(
                 officer_nationality_counts,
                 category_title="nationality",
                 value_title="officers",
                 horizontal=True,
                 full_labels=True,
-                # Altair's default vertical-chart height (300px), so it matches the age chart
-                # on the left instead of sizing itself to its own (shorter) row count.
+                height=300,
+            ),
+            width="stretch",
+        )
+        enriched_n = len(enriched_officer_nationality_counts)
+        right.caption(f"Officer nationality (top {enriched_n}, enriched companies only)")
+        right.altair_chart(
+            ui.bar_chart(
+                enriched_officer_nationality_counts,
+                category_title="nationality",
+                value_title="officers",
+                horizontal=True,
+                full_labels=True,
                 height=300,
             ),
             width="stretch",
