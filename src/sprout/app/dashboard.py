@@ -18,7 +18,7 @@ from sprout import queries
 from sprout.app import observability_queries as obs
 from sprout.app import ui
 from sprout.app.companies import render_companies
-from sprout.app.filters import render_sidebar
+from sprout.app.filters import Filters, filtered, render_sidebar
 from sprout.app.news_feed import render_news_feed
 from sprout.app.overview import render_overview
 from sprout.config import DEFAULT_EVAL_DB_PATH, get_settings
@@ -120,29 +120,34 @@ def render_progress() -> None:
     )
 
 
-def render_pool() -> None:
+def render_pool(filters: Filters) -> None:
+    # With a run-date window, every figure covers only companies ingested or enriched in it.
+    ids = filtered(filters).company_ids
     with ui.session() as session:
-        counts = queries.count_rows(session)
+        pool_ids = queries.run_window_company_ids(session, filters.run_from, filters.run_to)
+        counts = queries.count_rows(session, pool_ids)
         total = counts["companies"]
         last_ingest = queries.latest_companies_ingest_run(session)
-        enriched = queries.enriched_company_count(session)
-        enriched_facts = queries.enriched_fact_count(session)
-        enriched_news = queries.enriched_news_count(session)
-        category_counts = queries.category_counts(session)
-        stage_counts = queries.stage_counts(session)
-        business_status_counts = queries.business_status_counts(session)
-        valuation_counts = queries.valuation_bin_counts(session)
-        pool_founded_counts = queries.incorporation_year_counts(session)
-        enriched_founded_counts = queries.founded_year_counts(session)
-        locality_counts = queries.locality_counts(session)
-        officer_counts = queries.officer_count_distribution(session)
-        officer_age_counts = queries.officer_age_distribution(session)
+        enriched = len(ids)
+        enriched_facts = queries.enriched_fact_count(session, ids)
+        enriched_news = queries.enriched_news_count(session, ids)
+        category_counts = queries.category_counts(session, ids)
+        stage_counts = queries.stage_counts(session, ids)
+        business_status_counts = queries.business_status_counts(session, ids)
+        valuation_counts = queries.valuation_bin_counts(session, ids)
+        pool_founded_counts = queries.incorporation_year_counts(session, pool_ids)
+        enriched_founded_counts = queries.founded_year_counts(session, ids)
+        locality_counts = queries.locality_counts(session, company_ids=ids)
+        officer_counts = queries.officer_count_distribution(session, pool_ids)
+        officer_age_counts = queries.officer_age_distribution(session, company_ids=pool_ids)
         enriched_officer_age_counts = queries.officer_age_distribution(
-            session, enriched_only=True
+            session, enriched_only=True, company_ids=ids
         )
-        officer_nationality_counts = queries.officer_nationality_counts(session)
+        officer_nationality_counts = queries.officer_nationality_counts(
+            session, company_ids=pool_ids
+        )
         enriched_officer_nationality_counts = queries.officer_nationality_counts(
-            session, enriched_only=True
+            session, enriched_only=True, company_ids=ids
         )
 
     st.subheader("Pool overview")
@@ -741,7 +746,7 @@ def main() -> None:
         ("Overview", lambda: render_overview(filters)),
         ("Companies", lambda: render_companies(filters)),
         ("News feed", lambda: render_news_feed(filters)),
-        ("Candidate pool", render_pool),
+        ("Candidate pool", lambda: render_pool(filters)),
         ("Progress", render_progress),
         ("Observability", render_observability),
     ]

@@ -27,8 +27,8 @@ class Filters:
     founded_from: int | None = None
     founded_to: int | None = None
     text: str | None = None
-    enriched_from: date | None = None  # date of the latest enrichment
-    enriched_to: date | None = None
+    run_from: date | None = None  # window: first ingested or enriched on these days
+    run_to: date | None = None
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ class _Options:
     categories: dict[str, int]
     stages: list[str]
     founded_range: tuple[int, int] | None
-    enriched_range: tuple[date, date] | None
+    run_range: tuple[date, date] | None
 
 
 @st.cache_data(show_spinner=False)
@@ -54,10 +54,10 @@ def _options(db_path: str, version: float) -> _Options:
         categories = queries.category_counts(session)
         stage_values = set(queries.stage_counts(session)) - {queries.NOT_DISCLOSED}
         years = list(queries.founded_year_counts(session))
-        enriched_range = queries.enrichment_date_range(session)
+        run_range = queries.run_date_range(session)
     known = [s.value for s in Stage if s.value in stage_values]
     stages = known + sorted(stage_values - set(known))
-    return _Options(categories, stages, (min(years), max(years)) if years else None, enriched_range)
+    return _Options(categories, stages, (min(years), max(years)) if years else None, run_range)
 
 
 @st.cache_data(show_spinner=False)
@@ -72,8 +72,8 @@ def _filtered(db_path: str, version: float, filters: Filters) -> FilteredCompani
             max_funding_million_usd=filters.funding_max,
             founded_from=filters.founded_from,
             founded_to=filters.founded_to,
-            enriched_from=filters.enriched_from,
-            enriched_to=filters.enriched_to,
+            run_from=filters.run_from,
+            run_to=filters.run_to,
             text=filters.text or "",
             limit=_SEARCH_LIMIT,
         )
@@ -99,7 +99,7 @@ def render_sidebar() -> Filters:
     options = _options(db_path, ui.db_version(db_path))
     with st.sidebar:
         st.subheader("Filters")
-        st.caption("Apply to Overview, Companies and News feed.")
+        st.caption("Apply to Overview, Companies, News feed and Candidate pool.")
         category = st.selectbox(
             "Category",
             [None, *options.categories],
@@ -120,19 +120,19 @@ def render_sidebar() -> Filters:
             year_low, year_high = st.slider("Founded", first, last, (first, last))
             founded_from = year_low if year_low > first else None
             founded_to = year_high if year_high < last else None
-        enriched_from = enriched_to = None
-        if options.enriched_range and options.enriched_range[0] < options.enriched_range[1]:
-            first_day, last_day = options.enriched_range
+        run_from = run_to = None
+        if options.run_range and options.run_range[0] < options.run_range[1]:
+            first_day, last_day = options.run_range
             picked = st.date_input(
-                "Enriched on",
+                "Run date",
                 value=(first_day, last_day),
                 min_value=first_day,
                 max_value=last_day,
-                help="Date of a company's latest enrichment run, retrieved fact or funding round.",
+                help="Keep companies first ingested or enriched (by a run) in this date range.",
             )
             if isinstance(picked, tuple) and len(picked) == 2:
-                enriched_from = picked[0] if picked[0] > first_day else None
-                enriched_to = picked[1] if picked[1] < last_day else None
+                run_from = picked[0] if picked[0] > first_day else None
+                run_to = picked[1] if picked[1] < last_day else None
         text = st.text_input("Search name or one-liner").strip()
 
         filters = Filters(
@@ -143,8 +143,8 @@ def render_sidebar() -> Filters:
             founded_from=founded_from,
             founded_to=founded_to,
             text=text or None,
-            enriched_from=enriched_from,
-            enriched_to=enriched_to,
+            run_from=run_from,
+            run_to=run_to,
         )
         result = filtered(filters)
         coverage = result.coverage

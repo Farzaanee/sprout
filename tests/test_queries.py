@@ -13,6 +13,7 @@ from sprout.db import (
     CompanyNewsRow,
     FundingRoundRow,
     OfficerRow,
+    RunKind,
     RunLog,
     get_engine,
     init_db,
@@ -689,3 +690,27 @@ def test_search_news_matches_title_or_summary_newest_first(session):
 def test_companies_house_url():
     assert queries.companies_house_url("123").endswith("/company/123")
     assert queries.companies_house_url(None) is None
+
+
+def test_run_window_keeps_companies_ingested_or_enriched_in_it(session):
+    ingested = _add(session, "1", "Ingested Ltd", date(2020, 1, 1))
+    enriched = _add(session, "2", "Enriched Ltd", date(2020, 1, 1))
+    other = _add(session, "3", "Other Ltd", date(2020, 1, 1))
+    ingested.first_seen_at = datetime(2026, 11, 23, 9, tzinfo=UTC)
+    enriched.first_seen_at = other.first_seen_at = datetime(2026, 11, 1, 9, tzinfo=UTC)
+    for company, day in ((enriched, 24), (other, 20)):
+        session.add(
+            RunLog(
+                kind=RunKind.COMPANY_ENRICH.value,
+                company_id=company.id,
+                started_at=datetime(2026, 11, day, 9, tzinfo=UTC),
+            )
+        )
+    session.commit()
+    window = (date(2026, 11, 23), date(2026, 11, 24))
+
+    assert queries.run_window_company_ids(session, None, None) is None
+    assert queries.run_window_company_ids(session, *window) == {ingested.id, enriched.id}
+    assert queries.run_date_range(session) == (date(2026, 11, 1), date(2026, 11, 24))
+    found = queries.search_companies(session, run_from=window[0], run_to=window[1])
+    assert {c.name for c in found.companies} == {"Ingested Ltd", "Enriched Ltd"}

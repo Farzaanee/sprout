@@ -162,31 +162,46 @@ def _latest_funding_amounts(session: Session) -> dict[int, int | None]:
     return amounts
 
 
-def _enrichment_dates(session: Session) -> dict[int, date]:
-    """Latest enrichment date per company: the newest of its enrichment runs' `started_at` and
-    its facts' and funding rounds' `retrieved_at`. Companies with none are absent."""
-    latest: dict[int, datetime] = {}
+def run_window_company_ids(
+    session: Session, run_from: date | None, run_to: date | None
+) -> set[int] | None:
+    """Companies first ingested, or enriched by a `company_enrich` run, on a day within the
+    window (UTC days). None when no window is set, meaning no restriction."""
+    if run_from is None and run_to is None:
+        return None
+    ids: set[int] = set()
     sources = (
-        (RunLog.company_id, RunLog.started_at, RunLog.kind == RunKind.COMPANY_ENRICH.value),
-        (Fact.company_id, Fact.retrieved_at, None),
-        (FundingRoundRow.company_id, FundingRoundRow.retrieved_at, None),
+        (select(Company.id, Company.first_seen_at), None),
+        (
+            select(RunLog.company_id, RunLog.started_at),
+            RunLog.kind == RunKind.COMPANY_ENRICH.value,
+        ),
     )
-    for company_col, when_col, condition in sources:
-        query = select(company_col, func.max(when_col)).group_by(company_col)
+    for query, condition in sources:
         if condition is not None:
             query = query.where(condition)
         for company_id, when in session.exec(query).all():
-            if company_id is None or when is None:
-                continue
-            if company_id not in latest or when > latest[company_id]:
-                latest[company_id] = when
-    return {company_id: when.date() for company_id, when in latest.items()}
+            day = when.date() if when is not None else None
+            if (
+                company_id is not None
+                and day is not None
+                and (run_from is None or day >= run_from)
+                and (run_to is None or day <= run_to)
+            ):
+                ids.add(company_id)
+    return ids
 
 
-def enrichment_date_range(session: Session) -> tuple[date, date] | None:
-    """Earliest and latest enrichment date across companies; None when nothing is enriched."""
-    dates = _enrichment_dates(session).values()
-    return (min(dates), max(dates)) if dates else None
+def run_date_range(session: Session) -> tuple[date, date] | None:
+    """Earliest and latest ingest or enrichment day; None when the pool is empty."""
+    days = [
+        when.date()
+        for when in session.exec(select(Company.first_seen_at)).all()
+        if when is not None
+    ]
+    enrich = select(RunLog.started_at).where(RunLog.kind == RunKind.COMPANY_ENRICH.value)
+    days += [when.date() for when in session.exec(enrich).all() if when is not None]
+    return (min(days), max(days)) if days else None
 
 
 def get_profile(session: Session, company_id: int) -> Profile | None:
@@ -213,9 +228,13 @@ def get_profile(session: Session, company_id: int) -> Profile | None:
     )
 
 
-def count_rows(session: Session) -> dict[str, int]:
+def count_rows(session: Session, company_ids: Collection[int] | None = None) -> dict[str, int]:
     def count(model: Any) -> int:
-        return session.exec(select(func.count()).select_from(model)).one()
+        query = select(func.count()).select_from(model)
+        if company_ids is not None and model in (Company, Fact):
+            id_col = Company.id if model is Company else Fact.company_id
+            query = query.where(col(id_col).in_(list(company_ids)))
+        return session.exec(query).one()
 
     return {
         "companies": count(Company),
@@ -267,9 +286,14 @@ def keyword_counts(session: Session) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: -item[1]))
 
 
-def incorporation_year_counts(session: Session) -> dict[int, int]:
+def incorporation_year_counts(
+    session: Session, company_ids: Collection[int] | None = None
+) -> dict[int, int]:
     counts: dict[int, int] = {}
-    for incorporated in session.exec(select(Company.incorporated)).all():
+    query = select(Company.incorporated)
+    if company_ids is not None:
+        query = query.where(col(Company.id).in_(list(company_ids)))
+    for incorporated in session.exec(query).all():
         if incorporated is not None:
             counts[incorporated.year] = counts.get(incorporated.year, 0) + 1
     return dict(sorted(counts.items()))
@@ -282,59 +306,85 @@ def enriched_company_count(session: Session) -> int:
     ).one()
 
 
-def enriched_fact_count(session: Session) -> int:
-    """Fact rows belonging to classified companies, including undisclosed values."""
-    return session.exec(
+def enriched_fact_count(
+    session: Session,
+    company_ids: Collection[int] | None = None,
+) -> int:
+    """Fact rows belonging to classified companies, optionally only `company_ids`, including
+    undisclosed values."""
+    query = (
         select(func.count())
         .select_from(Fact)
         .join(Company, Fact.company_id == Company.id)
         .where(col(Company.category).is_not(None))
-    ).one()
+    )
+    if company_ids is not None:
+        query = query.where(col(Company.id).in_(list(company_ids)))
+    return session.exec(query).one()
 
 
-def enriched_news_count(session: Session) -> int:
-    """News item rows belonging to classified companies."""
-    return session.exec(
+def enriched_news_count(
+    session: Session,
+    company_ids: Collection[int] | None = None,
+) -> int:
+    """News item rows belonging to classified companies (optionally only `company_ids`)."""
+    query = (
         select(func.count())
         .select_from(CompanyNewsRow)
         .join(Company, CompanyNewsRow.company_id == Company.id)
         .where(col(Company.category).is_not(None))
-    ).one()
+    )
+    if company_ids is not None:
+        query = query.where(col(Company.id).in_(list(company_ids)))
+    return session.exec(query).one()
 
 
-def category_counts(session: Session) -> dict[str, int]:
+def category_counts(session: Session, company_ids: Collection[int] | None = None) -> dict[str, int]:
     """Classified candidates only; a company with no category yet is left out."""
     counts: dict[str, int] = {}
-    for category in session.exec(select(Company.category)).all():
+    query = select(Company.category)
+    if company_ids is not None:
+        query = query.where(col(Company.id).in_(list(company_ids)))
+    for category in session.exec(query).all():
         if category is None:
             continue
         counts[category] = counts.get(category, 0) + 1
     return dict(sorted(counts.items(), key=lambda item: -item[1]))
 
 
-def _field_counts(session: Session, field: str) -> dict[str, int]:
+def _field_counts(
+    session: Session, field: str, company_ids: Collection[int] | None = None
+) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for value in _winning_values(session, field).values():
+    allowed = None if company_ids is None else set(company_ids)
+    for company_id, value in _winning_values(session, field).items():
+        if allowed is not None and company_id not in allowed:
+            continue
         key = value if value is not None else NOT_DISCLOSED
         counts[key] = counts.get(key, 0) + 1
     return dict(sorted(counts.items(), key=lambda item: -item[1]))
 
 
-def stage_counts(session: Session) -> dict[str, int]:
-    return _field_counts(session, "stage")
+def stage_counts(session: Session, company_ids: Collection[int] | None = None) -> dict[str, int]:
+    return _field_counts(session, "stage", company_ids)
 
 
-def business_status_counts(session: Session) -> dict[str, int]:
-    return _field_counts(session, "business_status")
+def business_status_counts(
+    session: Session, company_ids: Collection[int] | None = None
+) -> dict[str, int]:
+    return _field_counts(session, "business_status", company_ids)
 
 
-def founded_year_counts(session: Session) -> dict[int, int]:
+def founded_year_counts(
+    session: Session, company_ids: Collection[int] | None = None
+) -> dict[int, int]:
     """Enriched companies only. `ingest` pre-populates every candidate's "founded" fact from its
     Companies House incorporation date, so a plain `_winning_values` scan would include
     unenriched companies too; restrict to companies with a category, i.e. a submitted profile."""
-    enriched_ids = set(
-        session.exec(select(Company.id).where(col(Company.category).is_not(None))).all()
-    )
+    id_query = select(Company.id).where(col(Company.category).is_not(None))
+    if company_ids is not None:
+        id_query = id_query.where(col(Company.id).in_(list(company_ids)))
+    enriched_ids = set(session.exec(id_query).all())
     counts: dict[int, int] = {}
     for company_id, value in _winning_values(session, "founded").items():
         if value is None or company_id not in enriched_ids:
@@ -353,10 +403,15 @@ _VALUATION_BINS = [
 ]
 
 
-def valuation_bin_counts(session: Session) -> dict[str, int]:
+def valuation_bin_counts(
+    session: Session, company_ids: Collection[int] | None = None
+) -> dict[str, int]:
     counts = {label: 0 for *_, label in _VALUATION_BINS}
     counts[NOT_DISCLOSED] = 0
-    for value in _winning_values(session, "valuation_million_usd").values():
+    allowed = None if company_ids is None else set(company_ids)
+    for company_id, value in _winning_values(session, "valuation_million_usd").items():
+        if allowed is not None and company_id not in allowed:
+            continue
         if value is None:
             counts[NOT_DISCLOSED] += 1
             continue
@@ -367,11 +422,16 @@ def valuation_bin_counts(session: Session) -> dict[str, int]:
     return counts
 
 
-def officer_count_distribution(session: Session) -> dict[str, int]:
+def officer_count_distribution(
+    session: Session, company_ids: Collection[int] | None = None
+) -> dict[str, int]:
     """Active officer count across the whole candidate pool, binned (see D34 in `candidates.py`
     for why this count matters: fewer than 2 is overwhelmingly a shell or trade body)."""
     counts: dict[str, int] = {}
-    for active_officers in session.exec(select(Company.active_officers)).all():
+    query = select(Company.active_officers)
+    if company_ids is not None:
+        query = query.where(col(Company.id).in_(list(company_ids)))
+    for active_officers in session.exec(query).all():
         if active_officers is None:
             key = "Unknown"
         elif active_officers >= 6:
@@ -400,7 +460,12 @@ def business_status_options() -> list[str]:
 _AGE_BINS = [(0, 30, "<30"), (30, 40, "30-39"), (40, 50, "40-49"), (50, 60, "50-59")]
 
 
-def officer_age_distribution(session: Session, *, enriched_only: bool = False) -> dict[str, int]:
+def officer_age_distribution(
+    session: Session,
+    *,
+    enriched_only: bool = False,
+    company_ids: Collection[int] | None = None,
+) -> dict[str, int]:
     """Officer age (from `birth_year`), binned; `60+` and `Unknown` (no birth year) close the
     list, matching the ordering convention in `officer_count_distribution`. When `enriched_only`
     is true, include officers only for companies with a submitted profile."""
@@ -411,6 +476,8 @@ def officer_age_distribution(session: Session, *, enriched_only: bool = False) -
         query = query.join(Company, OfficerRow.company_id == Company.id).where(
             col(Company.category).is_not(None)
         )
+    if company_ids is not None:
+        query = query.where(col(OfficerRow.company_id).in_(list(company_ids)))
     for birth_year in session.exec(query).all():
         if birth_year is None:
             key = "Unknown"
@@ -423,7 +490,11 @@ def officer_age_distribution(session: Session, *, enriched_only: bool = False) -
 
 
 def officer_nationality_counts(
-    session: Session, top_n: int = 10, *, enriched_only: bool = False
+    session: Session,
+    top_n: int = 10,
+    *,
+    enriched_only: bool = False,
+    company_ids: Collection[int] | None = None,
 ) -> dict[str, int]:
     """Top officer nationalities, grouping the long tail into "Other" (missing is "Unknown").
     When `enriched_only` is true, include officers only for companies with a submitted profile."""
@@ -433,6 +504,8 @@ def officer_nationality_counts(
         query = query.join(Company, OfficerRow.company_id == Company.id).where(
             col(Company.category).is_not(None)
         )
+    if company_ids is not None:
+        query = query.where(col(OfficerRow.company_id).in_(list(company_ids)))
     for nationality in session.exec(query).all():
         key = nationality or "Unknown"
         counts[key] = counts.get(key, 0) + 1
@@ -444,10 +517,14 @@ def officer_nationality_counts(
     return top
 
 
-def locality_counts(session: Session, top_n: int = 12) -> dict[str, int]:
+def locality_counts(
+    session: Session, top_n: int = 12, company_ids: Collection[int] | None = None
+) -> dict[str, int]:
     """Top localities among enriched companies, grouping the long tail into "Other"."""
     counts: dict[str, int] = {}
     query = select(Company.locality).where(col(Company.category).is_not(None))
+    if company_ids is not None:
+        query = query.where(col(Company.id).in_(list(company_ids)))
     for locality in session.exec(query).all():
         key = locality or "Unknown"
         counts[key] = counts.get(key, 0) + 1
@@ -474,15 +551,16 @@ def search_companies(
     max_funding_million_usd: int | None = None,
     founded_from: int | None = None,
     founded_to: int | None = None,
-    enriched_from: date | None = None,
-    enriched_to: date | None = None,
+    run_from: date | None = None,
+    run_to: date | None = None,
     enriched_only: bool = False,
     limit: int = 500,
 ) -> CompanySearch:
     """Candidates ordered by score. `text` matches the name or the winning `one_liner`; `stage`,
     `business_status` and the founded years match the winning fact; funding is the amount of the
     latest round (D22). A company whose value is not known never matches a filter on it.
-    `enriched_from`/`enriched_to` bound the date of the latest enrichment (`_enrichment_dates`).
+    `run_from`/`run_to` keep companies first ingested or enriched in that window
+    (`run_window_company_ids`).
     `enriched_only` keeps companies with a category. Coverage counts known values among all
     matches."""
     query = select(Company).where(Company.candidate_score >= min_score)
@@ -536,15 +614,8 @@ def search_companies(
             if (amount := funding.get(row.id)) is not None and amount <= max_funding_million_usd
         ]
 
-    if enriched_from is not None or enriched_to is not None:
-        enriched_on = _enrichment_dates(session)
-        rows = [
-            row
-            for row in rows
-            if (day := enriched_on.get(row.id)) is not None
-            and (enriched_from is None or day >= enriched_from)
-            and (enriched_to is None or day <= enriched_to)
-        ]
+    if (in_window := run_window_company_ids(session, run_from, run_to)) is not None:
+        rows = [row for row in rows if row.id in in_window]
 
     coverage = Coverage(
         matched=len(rows),
