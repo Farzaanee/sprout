@@ -289,6 +289,44 @@ def test_website_screen_skips_enrichment_even_for_explicit_forced_target(
     assert not runs(engine, kind=RunKind.COMPANY_ENRICH.value)
 
 
+@pytest.mark.parametrize(
+    ("age_days", "extra", "screened_again"),
+    [
+        (10, [], False),
+        (120, [], True),
+        (10, ["--force"], True),
+        (10, ["--no-website-days", "5"], True),
+    ],
+)
+def test_recent_no_website_screen_is_not_repeated(
+    settings, engine, monkeypatch, age_days, extra, screened_again
+):
+    (company_id,) = add_companies(engine, "ACME AI LTD")
+    started = datetime.now(UTC) - timedelta(days=age_days)
+    with Session(engine) as session:
+        session.add(
+            RunLog(
+                kind=RunKind.COMPANY_WEBSITE_SCREEN.value,
+                company_id=company_id,
+                status="ok",
+                started_at=started,
+                finished_at=started,
+                stats={"website": None, "reason": "none found"},
+            )
+        )
+        session.commit()
+    screens = []
+
+    def fake_screen(*_):
+        screens.append(1)
+        return LoopResult(payload={"url": "", "reason": "none"}, cost_usd=Decimal(0))
+
+    monkeypatch.setitem(orch.AGENTS, "website", (orch.SCREEN_BUDGET, fake_screen))
+    summary = invoke(settings, RoutingClient(), "--only", "ACME AI LTD", *extra)
+    assert summary.stats["results"] == {"skipped_no_website": 1}
+    assert bool(screens) is screened_again
+
+
 def test_real_website_screen_precedes_enrichment(settings, engine, monkeypatch, make_http):
     (company_id,) = add_companies(engine, "ACME AI LTD")
     url = "https://acme.example/about"

@@ -282,6 +282,26 @@ def enriched_company_count(session: Session) -> int:
     ).one()
 
 
+def enriched_fact_count(session: Session) -> int:
+    """Fact rows belonging to classified companies, including undisclosed values."""
+    return session.exec(
+        select(func.count())
+        .select_from(Fact)
+        .join(Company, Fact.company_id == Company.id)
+        .where(col(Company.category).is_not(None))
+    ).one()
+
+
+def enriched_news_count(session: Session) -> int:
+    """News item rows belonging to classified companies."""
+    return session.exec(
+        select(func.count())
+        .select_from(CompanyNewsRow)
+        .join(Company, CompanyNewsRow.company_id == Company.id)
+        .where(col(Company.category).is_not(None))
+    ).one()
+
+
 def category_counts(session: Session) -> dict[str, int]:
     """Classified candidates only; a company with no category yet is left out."""
     counts: dict[str, int] = {}

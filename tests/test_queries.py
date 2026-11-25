@@ -513,6 +513,39 @@ def test_pool_overview_counts(session):
     assert queries.locality_counts(session) == {"London": 2}  # unclassified company excluded
 
 
+def test_enriched_fact_count_includes_all_fact_rows_for_classified_companies(session):
+    assert queries.enriched_fact_count(session) == 0
+    enriched = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    unenriched = _add(session, "2", "Plain AI Ltd", date(2015, 6, 1))
+    enriched.category = "Other"
+    session.add(enriched)
+    session.commit()
+    _fact(session, enriched, "stage", None)
+    _fact(session, enriched, "stage", "Seed", url="https://other.example")
+    _fact(session, unenriched, "founded", 2015)
+
+    assert queries.count_rows(session)["facts"] == 3
+    assert queries.enriched_fact_count(session) == 2
+
+
+def test_enriched_news_count_counts_only_news_for_classified_companies(session):
+    assert queries.enriched_news_count(session) == 0
+    enriched = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    unenriched = _add(session, "2", "Plain AI Ltd", date(2015, 6, 1))
+    enriched.category = "Other"
+    session.add(enriched)
+    session.add_all(
+        [
+            CompanyNewsRow(company_id=enriched.id, url="https://example.com/1", title="First"),
+            CompanyNewsRow(company_id=enriched.id, url="https://example.com/2", title="Second"),
+            CompanyNewsRow(company_id=unenriched.id, url="https://example.com/3", title="Third"),
+        ]
+    )
+    session.commit()
+
+    assert queries.enriched_news_count(session) == 2
+
+
 def test_winning_values_prefers_valued_then_newest_then_confidence(session):
     company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
     _fact(session, company, "stage", None, url="https://a.example", confidence=Confidence.LOW)

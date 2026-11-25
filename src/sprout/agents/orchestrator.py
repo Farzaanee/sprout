@@ -46,6 +46,7 @@ from sprout.status import (
     company_statuses,
     profile_gaps,
     reap_abandoned,
+    recently_without_website,
 )
 
 MAX_CONCURRENCY = 8
@@ -247,6 +248,10 @@ def process_company(
         exhausted = not force and any(status.steps[s].state == "exhausted" for s in wanted)
         no_profile = False
         if "enrich" in needed:
+            if not force and recently_without_website(session, company_id, ctx.policy, ctx.now):
+                reason = f"no website found in the last {ctx.policy.no_website_days} days"
+                outcomes.append(StepOutcome("website", "skipped_no_website", error=reason))
+                return _outcome(company_id, outcomes, exhausted=False, no_profile=False)
             outcomes.append(_run_step("website", worker, company, ctx))
             if outcomes[-1].state != "ok":
                 return _outcome(company_id, outcomes, exhausted=False, no_profile=False)
@@ -476,7 +481,11 @@ async def run(
     stop: threading.Event | None = None,
 ) -> RunSummary:
     """Select, order and process the working set. `client` and `stop` are injectable for tests."""
-    policy = StatusPolicy(enrich_stale_days=args.stale_days, news_stale_days=args.news_stale_days)
+    policy = StatusPolicy(
+        enrich_stale_days=args.stale_days,
+        news_stale_days=args.news_stale_days,
+        no_website_days=args.no_website_days,
+    )
     now = datetime.now(UTC)
     steps: tuple[str, ...] = tuple(args.steps)
     if client is None and not args.dry_run:
@@ -595,6 +604,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--stale-days", type=int, default=30, help="re-enrich after this many days")
     parser.add_argument("--news-stale-days", type=int, default=7)
+    parser.add_argument(
+        "--no-website-days",
+        type=int,
+        default=90,
+        help="do not re-screen a company with no website found for this many days (default 90)",
+    )
     parser.add_argument("--steps", type=_steps_arg, default=STEPS, help="comma list, default all")
     parser.add_argument(
         "--only",
@@ -607,7 +622,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="ignore freshness, the 3-attempt cap and the single-run lock",
+        help="ignore freshness, the 3-attempt cap, the no-website window and the single-run lock",
     )
     parser.add_argument("--dry-run", action="store_true", help="show the plan, spend nothing")
     args = parser.parse_args(argv)

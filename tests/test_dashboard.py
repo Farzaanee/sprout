@@ -7,7 +7,16 @@ from sqlmodel import Session
 from streamlit.testing.v1 import AppTest
 
 from sprout.candidates import assess
-from sprout.db import RunLog, RunLogStep, get_engine, init_db, upsert_company
+from sprout.db import (
+    CompanyNewsRow,
+    RunLog,
+    RunLogStep,
+    get_engine,
+    init_db,
+    save_fact,
+    upsert_company,
+)
+from sprout.models import Sourced
 from sprout.sources.companies_house import CompanyHit
 
 ENTRY_POINT = Path(__file__).parents[1] / "streamlit_app.py"
@@ -51,6 +60,56 @@ def test_shows_counts_read_only(monkeypatch, tmp_path):
     assert [t.label for t in at.tabs] == TABS
     assert not at.button
     assert {m.label: m.value for m in at.metric}["Candidate companies"] == "1"
+
+
+def test_candidate_pool_explains_discovery_and_enrichment_screens(monkeypatch, tmp_path):
+    at = _app(monkeypatch, tmp_path).run()
+
+    captions = "\n".join(c.value for c in at.caption)
+    assert "discovery heuristic" in captions
+    assert all(
+        term in captions
+        for term in ("artificial intelligence", "machine learning", "robotics", "AI", "analytics")
+    )
+    assert "tech SIC code" in captions
+    assert "at least two active officers" in captions
+    assert "at least one director" in captions
+    assert "official website" in captions
+    assert "profile enrichment runs only after that check succeeds" in captions
+
+
+def test_candidate_pool_metrics_count_enriched_subset(monkeypatch, tmp_path):
+    engine = get_engine(tmp_path / "app.db")
+    init_db(engine)
+    with Session(engine) as session:
+        for number, name, category in (
+            ("1", "Neural Robotics Ltd", "Other"),
+            ("2", "Plain AI Ltd", None),
+        ):
+            hit = CompanyHit(number, name, "active", date(2020, 1, 1), ("62012",), "London")
+            company, _ = upsert_company(
+                session, hit, assess(hit.name, hit.sic_codes, incorporated=hit.incorporated)
+            )
+            company.category = category
+            save_fact(
+                session,
+                company.id,
+                "hq",
+                Sourced(value="London", source_url="https://example.com"),
+            )
+            session.add(
+                CompanyNewsRow(
+                    company_id=company.id, url=f"https://example.com/{number}", title="News"
+                )
+            )
+        session.commit()
+
+    at = _app(monkeypatch, tmp_path).run()
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Facts (candidate pool)"] == "2"
+    assert metrics["Facts (enriched)"] == "1"
+    assert metrics["News items (enriched)"] == "1"
 
 
 HOSTILE = (

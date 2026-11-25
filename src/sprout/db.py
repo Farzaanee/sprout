@@ -15,6 +15,7 @@ from typing import Any, Protocol
 
 from pydantic_core import to_json
 from sqlalchemy import JSON, Column, Engine, UniqueConstraint, event, inspect, text
+from sqlalchemy.orm import registry
 from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from sprout.candidates import Assessment, assess
@@ -26,6 +27,10 @@ from sprout.sources.web import normalise_url
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+class DatabaseModel(SQLModel, registry=registry()):
+    """Keep this module's mappings and metadata independent across module reloads."""
 
 
 class RunKind(StrEnum):
@@ -40,7 +45,7 @@ class RunKind(StrEnum):
     PIPELINE_RUN = "pipeline_run"
 
 
-class Company(SQLModel, table=True):
+class Company(DatabaseModel, table=True):
     __tablename__ = "company"
     __table_args__ = {"extend_existing": True}
 
@@ -64,7 +69,7 @@ class Company(SQLModel, table=True):
     last_seen_at: datetime = Field(default_factory=utcnow)
 
 
-class Fact(SQLModel, table=True):
+class Fact(DatabaseModel, table=True):
     """One `Sourced` value for one field of a company; `value_json` is NULL if not disclosed."""
 
     __tablename__ = "fact"
@@ -83,7 +88,7 @@ class Fact(SQLModel, table=True):
     note: str | None = None
 
 
-class FundingRoundRow(SQLModel, table=True):
+class FundingRoundRow(DatabaseModel, table=True):
     """One funding round with its own provenance (a company has many, each cited separately)."""
 
     __tablename__ = "funding_round"
@@ -101,7 +106,7 @@ class FundingRoundRow(SQLModel, table=True):
     note: str | None = None
 
 
-class OfficerRow(SQLModel, table=True):
+class OfficerRow(DatabaseModel, table=True):
     """One active company officer, with its own provenance. `role` is one of the four categories
     `officer_category` collapses Companies House's `officer_role` vocabulary into: director,
     secretary, llp-member, member."""
@@ -121,7 +126,7 @@ class OfficerRow(SQLModel, table=True):
     note: str | None = None
 
 
-class CompanyNewsRow(SQLModel, table=True):
+class CompanyNewsRow(DatabaseModel, table=True):
     """One article found for a company (D33). Written by `save_company_news`."""
 
     __tablename__ = "company_news"
@@ -136,7 +141,7 @@ class CompanyNewsRow(SQLModel, table=True):
     first_seen_at: datetime = Field(default_factory=utcnow)
 
 
-class RunLog(SQLModel, table=True):
+class RunLog(DatabaseModel, table=True):
     """One row per pipeline run: a whole batch for `kind == companies_ingest`, one
     company's attempt for every other kind. `stats` stays a thin JSON catch-all, for whatever a
     future `kind` needs that has not earned a column yet (for example Phase 4's planned `sources`
@@ -165,7 +170,7 @@ class RunLog(SQLModel, table=True):
     tool_calls: dict[str, int] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
 
-class RunLogStep(SQLModel, table=True):
+class RunLogStep(DatabaseModel, table=True):
     """One model response (loop iteration) of a run: tools called, usage, cost, truncated text."""
 
     __tablename__ = "run_log_step"
@@ -217,7 +222,7 @@ def _configure_connection(dbapi_connection: sqlite3.Connection, _record: object)
 
 def init_db(engine: Engine) -> None:
     """Create missing tables, add missing nullable columns (no data loss), migrate and backfill."""
-    SQLModel.metadata.create_all(engine)
+    DatabaseModel.metadata.create_all(engine)
     _add_missing_columns(engine)
     _migrate_run_log(engine)
     with Session(engine) as session:
@@ -302,7 +307,7 @@ def _add_missing_columns(engine: Engine) -> None:
     inspector = inspect(engine)
     quote = engine.dialect.identifier_preparer.quote
     with engine.begin() as conn:
-        for table in SQLModel.metadata.sorted_tables:
+        for table in DatabaseModel.metadata.sorted_tables:
             if not inspector.has_table(table.name):
                 continue
             existing = {c["name"] for c in inspector.get_columns(table.name)}

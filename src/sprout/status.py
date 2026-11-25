@@ -35,6 +35,7 @@ class StatusPolicy:
     news_stale_days: int = 7
     max_attempts: int = 3
     running_timeout: timedelta = timedelta(minutes=30)
+    no_website_days: int = 90
 
 
 @dataclass(frozen=True)
@@ -174,6 +175,26 @@ def company_statuses(
             steps[step] = _step_status(step, rows[company_id][step], policy=policy, now=now)
         result[company_id] = CompanyStatus(company_id, steps, costs[company_id])
     return result
+
+
+def recently_without_website(
+    session: Session, company_id: int, policy: StatusPolicy, now: datetime
+) -> bool:
+    """True when the company's newest website screen finished ok with no website, within
+    `policy.no_website_days`. Such a company is not screened again until the window passes."""
+    row = session.exec(
+        select(RunLog.status, RunLog.started_at, func.json_extract(col(RunLog.stats), "$.website"))
+        .where(
+            RunLog.company_id == company_id,
+            RunLog.kind == RunKind.COMPANY_WEBSITE_SCREEN.value,
+        )
+        .order_by(col(RunLog.started_at).desc(), col(RunLog.id).desc())
+    ).first()
+    if row is None:
+        return False
+    status, started_at, website = row
+    age = _utc(now) - _utc(started_at)
+    return status == "ok" and website is None and age <= timedelta(days=policy.no_website_days)
 
 
 def reap_abandoned(session: Session, now: datetime, policy: StatusPolicy) -> int:

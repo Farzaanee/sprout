@@ -122,9 +122,12 @@ def render_progress() -> None:
 
 def render_pool() -> None:
     with ui.session() as session:
-        total = queries.count_rows(session)["companies"]
+        counts = queries.count_rows(session)
+        total = counts["companies"]
         last_ingest = queries.latest_companies_ingest_run(session)
         enriched = queries.enriched_company_count(session)
+        enriched_facts = queries.enriched_fact_count(session)
+        enriched_news = queries.enriched_news_count(session)
         category_counts = queries.category_counts(session)
         stage_counts = queries.stage_counts(session)
         business_status_counts = queries.business_status_counts(session)
@@ -144,9 +147,14 @@ def render_pool() -> None:
 
     st.subheader("Pool overview")
     st.caption(
-        "Candidate companies are UK Companies House entities that match an AI "
-        "name/SIC-code keyword and pass the shell-company pre-screen.\n Enrichment is run "
-        "manually, per company, so only a hand-picked subset is enriched so far."
+        "Candidates are active Companies House companies incorporated since 2012 that match "
+        "name searches including 'artificial intelligence,' 'machine learning,' 'robotics,' "
+        "'AI,' and 'analytics,' and the name/tech SIC code candidate rules. This is a discovery "
+        "heuristic, not confirmation that a company is an AI startup. Before enrichment, a "
+        "separate pre-screen requires at least two active officers and at least one director "
+        "to reduce shell-company candidates. The pipeline then checks for an official website "
+        "and verifies the company's identity from its fetched page; profile enrichment runs "
+        "only after that check succeeds. Companies that fail either check are not enriched."
     )
     if last_ingest is not None:
         st.caption(
@@ -214,6 +222,16 @@ def render_pool() -> None:
         )
         cols[4].caption("Active officer count (pool)")
         cols[4].altair_chart(officer_pie, width="stretch")
+
+    fact_cols = st.columns(3)
+    fact_cols[0].metric("Facts (candidate pool)", f"{counts['facts']:,}")
+    fact_cols[1].metric("Facts (enriched)", f"{enriched_facts:,}")
+    fact_cols[2].metric("News items (enriched)", f"{enriched_news:,}")
+    st.caption(
+        "Fact counts include all stored fact rows, including undisclosed values and multiple "
+        "sources; funding rounds and news are counted separately. Enriched facts are a subset "
+        "of candidate-pool facts for companies with a classification."
+    )
 
     if total:
         left, right = st.columns(2)

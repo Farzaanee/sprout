@@ -205,6 +205,83 @@ Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-co
 | `gave_up` | a needed step is `exhausted` |
 | `skipped_budget`, `stopped` | enrich skipped for the batch cap, or interrupt before the company finished |
 
+## How a run flows
+
+Ingest and the orchestrator do not call each other; they share only the SQLite database. The orchestrator works on companies already in `company` (except `--only`, which can add one through Companies House).
+
+### One orchestrator invocation
+
+```mermaid
+flowchart TD
+    S([python -m sprout.orchestrator]) --> P[Parse args and build StatusPolicy<br/>stale 30d enrich, 7d news, no-website 90d]
+    P --> K{Anthropic key?}
+    K -- missing --> X2([exit 2])
+    K -- ok --> L{Another pipeline_run<br/>'running' and not timed out?}
+    L -- yes, no --force --> X2
+    L -- no --> R[reap_abandoned: stale running rows<br/>become internal_error]
+    R --> W["select_working_set<br/>pre-screen: active_officers >= min AND a director<br/>sort by candidate_score desc, id<br/>take first --limit<br/>(--only bypasses both and can add via Companies House)"]
+    W --> ST[company_statuses: per step state<br/>derived from run_log<br/>never / stale / failed / exhausted / fresh / running]
+    ST --> OR[order_for_work: failed retries, partial,<br/>never-enriched, stale, nothing to do last]
+    OR --> DR{--dry-run?}
+    DR -- yes --> X0([print plan and estimate, exit 0])
+    DR -- no --> PR[("INSERT run_log<br/>kind=pipeline_run, status=running")]
+    PR --> POOL[Worker pool, up to 8 threads<br/>each with own session and HTTP clients<br/>shared BatchBudget cap and 429 gate]
+    POOL --> PC[[process_company, per company]]
+    PC --> OUT[Collect outcomes]
+    OUT --> FIN[("UPDATE pipeline_run: status=ok,<br/>stats = results, spent_usd, by_kind,<br/>stopped_early, ...")]
+    FIN --> EX([exit 0, 1 or 2])
+```
+
+### Inside `process_company`
+
+This is where the per-company `run_log` rows are written.
+
+```mermaid
+flowchart TD
+    C([company_id]) --> N{"enrich needed?<br/>(never, stale, failed;<br/>--force ignores fresh and the 3-attempt cap)"}
+    N -- no, and a profile exists --> NW
+    N -- no, and no profile --> F0([result: failed])
+    N -- yes --> NWS{"--force not set and the last website<br/>screen found nothing within 90d?"}
+    NWS -- yes --> SKIP([skipped_no_website<br/>no API call, no cost])
+    NWS -- no --> WS["website step<br/>run_log: company_website_screen"]
+    WS --> WR{URL found?}
+    WR -- no --> SKIP2([skipped_no_website<br/>enrich not run])
+    WR -- failed, budget or stop --> END1([failed, skipped_budget, stopped])
+    WR -- yes --> EN["enrich step<br/>run_log: company_enrich<br/>(facts, funding, officers)"]
+    EN --> ER{ok?}
+    ER -- no --> END1
+    ER -- yes --> NW
+    NW{"news needed?<br/>(never, stale >7d, failed)"} -- yes --> NM["news step<br/>run_log: company_news_match<br/>(company_news rows)"]
+    NW -- no, fresh --> OK
+    NM --> OK([ok, or partial if news failed])
+```
+
+Each agent call first reserves part of the budget with `try_slice`. After a 429 the gate pauses all workers for 30 seconds and the step is retried once.
+
+### Step states in plain words
+
+The states are computed per company and per step (enrich, news) by `_step_status` in `status.py`, from that company's rows of the step's kind. The exact conditions are in the table under [Selector, status and retry](#selector-status-and-retry).
+
+| State | Meaning | Runs the step? |
+|---|---|---|
+| `never` | No successful run yet, and the newest run is not a failure | Yes |
+| `fresh` | Last successful run is within the TTL (enrich 30 days, news 7 days) | No |
+| `stale` | Last successful run is older than the TTL | Yes |
+| `failed` | Newest run failed and fewer than 3 failed attempts since the last success | Yes (retry) |
+| `exhausted` | Newest run failed and 3 or more failed attempts since the last success | No |
+| `running` | Newest run is `running` and under 30 minutes old (another process) | No |
+
+"Enrich needed" in the diagram means `never`, `stale` or `failed`. `--force` also treats `fresh` and `exhausted` as needed, but never takes over a `running` step. API errors do not count towards the 3 attempts.
+
+### Who triggers what
+
+The corrected picture is: orchestrator → (asks) `status.py` → (reads) `run_log`; orchestrator → (runs) agents → (write) `company_*` rows.
+
+- Only the orchestrator starts work: `process_company` calls `AGENTS[step]`, and each agent writes its own `company_website_screen`, `company_enrich` or `company_news_match` row.
+- `status.py` is a read-only helper with no side effects on agents (the one write is `reap_abandoned`, which marks stale `running` rows as failed). Its only caller is `orchestrator.py`: `reap_abandoned` at startup, `company_statuses` to order the working set and again per company, and `recently_without_website` before the website screen.
+- `pipeline_run` does not trigger the other kinds. It is the wrapper row (`company_id` NULL, no foreign key to the per-company rows) whose `stats` summarise the batch. Which companies are due never reads it, except for the single-run lock.
+- The Progress tab's "Logged runs" counts every `run_log` row of every kind; the Observability "Runs" counts only `company_enrich`, so the two numbers differ.
+
 ## Concurrency (D38)
 
 - `run()` pre-creates `concurrency` workers (default 4, clamp 1 to 8) in an `asyncio.Queue`. Each company task takes a worker, runs `await asyncio.to_thread(process_company, ...)`, and returns it. Each worker owns its own `HttpClient`, `WebFetcher`, Companies House client and `Session` (`HttpClient` is not thread-safe, D3); the Anthropic client is thread-safe and shared. Sessions and ORM objects never cross threads. Politeness and the Companies House window are therefore per worker.
@@ -215,11 +292,12 @@ Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-co
 
 ## CLI
 
-`python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max-total-usd 5.00] [--stale-days 30] [--news-stale-days 7] [--steps enrich,news] [--only NAME_OR_NUMBER ...] [--no-prescreen] [--force] [--dry-run]`
+`python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max-total-usd 5.00] [--stale-days 30] [--news-stale-days 7] [--no-website-days 90] [--steps enrich,news] [--only NAME_OR_NUMBER ...] [--no-prescreen] [--force] [--dry-run]`
 
 - `--dry-run` selects, prints each company's status, needed steps and an estimate (`ESTIMATED_STEP_USD` in `orchestrator.py`, planning means), and spends nothing; it needs no API key and takes no run lock.
 - `--steps` restricts which steps may run (for example `news` alone).
-- `--force` ignores freshness and the 3-attempt cap for the selected companies, and the single-run lock; it never takes over a step another process is running.
+- `--no-website-days` is how long a company whose website screen found nothing is left alone (default 90); the next run skips the screen and ends it `skipped_no_website` at no cost. A failed screen is not "no website" and is retried.
+- `--force` ignores freshness, the 3-attempt cap and the no-website window for the selected companies, and the single-run lock; it never takes over a step another process is running.
 - `--max-total-usd` is the single cap over enrichment and news spend. The default US$5.00 is the acceptance ceiling.
 - Output: one stderr line per finished company (result, per-step state and cost), a final summary on stdout, and one batch `run_log` row, kind `pipeline_run`, `company_id` NULL, `stats`: `limit`, `concurrency`, `max_total_usd`, `selected`, `results` (counts per company result), `spent_usd`, `by_kind`, `rate_limit_trips`, `incomplete_profiles` (company id to missing parts, ok companies only), `stopped_early` (`interrupted`, `rate_limited`, `budget` or null). The spend key is `spent_usd`, **not** `cost_usd`, because the Observability queries sum `stats.cost_usd` over every kind and would count the batch twice.
 - Exit codes: 0 when not stopped early and `ok / eligible working set >= 0.85` (or no companies are eligible); 1 below that or stopped early (budget, rate limit, interrupt); 2 for configuration (no Anthropic key, another run in progress, unresolvable `--only` target). Phase 9 maps these to job outcomes.
