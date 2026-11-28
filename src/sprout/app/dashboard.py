@@ -6,7 +6,7 @@ Sidebar: database picker, then filters for the first three tabs. Tabs: Overview,
 News feed, Candidate pool, Progress (phases + data counts), Observability.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import altair as alt
@@ -14,18 +14,43 @@ import pandas as pd
 import streamlit as st
 from sqlmodel import Session
 
-from sprout import queries
+from sprout import candidates, queries
 from sprout.app import observability_queries as obs
 from sprout.app import ui
 from sprout.app.companies import render_companies
-from sprout.app.filters import Filters, filtered, render_sidebar
+from sprout.app.filters import Filters, filtered, matching_company_ids, render_sidebar
 from sprout.app.news_feed import render_news_feed
 from sprout.app.overview import render_overview
 from sprout.config import DEFAULT_EVAL_DB_PATH, get_settings
-from sprout.db import RunKind
+from sprout.status import StatusPolicy, enrich_state_counts
 
 DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
+ENRICH_POLICY = StatusPolicy()
+ENRICH_STATE_LABELS = {
+    "fresh": "Fresh",
+    "stale": "Stale",
+    "never": "Never enriched",
+    "failed": "Failed (retrying)",
+    "exhausted": "Exhausted",
+    "running": "Running",
+}
 STATE_ICONS = {"Done": "✅", "In progress": "🟡", "Not started": "⬜"}
+
+
+def _score_explanation() -> str:
+    def words(keywords: tuple[str, ...]) -> str:
+        return ", ".join(k.replace("\\w*", "*") for k in keywords)
+
+    return (
+        "Score = 2 for each strong keyword in the company name "
+        f"({words(candidates.STRONG_KEYWORDS)}) + 1 for each weak keyword "
+        f"({words(candidates.WEAK_KEYWORDS)}) + 1 if the company has a tech SIC code. "
+        "A company is only a candidate if it is active, was incorporated since "
+        f"{candidates.MIN_INCORPORATION_DATE.year}, and its name has a strong keyword, or "
+        "'ai' or 'intelligen*', or two weak keywords, together with a tech SIC code. "
+        "The score reads the name only: it says nothing about funding or traction. The "
+        "orchestrator takes the highest scores first and breaks ties by database id."
+    )
 
 
 def _render_phases() -> None:
@@ -47,23 +72,36 @@ def _render_phases() -> None:
             st.caption(p.status_line)
 
 
-def render_progress() -> None:
+def render_progress(filters: Filters) -> None:
     _render_phases()
     st.subheader("Data in the database")
+    scope = matching_company_ids(filters)
+    if scope is not None:
+        st.caption(
+            "Counts and charts below cover only the companies matching the sidebar filters, "
+            "and runs started within the sidebar Run date range; runs without a company "
+            "(ingest and pipeline batches) are left out."
+        )
     with ui.session() as session:
-        counts = queries.count_rows(session)
-        runs = obs.recent_runs(session)
-        run_kinds = queries.run_kind_counts(session)
-        run_kind_companies = queries.run_kind_company_counts(session)
-        keywords = queries.keyword_counts(session)
-        years = queries.incorporation_year_counts(session)
+        window = {"start": filters.run_from, "end": filters.run_to}
+        counts = queries.count_rows(
+            session, scope, run_start=filters.run_from, run_end=filters.run_to
+        )
+        runs = obs.recent_runs(session, company_ids=scope, **window)
+        run_kinds = queries.run_kind_counts(session, scope, **window)
+        run_kind_companies = queries.run_kind_company_counts(session, scope, **window)
+        keywords = queries.keyword_counts(session, scope)
+        years = queries.incorporation_year_counts(session, scope)
     cols = st.columns(4)
     cols[0].metric("Candidate companies", counts["companies"])
     cols[1].metric("Facts (with sources)", counts["facts"])
     cols[2].metric("News items", counts["news"])
     cols[3].metric("Logged runs", counts["runs"])
     if counts["companies"] == 0 and counts["news"] == 0:
-        st.info("The database is empty. Run `uv run python -m sprout.ingest` to fill it.")
+        if scope is not None:
+            st.info("No company matches the sidebar filters.")
+        else:
+            st.info("The database is empty. Run `uv run python -m sprout.ingest` to fill it.")
         return
 
     left, right = st.columns(2)
@@ -121,7 +159,7 @@ def render_progress() -> None:
 
 
 def render_pool(filters: Filters) -> None:
-    # With a run-date window, every figure covers only companies ingested or enriched in it.
+    # With a run-date window, every figure covers only companies ingested or run in it.
     ids = filtered(filters).company_ids
     with ui.session() as session:
         pool_ids = queries.run_window_company_ids(session, filters.run_from, filters.run_to)
@@ -139,6 +177,17 @@ def render_pool(filters: Filters) -> None:
         enriched_founded_counts = queries.founded_year_counts(session, ids)
         locality_counts = queries.locality_counts(session, company_ids=ids)
         officer_counts = queries.officer_count_distribution(session, pool_ids)
+        website_counts = queries.website_screen_counts(session, pool_ids)
+        score_counts = {
+            str(s): n for s, n in queries.candidate_score_counts(session, pool_ids).items()
+        }
+        state_counts = {
+            state: n
+            for state, n in enrich_state_counts(
+                session, pool_ids, ENRICH_POLICY, datetime.now(UTC)
+            ).items()
+            if state != "never"
+        }
         officer_age_counts = queries.officer_age_distribution(session, company_ids=pool_ids)
         enriched_officer_age_counts = queries.officer_age_distribution(
             session, enriched_only=True, company_ids=ids
@@ -155,10 +204,9 @@ def render_pool(filters: Filters) -> None:
         "Candidates are active Companies House companies incorporated since 2012 that match "
         "name searches including 'artificial intelligence,' 'machine learning,' 'robotics,' "
         "'AI,' and 'analytics,' and the name/tech SIC code candidate rules. This is a discovery "
-        "heuristic, not confirmation that a company is an AI startup. Before enrichment, a "
-        "separate pre-screen requires at least two active officers and at least one director "
-        "to reduce shell-company candidates. The pipeline then checks for an official website "
-        "and verifies the company's identity from its fetched page; profile enrichment runs "
+        "heuristic, not confirmation that a company is an AI startup. The pipeline then checks "
+        "for an official website and verifies the company's identity from its fetched page; "
+        "profile enrichment runs "
         "only after that check succeeds. Companies that fail either check are not enriched."
     )
     if last_ingest is not None:
@@ -227,6 +275,123 @@ def render_pool(filters: Filters) -> None:
         )
         cols[4].caption("Active officer count (pool)")
         cols[4].altair_chart(officer_pie, width="stretch")
+
+        if state_counts:
+            state_total = sum(state_counts.values())
+            state_df = pd.DataFrame(
+                {
+                    "state": ENRICH_STATE_LABELS[state],
+                    "companies": value,
+                    "percent": 100 * value / state_total,
+                    "total": state_total,
+                }
+                for state, value in state_counts.items()
+            )
+            # Slices under 5% are too narrow for a label; they keep the tooltip only.
+            state_df["label"] = [
+                f"{r.companies} ({r.percent:.1f}%)" if r.percent >= 5 else ""
+                for r in state_df.itertuples()
+            ]
+            state_base = alt.Chart(state_df).encode(
+                theta=alt.Theta("companies:Q", stack=True),
+                color=alt.Color(
+                    "state:N", title=None, sort=[ENRICH_STATE_LABELS[s] for s in state_counts]
+                ),
+            )
+            state_pie = state_base.mark_arc(outerRadius=100).encode(
+                tooltip=[
+                    alt.Tooltip("state:N"),
+                    alt.Tooltip("companies:Q"),
+                    alt.Tooltip("percent:Q", title="% of companies in chart", format=".1f"),
+                    alt.Tooltip("total:Q", title="Total companies in chart"),
+                ]
+            )
+            state_labels = state_base.mark_text(radius=120, size=11).encode(text="label:N")
+            st.subheader("Enrichment status (pool)")
+            st.caption(
+                "Companies that have been through enrichment, by state: fresh (enriched within "
+                f"{ENRICH_POLICY.enrich_stale_days} days), stale (older), failed (will be "
+                f"retried), exhausted ({ENRICH_POLICY.max_attempts} failed attempts) or running. "
+                "Never-enriched companies are left out."
+            )
+            st.altair_chart((state_pie + state_labels).properties(height=280), width="stretch")
+
+        st.subheader("Website search outcome (pool)")
+        st.caption(
+            "Companies whose latest completed website search returned an official website, "
+            "versus none. Companies not yet screened, or whose screen failed, are left out."
+        )
+        if not website_counts:
+            st.info(
+                "No website search has completed yet. It runs as the first step of "
+                "`uv run python -m sprout.orchestrator`."
+            )
+        else:
+            website_total = sum(website_counts.values())
+            website_df = pd.DataFrame(
+                {
+                    "outcome": outcome,
+                    "companies": value,
+                    "percent": 100 * value / website_total,
+                    "total": website_total,
+                }
+                for outcome, value in website_counts.items()
+            )
+            website_df["label"] = [
+                f"{r.companies} ({r.percent:.1f}%)" if r.percent >= 5 else ""
+                for r in website_df.itertuples()
+            ]
+            website_base = alt.Chart(website_df).encode(
+                theta=alt.Theta("companies:Q", stack=True),
+                color=alt.Color(
+                    "outcome:N",
+                    title=None,
+                    scale=alt.Scale(
+                        domain=["Website found", "No website found"], range=["#4C78A8", "#B3B3B3"]
+                    ),
+                ),
+            )
+            website_pie = website_base.mark_arc(outerRadius=100).encode(
+                tooltip=[
+                    alt.Tooltip("outcome:N"),
+                    alt.Tooltip("companies:Q"),
+                    alt.Tooltip("percent:Q", title="% of screened companies", format=".1f"),
+                    alt.Tooltip("total:Q", title="Total screened companies"),
+                ]
+            )
+            website_labels = website_base.mark_text(radius=120, size=11).encode(text="label:N")
+            st.altair_chart((website_pie + website_labels).properties(height=280), width="stretch")
+
+        st.subheader("Candidate score distribution (pool)")
+        st.caption(_score_explanation())
+        score_total = sum(score_counts.values())
+        score_df = pd.DataFrame(
+            {
+                "score": score,
+                "companies": value,
+                "percent": 100 * value / score_total,
+                "total": score_total,
+            }
+            for score, value in score_counts.items()
+        )
+        score_df["label"] = [
+            f"{r.companies} ({r.percent:.1f}%)" if r.percent >= 5 else ""
+            for r in score_df.itertuples()
+        ]
+        score_base = alt.Chart(score_df).encode(
+            theta=alt.Theta("companies:Q", stack=True),
+            color=alt.Color("score:N", title="Candidate score", sort=list(score_counts)),
+        )
+        score_pie = score_base.mark_arc(outerRadius=100).encode(
+            tooltip=[
+                alt.Tooltip("score:N", title="Candidate score"),
+                alt.Tooltip("companies:Q"),
+                alt.Tooltip("percent:Q", title="% of candidates", format=".1f"),
+                alt.Tooltip("total:Q", title="Total candidates"),
+            ]
+        )
+        score_labels = score_base.mark_text(radius=120, size=11).encode(text="label:N")
+        st.altair_chart((score_pie + score_labels).properties(height=280), width="stretch")
 
     fact_cols = st.columns(3)
     fact_cols[0].metric("Facts (candidate pool)", f"{counts['facts']:,}")
@@ -387,15 +552,29 @@ def render_pool(filters: Filters) -> None:
             [""] + queries.business_status_options(),
             format_func=lambda s: s or "any",
         )
-        rows = queries.search_companies(
+        search = queries.search_companies(
             session,
-            text=text,
+            text=text or filters.text or "",
             min_score=int(min_score),
             keyword=keyword or None,
             incorporated_from=date(int(year), 1, 1),
             business_status=business_status or None,
-        ).companies
-        st.caption(f"{len(rows)} companies (max 500 shown). Candidates, not verified startups.")
+            category=filters.category,
+            stage=filters.stage,
+            min_funding_million_usd=filters.funding_min,
+            max_funding_million_usd=filters.funding_max,
+            founded_from=filters.founded_from,
+            founded_to=filters.founded_to,
+            run_from=filters.run_from,
+            run_to=filters.run_to,
+        )
+        rows = search.companies
+        matched = search.coverage.matched
+        shown = f", first {len(rows):,} shown" if matched > len(rows) else ""
+        st.caption(
+            f"{matched:,} companies match the sidebar filters and these controls{shown}. "
+            "Candidates, not verified startups."
+        )
         st.dataframe(
             pd.DataFrame(
                 {
@@ -476,28 +655,25 @@ def _render_run_detail(session: Session, run: obs.EnrichRun) -> None:
         st.code(run.error_message, language=None, wrap_lines=True)
 
 
-def render_observability() -> None:
+def render_observability(sidebar_filters: Filters) -> None:
+    scope = matching_company_ids(sidebar_filters)
     with ui.session() as session:
-        if not obs.enrich_runs(session):
+        if not obs.enrich_runs(session, company_ids=scope):
+            if scope is not None:
+                st.info("No pipeline runs for the companies matching the sidebar filters.")
+                return
             st.info(
-                "No enrichment runs yet. Run `uv run python -m sprout.enrich NAME_OR_NUMBER` "
-                "to create one."
+                "No pipeline runs yet. Run `uv run python -m sprout.enrich NAME_OR_NUMBER` "
+                "or `uv run python -m sprout.orchestrator` to create some."
             )
             return
 
-        date_bounds = obs.run_date_range(session)
-        start_date, end_date = date_bounds if date_bounds else (None, None)
-        if date_bounds:
-            min_date, max_date = date_bounds
-            selected = st.date_input(
-                "Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date
-            )
-            if isinstance(selected, tuple) and len(selected) == 2:
-                start_date, end_date = selected
-            elif isinstance(selected, date):
-                start_date = end_date = selected
-
-        date_kwargs = {"start": start_date, "end": end_date}
+        # The sidebar Run date range limits the runs themselves, not just the companies.
+        date_kwargs = {
+            "start": sidebar_filters.run_from,
+            "end": sidebar_filters.run_to,
+            "company_ids": scope,
+        }
         runs = obs.enrich_runs(session, **date_kwargs)
         counts = obs.failure_counts(session, **date_kwargs)
         rate_by_kind = obs.failure_rate_by_kind(session, **date_kwargs)
@@ -509,7 +685,7 @@ def render_observability() -> None:
         days = obs.daily_outcomes(session, **date_kwargs)
 
         if not runs:
-            st.info("No runs in this date range.")
+            st.info("No runs in the sidebar Run date range.")
             return
 
         failed = sum(r.failure_category is not None for r in runs)
@@ -693,9 +869,9 @@ def render_observability() -> None:
         company = filters[1].selectbox(
             "Company", [None] + companies, format_func=lambda c: "any" if c is None else c[1]
         )
-        kind_options = [RunKind.COMPANY_ENRICH.value]
-        kind_options += [k for k in sorted(rate_by_kind) if k not in kind_options]
-        kind = filters[2].selectbox("Kind", [*kind_options, ""], format_func=lambda k: k or "any")
+        kind = filters[2].selectbox(
+            "Kind", ["", *obs.PIPELINE_KINDS], format_func=lambda k: k or "any"
+        )
         tool = filters[3].selectbox(
             "Tool call", [""] + obs.all_tools(session), format_func=lambda t: t or "any"
         )
@@ -747,8 +923,8 @@ def main() -> None:
         ("Companies", lambda: render_companies(filters)),
         ("News feed", lambda: render_news_feed(filters)),
         ("Candidate pool", lambda: render_pool(filters)),
-        ("Progress", render_progress),
-        ("Observability", render_observability),
+        ("Progress", lambda: render_progress(filters)),
+        ("Observability", lambda: render_observability(filters)),
     ]
     for tab, (_, render) in zip(st.tabs([name for name, _ in tabs]), tabs, strict=True):
         with tab:

@@ -1,4 +1,4 @@
-"""Sidebar filters shared by the Overview, Companies and News feed pages.
+"""Sidebar filters shared by every dashboard tab.
 
 `Filters` is frozen and hashable so it can be part of a cache key. A filter left at its default is
 `None` and is not passed to `queries.search_companies`.
@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 
 import streamlit as st
+from sqlmodel import Session
 
 from sprout import queries
 from sprout.app import ui
@@ -27,7 +28,7 @@ class Filters:
     founded_from: int | None = None
     founded_to: int | None = None
     text: str | None = None
-    run_from: date | None = None  # window: first ingested or enriched on these days
+    run_from: date | None = None  # window: first ingested or run through the pipeline on these days
     run_to: date | None = None
 
 
@@ -60,23 +61,27 @@ def _options(db_path: str, version: float) -> _Options:
     return _Options(categories, stages, (min(years), max(years)) if years else None, run_range)
 
 
+def _search(session: Session, filters: Filters, *, enriched_only: bool) -> queries.CompanySearch:
+    return queries.search_companies(
+        session,
+        enriched_only=enriched_only,
+        category=filters.category,
+        stage=filters.stage,
+        min_funding_million_usd=filters.funding_min,
+        max_funding_million_usd=filters.funding_max,
+        founded_from=filters.founded_from,
+        founded_to=filters.founded_to,
+        run_from=filters.run_from,
+        run_to=filters.run_to,
+        text=filters.text or "",
+        limit=_SEARCH_LIMIT,
+    )
+
+
 @st.cache_data(show_spinner=False)
 def _filtered(db_path: str, version: float, filters: Filters) -> FilteredCompanies:
     with ui.session() as session:
-        search = queries.search_companies(
-            session,
-            enriched_only=True,
-            category=filters.category,
-            stage=filters.stage,
-            min_funding_million_usd=filters.funding_min,
-            max_funding_million_usd=filters.funding_max,
-            founded_from=filters.founded_from,
-            founded_to=filters.founded_to,
-            run_from=filters.run_from,
-            run_to=filters.run_to,
-            text=filters.text or "",
-            limit=_SEARCH_LIMIT,
-        )
+        search = _search(session, filters, enriched_only=True)
         return FilteredCompanies(
             company_ids=tuple(c.id for c in search.companies if c.id is not None),
             coverage=search.coverage,
@@ -84,10 +89,26 @@ def _filtered(db_path: str, version: float, filters: Filters) -> FilteredCompani
         )
 
 
+@st.cache_data(show_spinner=False)
+def _matching_ids(db_path: str, version: float, filters: Filters) -> frozenset[int]:
+    with ui.session() as session:
+        search = _search(session, filters, enriched_only=False)
+        return frozenset(c.id for c in search.companies if c.id is not None)
+
+
 def filtered(filters: Filters) -> FilteredCompanies:
     """Enriched companies matching `filters`, cached per database file version."""
     db_path = ui.current_db_path()
     return _filtered(db_path, ui.db_version(db_path), filters)
+
+
+def matching_company_ids(filters: Filters) -> frozenset[int] | None:
+    """Every candidate (enriched or not) matching `filters`, for tabs that scope rows by company.
+    None when no filter is set, so nothing is restricted, including runs that have no company."""
+    if filters == Filters():
+        return None
+    db_path = ui.current_db_path()
+    return _matching_ids(db_path, ui.db_version(db_path), filters)
 
 
 def _funding_label(step: int) -> str:
@@ -99,7 +120,7 @@ def render_sidebar() -> Filters:
     options = _options(db_path, ui.db_version(db_path))
     with st.sidebar:
         st.subheader("Filters")
-        st.caption("Apply to Overview, Companies, News feed and Candidate pool.")
+        st.caption("Apply to every tab.")
         category = st.selectbox(
             "Category",
             [None, *options.categories],
@@ -128,7 +149,7 @@ def render_sidebar() -> Filters:
                 value=(first_day, last_day),
                 min_value=first_day,
                 max_value=last_day,
-                help="Keep companies first ingested or enriched (by a run) in this date range.",
+                help="Keep companies first ingested or processed by a pipeline run in this range.",
             )
             if isinstance(picked, tuple) and len(picked) == 2:
                 run_from = picked[0] if picked[0] > first_day else None

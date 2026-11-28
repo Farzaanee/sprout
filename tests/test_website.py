@@ -28,6 +28,8 @@ def resources(tmp_path, make_http):
     def handler(request):
         if request.url.path == "/robots.txt":
             return httpx.Response(404)
+        if request.url.path == "/broken":
+            return httpx.Response(500)
         return httpx.Response(200, text=QUOTE, headers={"content-type": "text/html"})
 
     fetcher = WebFetcher(make_http(handler), resolver=lambda _: ["1.1.1.1"])
@@ -81,12 +83,31 @@ def test_missing_search_is_a_screen_failure_not_a_negative_result(resources):
 def test_fetch_failure_is_a_screen_failure_not_a_negative_result(resources):
     session, _, fetcher = resources
     client = ScriptedClient(
-        server_search_turn([URL], ("fetch_page", {"url": "http://localhost/private"})),
+        server_search_turn([URL], ("fetch_page", {"url": "https://acme.example/broken"})),
         submit(None, None, "No site"),
     )
     with pytest.raises(WebsiteScreenFailed, match="did not complete"):
         run((session, resources[1], fetcher), client)
     assert session.exec(select(RunLog)).one().status == "error"
+
+
+def test_an_invented_domain_is_not_fetched_and_is_not_a_failure(resources):
+    client = ScriptedClient(
+        server_search_turn([URL], ("fetch_page", {"url": "https://acme-ai.example/"})),
+        submit(None, None, "No official site found"),
+    )
+    result = run(resources, client)
+    session, _, _ = resources
+    assert result.payload["url"] == ""
+    assert session.exec(select(RunLog)).one().status == "ok"
+
+
+def test_another_page_on_a_searched_site_can_be_fetched(resources):
+    other_page = "https://www.acme.example/contact"
+    client = ScriptedClient(
+        server_search_turn([URL], ("fetch_page", {"url": other_page})), submit(other_page)
+    )
+    assert run(resources, client).payload["url"] == other_page
 
 
 def test_search_error_is_a_screen_failure_not_a_negative_result(resources):

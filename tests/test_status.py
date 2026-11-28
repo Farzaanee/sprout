@@ -19,6 +19,7 @@ from sprout.status import (
     StatusPolicy,
     _utc,
     company_statuses,
+    enrich_state_counts,
     profile_gaps,
     reap_abandoned,
 )
@@ -175,6 +176,19 @@ def test_cost_sums_stats_over_all_pipeline_rows(session, company):
 
 def test_empty_ids(session):
     assert company_statuses(session, [], POLICY, NOW) == {}
+
+
+def test_enrich_state_counts_over_pool_or_everything(session, company):
+    add_run(session, company, ENRICH, days_ago=31)
+    fresh, never = (Company(company_number=n, name=f"CO {n}") for n in ("2", "3"))
+    session.add_all([fresh, never])
+    session.commit()
+    add_run(session, fresh, ENRICH, days_ago=1)
+    assert enrich_state_counts(session, None, POLICY, NOW) == {"fresh": 1, "stale": 1, "never": 1}
+    assert enrich_state_counts(session, {fresh.id, never.id}, POLICY, NOW) == {
+        "fresh": 1,
+        "never": 1,
+    }
 
 
 def test_reaper_marks_old_running_rows_and_spares_young(session, company):

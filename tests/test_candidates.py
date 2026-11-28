@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from sprout.candidates import DISCOVERY_TERMS, assess, passes_prescreen
+from sprout.candidates import DISCOVERY_TERMS, assess
 
 
 @pytest.mark.parametrize(
@@ -55,17 +55,3 @@ def test_score_rewards_more_evidence():
 def test_discovery_terms_are_lowercase_and_unique():
     assert len(set(DISCOVERY_TERMS)) == len(DISCOVERY_TERMS)
     assert all(t == t.lower() for t in DISCOVERY_TERMS)
-
-
-@pytest.mark.parametrize("active_officers", [None, 0, 1])
-def test_prescreen_rejects_single_officer_or_unknown(active_officers):
-    assert not passes_prescreen(active_officers, True)
-
-
-@pytest.mark.parametrize("active_officers", [2, 3, 10])
-def test_prescreen_accepts_two_or_more_officers_with_a_director(active_officers):
-    assert passes_prescreen(active_officers, True)
-
-
-def test_prescreen_rejects_no_active_director():
-    assert not passes_prescreen(2, False)

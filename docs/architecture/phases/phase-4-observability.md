@@ -209,7 +209,7 @@ class TrendPoint: run_id: int; started_at: datetime; cost_usd: float; iterations
 @dataclass(frozen=True)
 class DayOutcome: day: date; runs: int; failures: int; cost_usd: float
 
-def enrich_runs(session, *, failure_category: str | None = None, failures_only: bool = False, limit: int = 200) -> list[EnrichRun]   # kind='company_enrich', newest first
+def enrich_runs(session, *, failure_category: str | None = None, failures_only: bool = False, limit: int = 200) -> list[EnrichRun]   # website-screen, enrich and news runs (`PIPELINE_KINDS`), or one `kind`; newest first
 def failure_counts(session) -> dict[str, int]                 # category -> runs, failed runs only, largest first
 def cost_trend(session, *, limit: int = 200) -> list[TrendPoint]   # oldest first; cost_per_iteration None when iterations == 0
 def daily_outcomes(session) -> list[DayOutcome]               # the error trend

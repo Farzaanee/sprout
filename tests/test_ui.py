@@ -131,7 +131,7 @@ def test_sidebar_filters_the_enriched_companies(monkeypatch, tmp_path):
     assert at.sidebar.selectbox[1].options == ["Any", "Robotics (1)"]
     assert at.sidebar.selectbox[2].options == ["Any", "Seed"]
     sidebar_text = " ".join(c.value for c in at.sidebar.caption)
-    assert "Apply to Overview, Companies, News feed and Candidate pool" in sidebar_text
+    assert "Apply to every tab" in sidebar_text
     assert "1 of 1 enriched companies match" in sidebar_text
     assert "Funding known for 0 of 1" in sidebar_text
     assert "Stage known for 1 of 1".lower() in sidebar_text.lower()

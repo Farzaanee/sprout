@@ -131,6 +131,38 @@ def runs(session):
     ]
 
 
+def test_run_queries_can_be_scoped_to_companies(session, runs):
+    company_id = runs[0].company_id
+    other = _add(session, "2", "Plain AI Ltd", date(2020, 1, 1))
+    _run(session, 4, category="refusal", company_id=other.id)
+
+    assert obs.failure_counts(session, company_ids={company_id}) == {
+        "invalid_output": 2,
+        "budget_cap": 1,
+    }
+    assert obs.failure_counts(session, company_ids={other.id}) == {"refusal": 1}
+    assert len(obs.enrich_runs(session, company_ids={company_id})) == 4
+    assert obs.enrich_runs(session, company_ids=set()) == []
+    assert {r.company_id for r in obs.recent_runs(session, company_ids={other.id})} == {other.id}
+    assert obs.cost_by_kind(session, company_ids={other.id}) == {"company_enrich": 0.0}
+
+
+def test_pipeline_runs_of_every_step_are_listed_but_batch_rows_are_not(session):
+    company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    ids = {
+        kind: _run(session, 1, kind=kind, company_id=company.id, stats={"cost_usd": 0.01}).id
+        for kind in ("company_website_screen", "company_enrich", "company_news_match")
+    }
+    _run(session, 1, kind="pipeline_run")
+    _run(session, 1, kind="companies_ingest")
+
+    assert {r.run_id for r in obs.enrich_runs(session)} == set(ids.values())
+    assert [r.run_id for r in obs.enrich_runs(session, kind="company_news_match")] == [
+        ids["company_news_match"]
+    ]
+    assert obs.daily_outcomes(session)[0].runs == 3
+
+
 def test_failure_counts_groups_failed_enrich_runs_largest_first(session, runs):
     counts = obs.failure_counts(session)
     assert counts == {"invalid_output": 2, "budget_cap": 1, "refusal": 1}

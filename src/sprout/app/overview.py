@@ -104,16 +104,14 @@ def _render_coverage(data: OverviewData) -> None:
 
 def _render_categories(data: OverviewData) -> None:
     st.subheader("Companies per category")
-    st.caption(
-        "Category is a model classification, not a sourced fact (D6). "
-        "Long labels are truncated; hover a bar for the full name."
-    )
+    st.caption("Category is a model classification, not a sourced fact (D6).")
     st.altair_chart(
         ui.bar_chart(
             data.categories,
             category_title="category",
             value_title="companies",
             horizontal=True,
+            full_labels=True,
             height=max(len(data.categories), 1) * 28,
         ),
         width="stretch",

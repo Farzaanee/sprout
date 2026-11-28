@@ -4,6 +4,7 @@ Dashboard only; company data reads shared with the MCP server live in `sprout.qu
 """
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from typing import Any
@@ -98,28 +99,45 @@ def parse_phases(plan_text: str, notes_text: str) -> list[PhaseStatus]:
     return phases
 
 
-def recent_runs(session: Session, limit: int = 20) -> list[RunLog]:
-    return list(session.exec(select(RunLog).order_by(col(RunLog.id).desc()).limit(limit)).all())
+def recent_runs(
+    session: Session,
+    limit: int = 20,
+    company_ids: Collection[int] | None = None,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> list[RunLog]:
+    query = _apply_scope(select(RunLog), start, end, company_ids)
+    return list(session.exec(query.order_by(col(RunLog.id).desc()).limit(limit)).all())
+
+
+PIPELINE_KINDS = (
+    RunKind.COMPANY_WEBSITE_SCREEN.value,
+    RunKind.COMPANY_ENRICH.value,
+    RunKind.COMPANY_NEWS_MATCH.value,
+)
 
 
 def _enrich_query() -> Any:
-    return select(RunLog).where(RunLog.kind == RunKind.COMPANY_ENRICH.value)
+    """Every per-company pipeline run (website screen, enrichment, news), not only enrichment."""
+    return select(RunLog).where(col(RunLog.kind).in_(PIPELINE_KINDS))
 
 
-def _apply_date_range(query: Any, start: date | None, end: date | None) -> Any:
+def _apply_scope(
+    query: Any,
+    start: date | None,
+    end: date | None,
+    company_ids: Collection[int] | None = None,
+) -> Any:
+    """Limit runs to a date range and, when `company_ids` is given, to those companies (runs
+    without a company, such as ingest and `pipeline_run` batches, then drop out)."""
     if start is not None:
         query = query.where(RunLog.started_at >= datetime.combine(start, time.min, tzinfo=UTC))
     if end is not None:
         query = query.where(RunLog.started_at <= datetime.combine(end, time.max, tzinfo=UTC))
+    if company_ids is not None:
+        query = query.where(col(RunLog.company_id).in_(list(company_ids)))
     return query
-
-
-def run_date_range(session: Session) -> tuple[date, date] | None:
-    bounds = session.exec(select(func.min(RunLog.started_at), func.max(RunLog.started_at))).one()
-    started_min, started_max = bounds
-    if started_min is None or started_max is None:
-        return None
-    return started_min.date(), started_max.date()
 
 
 def _number(stats: dict[str, Any], key: str) -> float:
@@ -141,22 +159,25 @@ def enrich_runs(
     failure_category: str | None = None,
     failures_only: bool = False,
     company_id: int | None = None,
-    kind: str | None = RunKind.COMPANY_ENRICH.value,
+    kind: str | None = None,
     tool: str | None = None,
     start: date | None = None,
     end: date | None = None,
+    company_ids: Collection[int] | None = None,
     limit: int = 200,
 ) -> list[EnrichRun]:
     query = select(RunLog)
     if kind:
         query = query.where(RunLog.kind == kind)
+    else:
+        query = query.where(col(RunLog.kind).in_(PIPELINE_KINDS))
     if failure_category:
         query = query.where(RunLog.failure_category == failure_category)
     elif failures_only:
         query = query.where(col(RunLog.failure_category).is_not(None))
     if company_id is not None:
         query = query.where(RunLog.company_id == company_id)
-    query = _apply_date_range(query, start, end)
+    query = _apply_scope(query, start, end, company_ids)
     runs = session.exec(query.order_by(col(RunLog.id).desc())).all()
     if tool:
         runs = [run for run in runs if tool in (run.tool_calls or {})]
@@ -170,9 +191,11 @@ def enrich_runs(
             .group_by(RunLogStep.run_log_id)
         ).all()
     )
-    company_ids = {run.company_id for run in runs if run.company_id is not None}
+    run_company_ids = {run.company_id for run in runs if run.company_id is not None}
     names = dict(
-        session.exec(select(Company.id, Company.name).where(col(Company.id).in_(company_ids))).all()
+        session.exec(
+            select(Company.id, Company.name).where(col(Company.id).in_(run_company_ids))
+        ).all()
     )
     return [
         EnrichRun(
@@ -198,14 +221,19 @@ def enrich_runs(
 
 
 def failure_counts(
-    session: Session, *, start: date | None = None, end: date | None = None
+    session: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    company_ids: Collection[int] | None = None,
 ) -> dict[str, int]:
-    query = _apply_date_range(
+    query = _apply_scope(
         select(RunLog.failure_category, func.count()).where(
-            RunLog.kind == RunKind.COMPANY_ENRICH.value, col(RunLog.failure_category).is_not(None)
+            col(RunLog.kind).in_(PIPELINE_KINDS), col(RunLog.failure_category).is_not(None)
         ),
         start,
         end,
+        company_ids,
     ).group_by(RunLog.failure_category)
     rows = session.exec(query).all()
     order = {category.value: index for index, category in enumerate(FailureCategory)}
@@ -214,10 +242,14 @@ def failure_counts(
 
 
 def failure_rate_by_kind(
-    session: Session, *, start: date | None = None, end: date | None = None
+    session: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    company_ids: Collection[int] | None = None,
 ) -> dict[str, float]:
-    query = _apply_date_range(
-        select(RunLog.kind, RunLog.failure_category, func.count()), start, end
+    query = _apply_scope(
+        select(RunLog.kind, RunLog.failure_category, func.count()), start, end, company_ids
     ).group_by(RunLog.kind, RunLog.failure_category)
     rows = session.exec(query).all()
     totals: dict[str, int] = {}
@@ -241,10 +273,14 @@ def all_tools(session: Session) -> list[str]:
 
 
 def failures_by_tool(
-    session: Session, *, start: date | None = None, end: date | None = None
+    session: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    company_ids: Collection[int] | None = None,
 ) -> dict[str, int]:
-    query = _apply_date_range(
-        _enrich_query().where(col(RunLog.failure_category).is_not(None)), start, end
+    query = _apply_scope(
+        _enrich_query().where(col(RunLog.failure_category).is_not(None)), start, end, company_ids
     )
     runs = session.exec(query).all()
     counts: dict[str, int] = {}
@@ -255,9 +291,13 @@ def failures_by_tool(
 
 
 def cost_by_tool(
-    session: Session, *, start: date | None = None, end: date | None = None
+    session: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    company_ids: Collection[int] | None = None,
 ) -> dict[str, float]:
-    query = _apply_date_range(_enrich_query(), start, end)
+    query = _apply_scope(_enrich_query(), start, end, company_ids)
     runs = session.exec(query).all()
     costs: dict[str, float] = {}
     for run in runs:
@@ -267,9 +307,13 @@ def cost_by_tool(
 
 
 def calls_by_tool(
-    session: Session, *, start: date | None = None, end: date | None = None
+    session: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    company_ids: Collection[int] | None = None,
 ) -> dict[str, int]:
-    query = _apply_date_range(_enrich_query(), start, end)
+    query = _apply_scope(_enrich_query(), start, end, company_ids)
     runs = session.exec(query).all()
     calls: dict[str, int] = {}
     for run in runs:
@@ -279,9 +323,13 @@ def calls_by_tool(
 
 
 def cost_by_kind(
-    session: Session, *, start: date | None = None, end: date | None = None
+    session: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    company_ids: Collection[int] | None = None,
 ) -> dict[str, float]:
-    query = _apply_date_range(select(RunLog), start, end)
+    query = _apply_scope(select(RunLog), start, end, company_ids)
     runs = session.exec(query).all()
     costs: dict[str, float] = {}
     for run in runs:
@@ -290,9 +338,14 @@ def cost_by_kind(
 
 
 def cost_trend(
-    session: Session, *, start: date | None = None, end: date | None = None, limit: int = 200
+    session: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    company_ids: Collection[int] | None = None,
+    limit: int = 200,
 ) -> list[TrendPoint]:
-    query = _apply_date_range(_enrich_query(), start, end)
+    query = _apply_scope(_enrich_query(), start, end, company_ids)
     runs = session.exec(query.order_by(col(RunLog.id).desc()).limit(limit)).all()
     points = []
     for run in reversed(runs):
@@ -312,9 +365,13 @@ def cost_trend(
 
 
 def daily_outcomes(
-    session: Session, *, start: date | None = None, end: date | None = None
+    session: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    company_ids: Collection[int] | None = None,
 ) -> list[DayOutcome]:
-    query = _apply_date_range(_enrich_query(), start, end)
+    query = _apply_scope(_enrich_query(), start, end, company_ids)
     days: dict[date, list[float]] = {}  # day -> [runs, failures, cost_usd]
     for run in session.exec(query.order_by(col(RunLog.id))).all():
         totals = days.setdefault(run.started_at.date(), [0, 0, 0.0])

@@ -112,7 +112,7 @@ def ingest_companies(
 
 def backfill_active_officers(session: Session, client: CompaniesHouseClient) -> dict[str, int]:
     """Fetch `active_officer_count` for companies that don't have one yet (e.g. ingested before
-    the D34 pre-screen existed), so `passes_prescreen` can be applied to them."""
+    the count was stored)."""
     stats = {"checked": 0, "updated": 0}
     companies = session.exec(select(Company).where(col(Company.active_officers).is_(None))).all()
     for company in companies:

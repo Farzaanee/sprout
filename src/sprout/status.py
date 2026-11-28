@@ -4,7 +4,8 @@ A step's state comes from the company's rows of one `RunKind`; nothing is stored
 selects work from it, and later phases (Phase 7 reads, Phase 8 cooldown) reuse it.
 """
 
-from collections.abc import Iterable, Sequence
+from collections import Counter
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -25,6 +26,7 @@ STEP_KINDS: dict[str, RunKind] = {
 
 StepState = Literal["fresh", "stale", "never", "failed", "exhausted", "running"]
 
+STATE_ORDER: tuple[StepState, ...] = ("fresh", "stale", "never", "failed", "exhausted", "running")
 ABANDONED_MESSAGE = "abandoned: process ended before the run finished"
 _NEEDED_STATES: frozenset[str] = frozenset({"never", "stale", "failed"})
 
@@ -175,6 +177,25 @@ def company_statuses(
             steps[step] = _step_status(step, rows[company_id][step], policy=policy, now=now)
         result[company_id] = CompanyStatus(company_id, steps, costs[company_id])
     return result
+
+
+def enrich_state_counts(
+    session: Session,
+    company_ids: Collection[int] | None,
+    policy: StatusPolicy,
+    now: datetime,
+) -> dict[str, int]:
+    """Companies per `enrich` step state, in `STATE_ORDER`, zero-count states omitted. None means
+    every company."""
+    ids = (
+        list(company_ids)
+        if company_ids is not None
+        else list(session.exec(select(Company.id)).all())
+    )
+    counts = Counter(
+        s.steps["enrich"].state for s in company_statuses(session, ids, policy, now).values()
+    )
+    return {state: counts[state] for state in STATE_ORDER if counts[state]}
 
 
 def recently_without_website(

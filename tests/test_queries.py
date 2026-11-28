@@ -406,6 +406,54 @@ def _add_officer(session, company_id, name, role, birth_year=None, nationality=N
     session.commit()
 
 
+def test_candidate_score_counts_are_ordered_and_can_be_limited(session):
+    scores = [2, 4, 2, 5]
+    companies = []
+    for number, score in enumerate(scores, start=1):
+        company = _add(session, str(number), f"Co {number} Ltd", date(2020, 1, 1))
+        company.candidate_score = score
+        session.add(company)
+        companies.append(company)
+    session.commit()
+
+    assert queries.candidate_score_counts(session) == {2: 2, 4: 1, 5: 1}
+    assert queries.candidate_score_counts(session, {companies[0].id, companies[1].id}) == {
+        2: 1,
+        4: 1,
+    }
+
+
+def test_website_screen_counts_use_each_companys_newest_completed_screen(session):
+    def screen(company, days_ago, website, status="ok"):
+        session.add(
+            RunLog(
+                kind=RunKind.COMPANY_WEBSITE_SCREEN.value,
+                company_id=company.id,
+                started_at=utcnow() - timedelta(days=days_ago),
+                status=status,
+                stats={"website": website},
+            )
+        )
+
+    a, b, c, d, _never = (
+        _add(session, str(n), f"Co {n} Ltd", date(2020, 1, 1)) for n in range(1, 6)
+    )
+    screen(a, 5, None)
+    screen(a, 1, "https://a.example")  # newest wins over an older "none"
+    screen(b, 3, None)
+    screen(c, 2, "https://c.example")
+    screen(c, 1, None, status="error")  # a failed screen is ignored
+    screen(d, 1, "https://d.example")
+    session.commit()
+
+    assert queries.website_screen_counts(session) == {"Website found": 3, "No website found": 1}
+    assert queries.website_screen_counts(session, {b.id, c.id}) == {
+        "Website found": 1,
+        "No website found": 1,
+    }
+    assert queries.website_screen_counts(session, set()) == {}
+
+
 def test_officer_age_distribution_bins_by_birth_year(session):
     company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
     this_year = date.today().year
@@ -466,6 +514,47 @@ def test_counts_facts_keywords_and_years(session):
     assert [f.field for f in queries.company_facts(session, company.id)] == ["hq"]
     assert queries.keyword_counts(session)["neural"] == 1
     assert queries.incorporation_year_counts(session) == {2020: 1}
+
+
+def test_counts_can_be_scoped_to_companies(session):
+    scoped = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    other = _add(session, "2", "Plain AI Ltd", date(2020, 1, 1))
+    for company in (scoped, other):
+        _fact(session, company, "hq", "London")
+        session.add(RunLog(kind="company_enrich", company_id=company.id, status="ok"))
+    session.add(RunLog(kind="companies_ingest", status="ok"))  # batch run, no company
+    session.commit()
+
+    assert queries.count_rows(session, {scoped.id}) == {
+        "companies": 1,
+        "facts": 1,
+        "news": 0,
+        "runs": 1,
+    }
+    assert queries.run_kind_counts(session, {scoped.id}) == {"company_enrich": 1}
+    assert queries.run_kind_company_counts(session, {scoped.id}) == {"company_enrich": 1}
+    assert queries.keyword_counts(session, {other.id}).keys() == set(other.matched_keywords)
+    assert queries.run_kind_counts(session)["companies_ingest"] == 1
+
+
+def test_run_counts_can_be_limited_to_run_days(session):
+    company = _add(session, "1", "Neural Robotics Ltd", date(2020, 1, 1))
+    for day in (10, 20):
+        session.add(
+            RunLog(
+                kind="company_enrich",
+                company_id=company.id,
+                status="ok",
+                started_at=datetime(2026, 11, day, 9, tzinfo=UTC),
+            )
+        )
+    session.commit()
+    window = {"start": date(2026, 11, 15), "end": None}
+
+    assert queries.count_rows(session)["runs"] == 2
+    assert queries.count_rows(session, run_start=window["start"])["runs"] == 1
+    assert queries.run_kind_counts(session, **window) == {"company_enrich": 1}
+    assert queries.run_kind_company_counts(session, start=date(2026, 12, 1)) == {}
 
 
 def test_latest_companies_ingest_run_skips_backfill_runs(session):
@@ -692,16 +781,22 @@ def test_companies_house_url():
     assert queries.companies_house_url(None) is None
 
 
-def test_run_window_keeps_companies_ingested_or_enriched_in_it(session):
+def test_run_window_keeps_companies_ingested_or_run_in_it(session):
     ingested = _add(session, "1", "Ingested Ltd", date(2020, 1, 1))
     enriched = _add(session, "2", "Enriched Ltd", date(2020, 1, 1))
+    news_only = _add(session, "4", "News Ltd", date(2020, 1, 1))
     other = _add(session, "3", "Other Ltd", date(2020, 1, 1))
     ingested.first_seen_at = datetime(2026, 11, 23, 9, tzinfo=UTC)
-    enriched.first_seen_at = other.first_seen_at = datetime(2026, 11, 1, 9, tzinfo=UTC)
-    for company, day in ((enriched, 24), (other, 20)):
+    for company in (enriched, news_only, other):
+        company.first_seen_at = datetime(2026, 11, 1, 9, tzinfo=UTC)
+    for company, kind, day in (
+        (enriched, RunKind.COMPANY_ENRICH, 24),
+        (news_only, RunKind.COMPANY_NEWS_MATCH, 28),
+        (other, RunKind.COMPANY_ENRICH, 20),
+    ):
         session.add(
             RunLog(
-                kind=RunKind.COMPANY_ENRICH.value,
+                kind=kind.value,
                 company_id=company.id,
                 started_at=datetime(2026, 11, day, 9, tzinfo=UTC),
             )
@@ -711,6 +806,7 @@ def test_run_window_keeps_companies_ingested_or_enriched_in_it(session):
 
     assert queries.run_window_company_ids(session, None, None) is None
     assert queries.run_window_company_ids(session, *window) == {ingested.id, enriched.id}
-    assert queries.run_date_range(session) == (date(2026, 11, 1), date(2026, 11, 24))
+    assert queries.run_window_company_ids(session, date(2026, 11, 28), None) == {news_only.id}
+    assert queries.run_date_range(session) == (date(2026, 11, 1), date(2026, 11, 28))
     found = queries.search_companies(session, run_from=window[0], run_to=window[1])
     assert {c.name for c in found.companies} == {"Ingested Ltd", "Enriched Ltd"}

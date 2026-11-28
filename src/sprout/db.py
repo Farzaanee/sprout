@@ -63,7 +63,7 @@ class Company(DatabaseModel, table=True):
     matched_keywords: list[str] = Field(
         default_factory=list, sa_column=Column(JSON, nullable=False)
     )
-    # Active officer count at last ingest (D34 pre-screen input); None if never fetched.
+    # Active officer count at last ingest; None if never fetched. Shown in the dashboard only.
     active_officers: int | None = None
     first_seen_at: datetime = Field(default_factory=utcnow)
     last_seen_at: datetime = Field(default_factory=utcnow)

@@ -33,6 +33,9 @@ fpush:
 	git commit --amend --no-edit
 	git push -f
 
+orchestrator:
+	uv run python -m sprout.orchestrator --limit 10
+
 eval-rec:
 	uv run python -m evals.run_evals --record
 

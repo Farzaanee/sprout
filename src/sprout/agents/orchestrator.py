@@ -29,10 +29,9 @@ from sprout.agents.enrich import CompanyNotFound, enrich_with_result, resolve_co
 from sprout.agents.loop import Budget, LoopResult, MessagesClient, make_client
 from sprout.agents.news import NEWS_BUDGET, collect_with_result
 from sprout.agents.website import SCREEN_BUDGET, screen_website
-from sprout.candidates import passes_prescreen
 from sprout.config import MissingConfigError, Settings, get_settings
 from sprout.costs import BatchBudget
-from sprout.db import Company, OfficerRow, RunKind, RunLog, get_engine, init_db, logged_run
+from sprout.db import Company, RunKind, RunLog, get_engine, init_db, logged_run
 from sprout.failures import FailureCategory, failure_category_for
 from sprout.sources import companies_house, web
 from sprout.sources.companies_house import CompaniesHouseClient
@@ -302,26 +301,17 @@ def select_working_set(
     *,
     limit: int,
     only: Sequence[str] = (),
-    prescreen: bool = True,
     ch: CompaniesHouseClient | None = None,
 ) -> list[int]:
-    """Pre-screen survivors by `candidate_score` then id, first `limit` (D39), so the same limit
-    always names the same set and a small pilot is a prefix of a bigger run. `only` bypasses the
-    pre-screen and the limit; targets not in the database are added through Companies House."""
+    """Companies by `candidate_score` then id, first `limit` (D39), so the same limit always names
+    the same set and a small pilot is a prefix of a bigger run. `only` bypasses the ranking and
+    the limit; targets not in the database are added through Companies House."""
     if only:
         ids = [resolve_company(session, target, ch).id for target in only]
         return [i for i in dict.fromkeys(ids) if i is not None]
-    rows = session.exec(select(Company.id, Company.candidate_score, Company.active_officers)).all()
-    director_ids = set(
-        session.exec(select(OfficerRow.company_id).where(OfficerRow.role == "director")).all()
-    )
-    survivors = [
-        r
-        for r in rows
-        if not prescreen or passes_prescreen(r.active_officers, r.id in director_ids)
-    ]
-    survivors.sort(key=lambda r: (-r.candidate_score, r.id))
-    return [r.id for r in survivors[:limit]]
+    rows = session.exec(select(Company.id, Company.candidate_score)).all()
+    rows.sort(key=lambda r: (-r.candidate_score, r.id))
+    return [r.id for r in rows[:limit]]
 
 
 def order_for_work(
@@ -513,7 +503,6 @@ async def run(
                 session,
                 limit=args.limit,
                 only=args.only,
-                prescreen=not args.no_prescreen,
                 ch=_open_companies_house(settings, stack),
             )
         except (CompanyNotFound, FetchError, ValueError) as exc:
@@ -616,9 +605,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         nargs="+",
         default=(),
         metavar="NAME_OR_NUMBER",
-        help="work on these companies only (skips the pre-screen and --limit)",
+        help="work on these companies only (skips the ranking and --limit)",
     )
-    parser.add_argument("--no-prescreen", action="store_true", help="skip the D34 officer filter")
     parser.add_argument(
         "--force",
         action="store_true",

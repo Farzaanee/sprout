@@ -72,8 +72,6 @@ def test_candidate_pool_explains_discovery_and_enrichment_screens(monkeypatch, t
         for term in ("artificial intelligence", "machine learning", "robotics", "AI", "analytics")
     )
     assert "tech SIC code" in captions
-    assert "at least two active officers" in captions
-    assert "at least one director" in captions
     assert "official website" in captions
     assert "profile enrichment runs only after that check succeeds" in captions
 
@@ -91,6 +89,24 @@ def test_candidate_pool_metrics_count_enriched_subset(monkeypatch, tmp_path):
                 session, hit, assess(hit.name, hit.sic_codes, incorporated=hit.incorporated)
             )
             company.category = category
+            if category:
+                session.add(
+                    RunLog(
+                        kind="company_website_screen",
+                        company_id=company.id,
+                        started_at=datetime.now(UTC),
+                        status="ok",
+                        stats={"website": "https://example.com"},
+                    )
+                )
+                session.add(
+                    RunLog(
+                        kind="company_enrich",
+                        company_id=company.id,
+                        started_at=datetime.now(UTC),
+                        status="ok",
+                    )
+                )
             save_fact(
                 session,
                 company.id,
@@ -110,6 +126,98 @@ def test_candidate_pool_metrics_count_enriched_subset(monkeypatch, tmp_path):
     assert metrics["Facts (candidate pool)"] == "2"
     assert metrics["Facts (enriched)"] == "1"
     assert metrics["News items (enriched)"] == "1"
+    assert "Enrichment status (pool)" in _subheaders(at)
+    assert "Website search outcome (pool)" in _subheaders(at)
+    assert "Candidate score distribution (pool)" in _subheaders(at)
+
+
+def test_candidate_table_follows_the_sidebar_filters(monkeypatch, tmp_path):
+    engine = get_engine(tmp_path / "app.db")
+    init_db(engine)
+    with Session(engine) as session:
+        for number, name in (("1", "Neural Robotics Ltd"), ("2", "Plain AI Ltd")):
+            hit = CompanyHit(number, name, "active", date(2020, 1, 1), ("62012",), "London")
+            upsert_company(
+                session, hit, assess(hit.name, hit.sic_codes, incorporated=hit.incorporated)
+            )
+        session.commit()
+
+    at = _app(monkeypatch, tmp_path).run()
+    assert "2 companies match" in " ".join(c.value for c in at.caption)
+
+    at.sidebar.text_input[0].set_value("neural").run()
+    captions = " ".join(c.value for c in at.caption)
+    assert "1 companies match the sidebar filters" in captions
+
+
+def test_progress_and_observability_follow_the_sidebar_filters(monkeypatch, tmp_path):
+    engine = get_engine(tmp_path / "app.db")
+    init_db(engine)
+    with Session(engine) as session:
+        for number, name in (("1", "Neural Robotics Ltd"), ("2", "Plain AI Ltd")):
+            hit = CompanyHit(number, name, "active", date(2020, 1, 1), ("62012",), "London")
+            company, _ = upsert_company(
+                session, hit, assess(hit.name, hit.sic_codes, incorporated=hit.incorporated)
+            )
+            session.add(
+                RunLog(
+                    kind="company_enrich",
+                    company_id=company.id,
+                    started_at=datetime.now(UTC),
+                    status="error",
+                    failure_category="refusal",
+                )
+            )
+        session.commit()
+
+    at = _app(monkeypatch, tmp_path).run()
+    metrics = {m.label: m.value for m in at.metric}
+    assert (metrics["Candidate companies"], metrics["Logged runs"], metrics["Runs"]) == (
+        "2",
+        "2",
+        "2",
+    )
+
+    at.sidebar.text_input[0].set_value("neural").run()
+    metrics = {m.label: m.value for m in at.metric}
+    assert (metrics["Candidate companies"], metrics["Logged runs"], metrics["Runs"]) == (
+        "1",
+        "1",
+        "1",
+    )
+
+    at.sidebar.text_input[0].set_value("zzz").run()
+    assert "No pipeline runs for the companies matching the sidebar filters." in [
+        i.value for i in at.info
+    ]
+
+
+def test_observability_limits_runs_to_the_sidebar_run_dates(monkeypatch, tmp_path):
+    engine = get_engine(tmp_path / "app.db")
+    init_db(engine)
+    with Session(engine) as session:
+        hit = CompanyHit("1", "Neural Robotics Ltd", "active", date(2020, 1, 1), ("62012",), "L")
+        company, _ = upsert_company(
+            session, hit, assess(hit.name, hit.sic_codes, incorporated=hit.incorporated)
+        )
+        for day in (1, 20):
+            session.add(
+                RunLog(
+                    kind="company_enrich",
+                    company_id=company.id,
+                    started_at=datetime(2026, 11, day, 9, tzinfo=UTC),
+                    status="ok",
+                )
+            )
+        session.commit()
+
+    at = _app(monkeypatch, tmp_path).run()
+    assert {m.label: m.value for m in at.metric}["Runs"] == "2"
+
+    day = date(2026, 11, 20)
+    at.sidebar.date_input[0].set_value((day, day)).run()
+    metrics = {m.label: m.value for m in at.metric}
+    assert (metrics["Runs"], metrics["Logged runs"]) == ("1", "1")
 
 
 HOSTILE = (
@@ -168,9 +276,9 @@ def _subheaders(at) -> list[str]:
     return [s.value for s in at.subheader]
 
 
-def test_observability_empty_points_at_the_enrich_command(monkeypatch, tmp_path):
+def test_observability_empty_points_at_the_pipeline_commands(monkeypatch, tmp_path):
     at = _observability(monkeypatch, tmp_path)
-    assert any("uv run python -m sprout.enrich NAME_OR_NUMBER" in i.value for i in at.info)
+    assert any("uv run python -m sprout.orchestrator" in i.value for i in at.info)
     assert "Failures" not in _subheaders(at)
     assert "Runs" not in {m.label for m in at.metric}
 

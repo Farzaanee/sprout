@@ -72,9 +72,9 @@ flowchart TB
 
 ### Website screen
 
-Before each due enrichment, the orchestrator and single-company CLI search for the company's official website. A website is accepted only after fetching the page and matching a verbatim identity quote against its visible text. The model judges whether the page belongs to the legal entity, so identity is not guaranteed. The screen stores the website as a sourced fact and records its result and cost in `company_website_screen`. Enrichment receives the recorded website as untrusted context.
+Before each due enrichment, the orchestrator and single-company CLI search for the company's official website. A website is accepted only after fetching the page and matching a verbatim identity quote against its visible text. During the screen, `fetch_page` only accepts a URL on a site that `web_search` already returned (host compared without `www.`), so the model cannot fetch a domain it made up; a refused fetch is not a failure. The model judges whether the page belongs to the legal entity, so identity is not guaranteed. The screen stores the website as a sourced fact and records its result and cost in `company_website_screen`. Enrichment receives the recorded website as untrusted context.
 
-An unconfirmed website produces `skipped_no_website`, without enrichment or downstream steps. A failed search or fetch cannot establish absence and produces a retryable failure instead. A skipped company remains in the ranked working set, is screened again on the next invocation and is excluded from the success-rate denominator. `--only`, `--no-prescreen` and `--force` do not bypass the website screen. `--dry-run` does not screen and its estimate includes the screen for each due enrichment. Screen budgets and model routing are in [cross-cutting](../4.%20cross-cutting.md#9-phase-6-agent-caps-and-run-budget).
+An unconfirmed website produces `skipped_no_website`, without enrichment or downstream steps. A failed search or fetch cannot establish absence and produces a retryable failure instead. A skipped company remains in the ranked working set, is screened again on the next invocation and is excluded from the success-rate denominator. `--only` and `--force` do not bypass the website screen. `--dry-run` does not screen and its estimate includes the screen for each due enrichment. Screen budgets and model routing are in [cross-cutting](../4.%20cross-cutting.md#9-phase-6-agent-caps-and-run-budget).
 
 The low-level enrichment functions remain available for controlled evals, which intentionally include non-startup controls and do not use the production screen.
 
@@ -119,7 +119,7 @@ RunContext(client, settings, batch: BatchBudget, gate, stop: threading.Event, po
 StepOutcome(step, state: ok|failed|skipped_fresh|skipped_no_website|skipped_budget|stopped, cost_usd, failure_category, error)
 CompanyOutcome(company_id, result: ok|partial|failed|gave_up|skipped_budget|skipped_no_website|stopped, steps, cost_usd)
 process_company(worker, company_id, steps, ctx, *, force=False) -> CompanyOutcome   # sync, never raises, never prints
-select_working_set(session, *, limit, only, prescreen, ch) -> list[int]
+select_working_set(session, *, limit, only, ch) -> list[int]
 order_for_work(ids, statuses, steps, *, force) -> list[int]
 async run(settings, args, *, client=None, stop=None) -> RunSummary(exit_code, text, error, stats); main(argv) -> int
 ```
@@ -174,7 +174,7 @@ Judge a field by its winning row only (`sprout.queries.get_profile` does this an
 
 Status is derived from `run_log` (D32, [data model](../2.%20data-model.md#per-company-status-derived-not-stored)). Constants live in `StatusPolicy`. Decisions: D39.
 
-**Working set.** Candidates are companies with `passes_prescreen(active_officers)` (D34), ranked by `candidate_score` descending then `id`. `--limit N` takes the first N: it bounds the working set, not the amount of new work, so rerunning with the same N completes the same set instead of growing it, and a pilot of 12 is a prefix of the full 50. `--only NAME_OR_NUMBER...` bypasses the officer pre-screen and the limit (companies not yet in the DB are added through `resolve_company`; an unresolvable target exits 2); `--no-prescreen` disables the officer pre-screen.
+**Working set.** Candidates are all companies in the database, ranked by `candidate_score` descending then `id`. `--limit N` takes the first N: it bounds the working set, not the amount of new work, so rerunning with the same N completes the same set instead of growing it, and a pilot of 12 is a prefix of the full 50. `--only NAME_OR_NUMBER...` bypasses the ranking and the limit (companies not yet in the DB are added through `resolve_company`; an unresolvable target exits 2).
 
 **Per step.** `StepStatus.state` for a step with kind K:
 
@@ -219,7 +219,7 @@ flowchart TD
     K -- ok --> L{Another pipeline_run<br/>'running' and not timed out?}
     L -- yes, no --force --> X2
     L -- no --> R[reap_abandoned: stale running rows<br/>become internal_error]
-    R --> W["select_working_set<br/>pre-screen: active_officers >= min AND a director<br/>sort by candidate_score desc, id<br/>take first --limit<br/>(--only bypasses both and can add via Companies House)"]
+    R --> W["select_working_set<br/>sort by candidate_score desc, id<br/>take first --limit<br/>(--only bypasses both and can add via Companies House)"]
     W --> ST[company_statuses: per step state<br/>derived from run_log<br/>never / stale / failed / exhausted / fresh / running]
     ST --> OR[order_for_work: failed retries, partial,<br/>never-enriched, stale, nothing to do last]
     OR --> DR{--dry-run?}
@@ -292,7 +292,7 @@ The corrected picture is: orchestrator → (asks) `status.py` → (reads) `run_l
 
 ## CLI
 
-`python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max-total-usd 5.00] [--stale-days 30] [--news-stale-days 7] [--no-website-days 90] [--steps enrich,news] [--only NAME_OR_NUMBER ...] [--no-prescreen] [--force] [--dry-run]`
+`python -m sprout.orchestrator [--limit 50] [--concurrency 4] [--max-total-usd 5.00] [--stale-days 30] [--news-stale-days 7] [--no-website-days 90] [--steps enrich,news] [--only NAME_OR_NUMBER ...] [--force] [--dry-run]`
 
 - `--dry-run` selects, prints each company's status, needed steps and an estimate (`ESTIMATED_STEP_USD` in `orchestrator.py`, planning means), and spends nothing; it needs no API key and takes no run lock.
 - `--steps` restricts which steps may run (for example `news` alone).
@@ -301,6 +301,25 @@ The corrected picture is: orchestrator → (asks) `status.py` → (reads) `run_l
 - `--max-total-usd` is the single cap over enrichment and news spend. The default US$5.00 is the acceptance ceiling.
 - Output: one stderr line per finished company (result, per-step state and cost), a final summary on stdout, and one batch `run_log` row, kind `pipeline_run`, `company_id` NULL, `stats`: `limit`, `concurrency`, `max_total_usd`, `selected`, `results` (counts per company result), `spent_usd`, `by_kind`, `rate_limit_trips`, `incomplete_profiles` (company id to missing parts, ok companies only), `stopped_early` (`interrupted`, `rate_limited`, `budget` or null). The spend key is `spent_usd`, **not** `cost_usd`, because the Observability queries sum `stats.cost_usd` over every kind and would count the batch twice.
 - Exit codes: 0 when not stopped early and `ok / eligible working set >= 0.85` (or no companies are eligible); 1 below that or stopped early (budget, rate limit, interrupt); 2 for configuration (no Anthropic key, another run in progress, unresolvable `--only` target). Phase 9 maps these to job outcomes.
+
+### `sprout.enrich` versus `sprout.orchestrator`
+
+Both run the same enrichment agent (`enrich_with_result`). The orchestrator adds selection, status and concurrency around it.
+
+| | `python -m sprout.enrich` | `python -m sprout.orchestrator` |
+|---|---|---|
+| Purpose | Enrich the companies you name, one by one: spot checks, debugging, wipe and redo | Run the pipeline over a ranked working set: real batches |
+| Choosing companies | Names or Companies House numbers on the command line | The first `--limit N` by `candidate_score` then `id`, or `--only` to name them |
+| Steps | Website screen, then enrichment; no news step | Website screen, enrichment and news; `--steps` restricts them |
+| Finished work | Always runs, even for a fresh company | Skips fresh steps (30 days for enrichment, 7 for news), retries failed ones, stops after 3 failed attempts; `--force` overrides |
+| Concurrency | Sequential | Worker pool, `--concurrency` (default 4) |
+| Spend cap | `--max-total-usd`, none unless given | `--max-total-usd`, default US$5.00 |
+| Preview | None | `--dry-run` |
+| Clean re-enrichment | `--reset` deletes the company's facts, funding rounds and category first | None; `--force` re-runs but keeps old facts |
+| Other flags | `--show`, `--strong`, `--effort`, `--max-usd`, `--max-iterations` | `--stale-days`, `--news-stale-days`, `--no-website-days` |
+| Run record | One `company_enrich` row per attempt | The same per-step rows plus one `pipeline_run` row; one run at a time (lock) |
+
+A company added by number has `candidate_score` 0 and is never picked by `--limit`; enrich it with `--only` or `sprout.enrich`.
 
 ## Evaluating the news agent (D28)
 
@@ -352,7 +371,7 @@ No table or column changes (D10 is not triggered): the Phase 6 data lands in exi
 
 ## Known weak spots and open items
 
-- **Pre-screen too loose (A1, D34):** validated live and found too loose, not too strict; details in [implementation-notes](../../implementation-notes.md#d34-pre-screen-validation-a1). Whether to tighten the pool is undecided.
+- **Noisy candidate pool (A1, D34):** validated live and found too loose; details in [implementation-notes](../../implementation-notes.md#candidate-pool-quality-a1). Whether to tighten the pool is undecided.
 - **News:** cross-outlet coverage of one event can still duplicate (same-date exact match is collapsed in code; different dates are not), and some items have no published date.
 - **`profile_gaps`** treats an explicit "not disclosed" (NULL) fact as a gap, so most ok companies are reported incomplete.
 - **Exercised live since:** a single and a double SIGINT mid-run, and the 429 gate (simulated client). See [risks.md](../5.%20risks.md).

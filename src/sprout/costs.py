@@ -132,10 +132,10 @@ class BatchBudget:
 
 
 def enrichment_batch_size(
-    survivors_after_prescreen: int,
+    candidates: int,
     *,
     budget_usd: Decimal = BUDGET_PER_RUN_USD,
     cost_per_company_usd: Decimal = COST_PER_COMPANY_USD,
 ) -> int:
-    """N (D34): how many pre-screened candidates one run can afford to enrich."""
-    return min(survivors_after_prescreen, int(budget_usd / cost_per_company_usd))
+    """N (D34): how many candidates one run can afford to enrich."""
+    return min(candidates, int(budget_usd / cost_per_company_usd))

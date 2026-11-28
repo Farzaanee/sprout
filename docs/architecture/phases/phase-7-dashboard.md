@@ -61,7 +61,7 @@ The committed snapshot (`data/sprout_snapshot.db`, also the default when `data/s
 | `app/companies.py` | `render_companies(filters)`: filtered list (`CardRow`) and the company detail; `FIELDS` is the display allowlist |
 | `app/news_feed.py` | `render_news_feed(filters)`; `FeedItem` is the cached plain data |
 
-Tabs, in order: Overview, Companies, News feed, Candidate pool, Progress, Observability. The sidebar filters apply to the first three; the sidebar says so. The database picker is at the top of the sidebar, so every tab reads the same database in the same run.
+Tabs, in order: Overview, Companies, News feed, Candidate pool, Progress, Observability. The sidebar filters apply to every tab; the sidebar says so. Overview, Companies and News feed use the enriched companies that match (`filtered`); Candidate pool, Progress and Observability scope their counts, charts and run tables to every matching candidate, enriched or not (`matching_company_ids`, `None` when no filter is set). With a filter set, runs without a company (ingest and `pipeline_run` batches) and runs of companies with no value for a Category, Stage or Funding filter drop out. The database picker is at the top of the sidebar, so every tab reads the same database in the same run.
 
 No new package or framework: tabs, not Streamlit's multi-page routing, because the existing tests, the `streamlit_app.py` entry point and the Streamlit Cloud deployment already assume one script.
 

@@ -10,7 +10,7 @@ import json
 import statistics
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from sqlmodel import Session, col, func, select
@@ -162,11 +162,19 @@ def _latest_funding_amounts(session: Session) -> dict[int, int | None]:
     return amounts
 
 
+PIPELINE_RUN_KINDS = (
+    RunKind.COMPANY_WEBSITE_SCREEN.value,
+    RunKind.COMPANY_ENRICH.value,
+    RunKind.COMPANY_NEWS_MATCH.value,
+)
+
+
 def run_window_company_ids(
     session: Session, run_from: date | None, run_to: date | None
 ) -> set[int] | None:
-    """Companies first ingested, or enriched by a `company_enrich` run, on a day within the
-    window (UTC days). None when no window is set, meaning no restriction."""
+    """Companies first ingested, or processed by a pipeline run (website screen, enrichment or
+    news, any outcome), on a day within the window (UTC days). None when no window is set,
+    meaning no restriction."""
     if run_from is None and run_to is None:
         return None
     ids: set[int] = set()
@@ -174,7 +182,7 @@ def run_window_company_ids(
         (select(Company.id, Company.first_seen_at), None),
         (
             select(RunLog.company_id, RunLog.started_at),
-            RunLog.kind == RunKind.COMPANY_ENRICH.value,
+            col(RunLog.kind).in_(PIPELINE_RUN_KINDS),
         ),
     )
     for query, condition in sources:
@@ -193,14 +201,14 @@ def run_window_company_ids(
 
 
 def run_date_range(session: Session) -> tuple[date, date] | None:
-    """Earliest and latest ingest or enrichment day; None when the pool is empty."""
+    """Earliest and latest ingest or pipeline-run day; None when the pool is empty."""
     days = [
         when.date()
         for when in session.exec(select(Company.first_seen_at)).all()
         if when is not None
     ]
-    enrich = select(RunLog.started_at).where(RunLog.kind == RunKind.COMPANY_ENRICH.value)
-    days += [when.date() for when in session.exec(enrich).all() if when is not None]
+    runs = select(RunLog.started_at).where(col(RunLog.kind).in_(PIPELINE_RUN_KINDS))
+    days += [when.date() for when in session.exec(runs).all() if when is not None]
     return (min(days), max(days)) if days else None
 
 
@@ -228,12 +236,37 @@ def get_profile(session: Session, company_id: int) -> Profile | None:
     )
 
 
-def count_rows(session: Session, company_ids: Collection[int] | None = None) -> dict[str, int]:
+def _in_run_days(query: Any, start: date | None, end: date | None) -> Any:
+    """Limit a `RunLog` query to runs started within the UTC days `start` to `end`."""
+    if start is not None:
+        query = query.where(RunLog.started_at >= datetime.combine(start, time.min, tzinfo=UTC))
+    if end is not None:
+        query = query.where(RunLog.started_at <= datetime.combine(end, time.max, tzinfo=UTC))
+    return query
+
+
+def count_rows(
+    session: Session,
+    company_ids: Collection[int] | None = None,
+    *,
+    run_start: date | None = None,
+    run_end: date | None = None,
+) -> dict[str, int]:
+    """Row counts; with `company_ids`, only rows of those companies (runs and news without a
+    company are left out). `run_start`/`run_end` limit the run count to those days."""
+    id_columns = {
+        Company: Company.id,
+        Fact: Fact.company_id,
+        CompanyNewsRow: CompanyNewsRow.company_id,
+        RunLog: RunLog.company_id,
+    }
+
     def count(model: Any) -> int:
         query = select(func.count()).select_from(model)
-        if company_ids is not None and model in (Company, Fact):
-            id_col = Company.id if model is Company else Fact.company_id
-            query = query.where(col(id_col).in_(list(company_ids)))
+        if company_ids is not None:
+            query = query.where(col(id_columns[model]).in_(list(company_ids)))
+        if model is RunLog:
+            query = _in_run_days(query, run_start, run_end)
         return session.exec(query).one()
 
     return {
@@ -244,22 +277,40 @@ def count_rows(session: Session, company_ids: Collection[int] | None = None) -> 
     }
 
 
-def run_kind_counts(session: Session) -> dict[str, int]:
+def run_kind_counts(
+    session: Session,
+    company_ids: Collection[int] | None = None,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> dict[str, int]:
     """Logged runs per current `RunKind`, largest first. Kinds of removed agents (old classifier
-    and verifier rows) are left out."""
+    and verifier rows) are left out. With `company_ids`, only runs of those companies; `start`
+    and `end` limit the runs to those days."""
     current = {kind.value for kind in RunKind}
-    rows = session.exec(select(RunLog.kind, func.count()).group_by(RunLog.kind)).all()
+    query = select(RunLog.kind, func.count()).group_by(RunLog.kind)
+    if company_ids is not None:
+        query = query.where(col(RunLog.company_id).in_(list(company_ids)))
+    rows = session.exec(_in_run_days(query, start, end)).all()
     return dict(sorted((r for r in rows if r[0] in current), key=lambda row: (-row[1], row[0])))
 
 
-def run_kind_company_counts(session: Session) -> dict[str, int]:
+def run_kind_company_counts(
+    session: Session,
+    company_ids: Collection[int] | None = None,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> dict[str, int]:
     """Distinct companies touched per run kind. An ingest run is a batch with no company_id, so
-    it reports every company in the database; other batch kinds are 0."""
-    rows = session.exec(
-        select(RunLog.kind, func.count(func.distinct(RunLog.company_id))).group_by(RunLog.kind)
-    ).all()
-    counts = dict(rows)
-    if RunKind.COMPANIES_INGEST.value in counts:
+    it reports every company in the database; other batch kinds are 0. With `company_ids`, only
+    runs of those companies are counted and batch runs drop out; `start` and `end` limit the
+    runs to those days."""
+    query = select(RunLog.kind, func.count(func.distinct(RunLog.company_id))).group_by(RunLog.kind)
+    if company_ids is not None:
+        query = query.where(col(RunLog.company_id).in_(list(company_ids)))
+    counts = dict(session.exec(_in_run_days(query, start, end)).all())
+    if company_ids is None and RunKind.COMPANIES_INGEST.value in counts:
         counts[RunKind.COMPANIES_INGEST.value] = session.exec(
             select(func.count()).select_from(Company)
         ).one()
@@ -278,12 +329,25 @@ def latest_companies_ingest_run(session: Session) -> RunLog | None:
     return next((run for run in runs if "searched" in run.stats), None)
 
 
-def keyword_counts(session: Session) -> dict[str, int]:
+def keyword_counts(session: Session, company_ids: Collection[int] | None = None) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for keywords in session.exec(select(Company.matched_keywords)).all():
+    query = select(Company.matched_keywords)
+    if company_ids is not None:
+        query = query.where(col(Company.id).in_(list(company_ids)))
+    for keywords in session.exec(query).all():
         for keyword in keywords:
             counts[keyword] = counts.get(keyword, 0) + 1
     return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
+def candidate_score_counts(
+    session: Session, company_ids: Collection[int] | None = None
+) -> dict[int, int]:
+    """Companies per `candidate_score`, lowest score first."""
+    query = select(Company.candidate_score, func.count()).group_by(Company.candidate_score)
+    if company_ids is not None:
+        query = query.where(col(Company.id).in_(list(company_ids)))
+    return dict(sorted(session.exec(query).all()))
 
 
 def incorporation_year_counts(
@@ -422,11 +486,33 @@ def valuation_bin_counts(
     return counts
 
 
+def website_screen_counts(
+    session: Session, company_ids: Collection[int] | None = None
+) -> dict[str, int]:
+    """Companies by the outcome of their newest completed website screen: a website returned or
+    none. A screen that errored says nothing about the company and a company never screened is
+    not counted; zero-count outcomes are omitted."""
+    query = select(
+        RunLog.company_id,
+        RunLog.started_at,
+        RunLog.id,
+        func.json_extract(col(RunLog.stats), "$.website"),
+    ).where(RunLog.kind == RunKind.COMPANY_WEBSITE_SCREEN.value, RunLog.status == "ok")
+    if company_ids is not None:
+        query = query.where(col(RunLog.company_id).in_(list(company_ids)))
+    newest: dict[int, tuple[datetime, int, Any]] = {}
+    for company_id, started_at, run_id, website in session.exec(query).all():
+        if company_id not in newest or (started_at, run_id) > newest[company_id][:2]:
+            newest[company_id] = (started_at, run_id, website)
+    found = sum(1 for *_, website in newest.values() if website)
+    counts = {"Website found": found, "No website found": len(newest) - found}
+    return {label: n for label, n in counts.items() if n}
+
+
 def officer_count_distribution(
     session: Session, company_ids: Collection[int] | None = None
 ) -> dict[str, int]:
-    """Active officer count across the whole candidate pool, binned (see D34 in `candidates.py`
-    for why this count matters: fewer than 2 is overwhelmingly a shell or trade body)."""
+    """Active officer count across the whole candidate pool, binned."""
     counts: dict[str, int] = {}
     query = select(Company.active_officers)
     if company_ids is not None:
@@ -559,8 +645,8 @@ def search_companies(
     """Candidates ordered by score. `text` matches the name or the winning `one_liner`; `stage`,
     `business_status` and the founded years match the winning fact; funding is the amount of the
     latest round (D22). A company whose value is not known never matches a filter on it.
-    `run_from`/`run_to` keep companies first ingested or enriched in that window
-    (`run_window_company_ids`).
+    `run_from`/`run_to` keep companies first ingested or processed by a pipeline run in that
+    window (`run_window_company_ids`).
     `enriched_only` keeps companies with a category. Coverage counts known values among all
     matches."""
     query = select(Company).where(Company.candidate_score >= min_score)

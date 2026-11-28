@@ -22,7 +22,7 @@ from sprout.agents.orchestrator import (
 )
 from sprout.config import Settings
 from sprout.costs import BatchBudget
-from sprout.db import Company, OfficerRow, RunKind, RunLog, get_engine, init_db
+from sprout.db import Company, RunKind, RunLog, get_engine, init_db
 from sprout.models import Category
 from sprout.sources.web import WebFetcher
 from sprout.status import STEPS, CompanyStatus, StatusPolicy, StepStatus
@@ -127,7 +127,7 @@ def no_pause(monkeypatch):
     )
 
 
-def add_companies(engine, *names, officers=2, director=True):
+def add_companies(engine, *names):
     """Companies ranked in the order given (descending score). Returns their ids."""
     ids = []
     with Session(engine) as session:
@@ -136,21 +136,9 @@ def add_companies(engine, *names, officers=2, director=True):
                 company_number=f"{rank + 1:08d}",
                 name=name,
                 candidate_score=100 - rank,
-                active_officers=officers,
             )
             session.add(row)
             session.commit()
-            if director:
-                session.add(
-                    OfficerRow(
-                        company_id=row.id,
-                        name="A Director",
-                        role="director",
-                        retrieved_at=datetime.now(UTC),
-                        confidence="medium",
-                    )
-                )
-                session.commit()
             ids.append(row.id)
     return ids
 
@@ -565,65 +553,21 @@ def test_dry_run_prints_the_plan_and_spends_nothing(settings, engine):
 # ---- selection and order ----------------------------------------------------------------------
 
 
-def test_working_set_is_the_ranked_prescreen_survivors_and_limit_is_a_stable_prefix(engine):
+def test_working_set_is_the_ranked_companies_and_limit_is_a_stable_prefix(engine):
     with Session(engine) as session:
-        rows = [
-            ("LOW", 1, 3),
-            ("TOP", 9, 2),
-            ("TIE-B", 5, 4),
-            ("TIE-A", 5, 2),
-            ("SHELL", 20, 1),
-            ("UNKNOWN", 30, None),
-        ]
-        for number, (name, score, officers) in enumerate(rows):
-            company = Company(
-                company_number=f"{number:08d}",
-                name=name,
-                candidate_score=score,
-                active_officers=officers,
-            )
-            session.add(company)
-            session.commit()
-            if name != "SHELL":  # all pass the director check except the shell
-                session.add(
-                    OfficerRow(
-                        company_id=company.id,
-                        name="A Director",
-                        role="director",
-                        retrieved_at=datetime.now(UTC),
-                        confidence="medium",
-                    )
-                )
+        for number, (name, score) in enumerate(
+            [("LOW", 1), ("TOP", 9), ("TIE-B", 5), ("TIE-A", 5)]
+        ):
+            session.add(Company(company_number=f"{number:08d}", name=name, candidate_score=score))
         session.commit()
         names = {c.id: c.name for c in session.exec(select(Company))}
 
         def pick(**kwargs):
             return [names[i] for i in select_working_set(session, **kwargs)]
 
-        assert pick(limit=10) == ["TOP", "TIE-B", "TIE-A", "LOW"]  # ties by id; shells dropped
+        assert pick(limit=10) == ["TOP", "TIE-B", "TIE-A", "LOW"]  # ties by id
         assert pick(limit=2) == ["TOP", "TIE-B"]
-        assert pick(limit=2, prescreen=False) == ["UNKNOWN", "SHELL"]
-        assert pick(limit=1, only=["shell", "TOP"]) == ["SHELL", "TOP"]  # bypasses both
-
-
-def test_working_set_drops_companies_with_no_active_director(engine):
-    with Session(engine) as session:
-        company = Company(
-            company_number="00000001", name="NO-DIRECTOR", candidate_score=9, active_officers=2
-        )
-        session.add(company)
-        session.commit()
-        session.add(
-            OfficerRow(
-                company_id=company.id,
-                name="A Secretary",
-                role="secretary",
-                retrieved_at=datetime.now(UTC),
-                confidence="medium",
-            )
-        )
-        session.commit()
-        assert select_working_set(session, limit=10) == []
+        assert pick(limit=1, only=["low", "TOP"]) == ["LOW", "TOP"]  # bypasses ranking and limit
 
 
 def status_of(company_id, **states):
